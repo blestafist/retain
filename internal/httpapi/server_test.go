@@ -11,6 +11,8 @@ import (
 	"testing/fstest"
 )
 
+const testPublicOrigin = "http://localhost:5173"
+
 type fakePinger struct {
 	err error
 }
@@ -32,9 +34,9 @@ func TestHealthHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewHandler(fakePinger{err: tt.err}, frontendFiles())
+			handler := NewHandler(testPublicOrigin, fakePinger{err: tt.err}, frontendFiles())
 			response := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+			request := newServerRequest(http.MethodGet, "/healthz")
 			handler.ServeHTTP(response, request)
 
 			if response.Code != tt.wantStatus {
@@ -54,7 +56,7 @@ func TestHealthHandler(t *testing.T) {
 }
 
 func TestStaticHandler(t *testing.T) {
-	handler := NewHandler(fakePinger{}, frontendFiles())
+	handler := NewHandler(testPublicOrigin, fakePinger{}, frontendFiles())
 	tests := []struct {
 		name          string
 		path          string
@@ -75,7 +77,7 @@ func TestStaticHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			response := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			request := newServerRequest(http.MethodGet, tt.path)
 			handler.ServeHTTP(response, request)
 
 			if response.Code != tt.wantStatus {
@@ -92,6 +94,52 @@ func TestStaticHandler(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandlerRequiresSameOriginForStateChangingRequests(t *testing.T) {
+	tests := []struct {
+		name       string
+		origin     string
+		wantStatus int
+	}{
+		{name: "missing Origin", wantStatus: http.StatusForbidden},
+		{name: "spoofed Origin", origin: "http://attacker.example", wantStatus: http.StatusForbidden},
+		{name: "matching Origin on Vite port passes guard", origin: testPublicOrigin, wantStatus: http.StatusMethodNotAllowed},
+		{name: "backend port in Origin does not match Vite port", origin: "http://localhost:8080", wantStatus: http.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewHandler(testPublicOrigin, fakePinger{}, frontendFiles())
+			request := newServerRequest(http.MethodPost, "/future-state-change")
+			if tt.origin != "" {
+				request.Header.Set("Origin", tt.origin)
+			}
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+
+			if response.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d (body %q)", response.Code, tt.wantStatus, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandlerRejectsWrongHostEvenForSafeRequests(t *testing.T) {
+	handler := NewHandler(testPublicOrigin, fakePinger{}, frontendFiles())
+	request := httptest.NewRequest(http.MethodGet, "http://localhost:8080/healthz", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
+	}
+}
+
+func newServerRequest(method, path string) *http.Request {
+	request := httptest.NewRequest(method, "http://localhost:5173"+path, nil)
+	request.Host = "localhost:5173"
+	return request
 }
 
 func frontendFiles() fs.FS {

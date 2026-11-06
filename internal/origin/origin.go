@@ -44,8 +44,18 @@ func Parse(raw string) (Origin, error) {
 	if hostname == "" {
 		return Origin{}, fmt.Errorf("origin hostname must not be empty")
 	}
+	bracketedHost := strings.HasPrefix(u.Host, "[")
+	if err := validateHostname(hostname, bracketedHost); err != nil {
+		return Origin{}, fmt.Errorf("invalid origin hostname: %w", err)
+	}
+
 	port := defaultPort(scheme)
 	if rawPort := u.Port(); rawPort != "" {
+		for _, digit := range rawPort {
+			if digit < '0' || digit > '9' {
+				return Origin{}, fmt.Errorf("origin port must be between 1 and 65535")
+			}
+		}
 		parsedPort, err := strconv.ParseUint(rawPort, 10, 16)
 		if err != nil || parsedPort == 0 {
 			return Origin{}, fmt.Errorf("origin port must be between 1 and 65535")
@@ -88,4 +98,40 @@ func normalizeHostname(hostname string) string {
 		return address.String()
 	}
 	return strings.ToLower(hostname)
+}
+
+func validateHostname(hostname string, bracketed bool) error {
+	if bracketed {
+		address, err := netip.ParseAddr(hostname)
+		if err != nil || !address.Is6() || address.Zone() != "" {
+			return fmt.Errorf("bracketed host must be an IPv6 literal")
+		}
+		return nil
+	}
+
+	if address, err := netip.ParseAddr(hostname); err == nil {
+		if !address.Is4() {
+			return fmt.Errorf("IPv6 literals must be enclosed in brackets")
+		}
+		return nil
+	}
+
+	if len(hostname) > 253 || strings.HasSuffix(hostname, ".") ||
+		strings.ContainsAny(hostname, "[]:%") || strings.Trim(hostname, "0123456789.") == "" {
+		return fmt.Errorf("host must be a DNS name or IP literal")
+	}
+
+	for _, label := range strings.Split(hostname, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return fmt.Errorf("host must be a DNS name or IP literal")
+		}
+		for _, char := range label {
+			if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') &&
+				(char < '0' || char > '9') && char != '-' {
+				return fmt.Errorf("host must be a DNS name or IP literal")
+			}
+		}
+	}
+
+	return nil
 }

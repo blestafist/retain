@@ -15,13 +15,14 @@ type databasePinger interface {
 	PingContext(context.Context) error
 }
 
-// NewHandler wires the health endpoint and the embedded frontend. Frontend
-// build output is optional so the server package also works in a fresh checkout.
-func NewHandler(database databasePinger, frontend fs.FS) http.Handler {
+// NewHandler wires the health endpoint and the embedded frontend behind the
+// same-origin guard. Frontend build output is optional so the server package
+// also works in a fresh checkout.
+func NewHandler(publicOrigin string, database databasePinger, frontend fs.FS) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler(database))
 	mux.Handle("GET /", frontendHandler(frontend))
-	return mux
+	return RequireSameOrigin(publicOrigin, mux)
 }
 
 func healthHandler(database databasePinger) http.HandlerFunc {

@@ -53,7 +53,7 @@ func run(logger *slog.Logger) error {
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewHandler(database.SQL, web.Files()),
+		Handler:           httpapi.NewHandler(cfg.PublicOrigin, database.SQL, web.Files()),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

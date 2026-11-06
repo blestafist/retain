@@ -28,6 +28,20 @@ func TestLoad(t *testing.T) {
 			wantOrigin:  "https://retain.example.test",
 		},
 		{
+			name:        "Vite development origin with explicit port",
+			environment: map[string]string{"PUBLIC_ORIGIN": "http://localhost:5173"},
+			wantPath:    defaultDatabasePath,
+			wantAddr:    defaultHTTPAddr,
+			wantOrigin:  "http://localhost:5173",
+		},
+		{
+			name:        "valid IPv6 public origin",
+			environment: map[string]string{"PUBLIC_ORIGIN": "https://[2001:db8::1]:8443"},
+			wantPath:    defaultDatabasePath,
+			wantAddr:    defaultHTTPAddr,
+			wantOrigin:  "https://[2001:db8::1]:8443",
+		},
+		{
 			name:        "blank database path",
 			environment: map[string]string{"DATABASE_PATH": "   "},
 			wantErr:     "DATABASE_PATH must not be blank",
@@ -75,6 +89,26 @@ func TestLoad(t *testing.T) {
 		{
 			name:        "public origin with invalid port",
 			environment: map[string]string{"PUBLIC_ORIGIN": "https://retain.example.test:70000"},
+			wantErr:     "PUBLIC_ORIGIN must be an absolute HTTP(S) origin",
+		},
+		{
+			name:        "public origin with bracketed DNS name",
+			environment: map[string]string{"PUBLIC_ORIGIN": "https://[example.com]"},
+			wantErr:     "PUBLIC_ORIGIN must be an absolute HTTP(S) origin",
+		},
+		{
+			name:        "public origin with invalid IPv6 literal",
+			environment: map[string]string{"PUBLIC_ORIGIN": "https://[2001:db8::zz]"},
+			wantErr:     "PUBLIC_ORIGIN must be an absolute HTTP(S) origin",
+		},
+		{
+			name:        "public origin with bracketed IPv4 literal",
+			environment: map[string]string{"PUBLIC_ORIGIN": "https://[127.0.0.1]"},
+			wantErr:     "PUBLIC_ORIGIN must be an absolute HTTP(S) origin",
+		},
+		{
+			name:        "public origin with invalid hostname syntax",
+			environment: map[string]string{"PUBLIC_ORIGIN": "https://retain_app.example.test"},
 			wantErr:     "PUBLIC_ORIGIN must be an absolute HTTP(S) origin",
 		},
 	}
