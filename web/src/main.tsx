@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { t } from './i18n/en';
+import { ThemeProvider } from './theme/context';
 
 const rootElement = document.getElementById('root');
 
@@ -13,6 +14,8 @@ document.title = t('appName');
 
 createRoot(rootElement).render(
   <StrictMode>
-    <App />
+    <ThemeProvider>
+      <App />
+    </ThemeProvider>
   </StrictMode>,
 );

@@ -7,7 +7,88 @@
       name="description"
       content="A simple place to learn vocabulary."
     />
+    <meta name="theme-color" content="" />
     <title></title>
+    <link rel="stylesheet" href="/src/theme/generated-default.css" />
+    <script id="theme-default-palette" type="application/json">{"light":{"background":"#FCF9F4","on-background":"#1B1C19","surface":"#FCF9F4","on-surface":"#1B1C19","surface-variant":"#E2E3D7","on-surface-variant":"#45483F","surface-dim":"#DCDAD5","surface-bright":"#FCF9F4","surface-container-lowest":"#FFFFFF","surface-container-low":"#F6F3EE","surface-container":"#F0EEE9","surface-container-high":"#EAE8E3","surface-container-highest":"#E4E2DD","inverse-surface":"#30312D","inverse-on-surface":"#F3F0EB","surface-tint":"#576342","shadow":"#000000","scrim":"#000000","outline":"#76786E","outline-variant":"#C6C7BB","primary":"#242F13","on-primary":"#FFFFFF","primary-container":"#3A4527","on-primary-container":"#A6B28C","inverse-primary":"#BFCCA4","primary-fixed":"#DBE8BE","primary-fixed-dim":"#BFCCA4","on-primary-fixed":"#151F05","on-primary-fixed-variant":"#3F4B2C","secondary":"#5C6051","on-secondary":"#FFFFFF","secondary-container":"#E0E5D1","on-secondary-container":"#626656","secondary-fixed":"#E0E5D1","secondary-fixed-dim":"#C4C9B5","on-secondary-fixed":"#191D11","on-secondary-fixed-variant":"#44493A","tertiary":"#3B2336","on-tertiary":"#FFFFFF","tertiary-container":"#53394D","on-tertiary-container":"#C6A3BC","tertiary-fixed":"#FDD8F1","tertiary-fixed-dim":"#E0BCD5","on-tertiary-fixed":"#2A1426","on-tertiary-fixed-variant":"#593E53","error":"#BA1A1A","on-error":"#FFFFFF","error-container":"#FFDAD6","on-error-container":"#93000A","rating-again":"#B82100","on-rating-again":"#FFFFFF","rating-again-container":"#FFDAD3","on-rating-again-container":"#000000","rating-hard":"#875200","on-rating-hard":"#FFFFFF","rating-hard-container":"#FFDDBA","on-rating-hard-container":"#000000","rating-good":"#416918","on-rating-good":"#FFFFFF","rating-good-container":"#C1F190","on-rating-good-container":"#000000","rating-easy":"#00629F","on-rating-easy":"#FFFFFF","rating-easy-container":"#D0E4FF","on-rating-easy-container":"#000000"},"dark":{"background":"#131411","on-background":"#E4E2DD","surface":"#131411","on-surface":"#E4E2DD","surface-variant":"#45483F","on-surface-variant":"#C6C7BB","surface-dim":"#131411","surface-bright":"#393936","surface-container-lowest":"#0E0E0C","surface-container-low":"#1B1C19","surface-container":"#1F201D","surface-container-high":"#2A2A27","surface-container-highest":"#353532","inverse-surface":"#E4E2DD","inverse-on-surface":"#30312D","surface-tint":"#BFCCA4","shadow":"#000000","scrim":"#000000","outline":"#909287","outline-variant":"#45483F","primary":"#BFCCA4","on-primary":"#293418","primary-container":"#3A4527","on-primary-container":"#A6B28C","inverse-primary":"#576342","primary-fixed":"#DBE8BE","primary-fixed-dim":"#BFCCA4","on-primary-fixed":"#151F05","on-primary-fixed-variant":"#3F4B2C","secondary":"#C4C9B5","on-secondary":"#2E3225","secondary-container":"#44493A","on-secondary-container":"#B3B7A5","secondary-fixed":"#E0E5D1","secondary-fixed-dim":"#C4C9B5","on-secondary-fixed":"#191D11","on-secondary-fixed-variant":"#44493A","tertiary":"#E0BCD5","on-tertiary":"#41283C","tertiary-container":"#53394D","on-tertiary-container":"#C6A3BC","tertiary-fixed":"#FDD8F1","tertiary-fixed-dim":"#E0BCD5","on-tertiary-fixed":"#2A1426","on-tertiary-fixed-variant":"#593E53","error":"#FFB4AB","on-error":"#690005","error-container":"#93000A","on-error-container":"#FFDAD6","rating-again":"#FFB4A4","on-rating-again":"#000000","rating-again-container":"#8D1700","on-rating-again-container":"#FFFFFF","rating-hard":"#FFB865","on-rating-hard":"#000000","rating-hard-container":"#663D00","on-rating-hard-container":"#FFFFFF","rating-good":"#A5D477","on-rating-good":"#000000","rating-good-container":"#2B5000","on-rating-good-container":"#FFFFFF","rating-easy":"#9BCBFF","on-rating-easy":"#000000","rating-easy-container":"#004A79","on-rating-easy-container":"#FFFFFF"}}</script>
+    <script>
+      (() => {
+        const cacheKey = 'retain.theme.cache.v1';
+        const cacheVersion = 1;
+        const roles = 'background,on-background,surface,on-surface,surface-variant,on-surface-variant,surface-dim,surface-bright,surface-container-lowest,surface-container-low,surface-container,surface-container-high,surface-container-highest,inverse-surface,inverse-on-surface,surface-tint,shadow,scrim,outline,outline-variant,primary,on-primary,primary-container,on-primary-container,inverse-primary,primary-fixed,primary-fixed-dim,on-primary-fixed,on-primary-fixed-variant,secondary,on-secondary,secondary-container,on-secondary-container,secondary-fixed,secondary-fixed-dim,on-secondary-fixed,on-secondary-fixed-variant,tertiary,on-tertiary,tertiary-container,on-tertiary-container,tertiary-fixed,tertiary-fixed-dim,on-tertiary-fixed,on-tertiary-fixed-variant,error,on-error,error-container,on-error-container,rating-again,on-rating-again,rating-again-container,on-rating-again-container,rating-hard,on-rating-hard,rating-hard-container,on-rating-hard-container,rating-good,on-rating-good,rating-good-container,on-rating-good-container,rating-easy,on-rating-easy,rating-easy-container,on-rating-easy-container'.split(',');
+        const isRecord = (value) =>
+          typeof value === 'object' && value !== null && !Array.isArray(value);
+        const isHex = (value) => typeof value === 'string' && /^#[\da-f]{6}$/i.test(value);
+        const root = document.documentElement;
+        let systemIsDark = false;
+
+        try {
+          systemIsDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        } catch {
+          // Use the light default when system preferences are unavailable.
+        }
+
+        let cachedTheme = null;
+        try {
+          const value = JSON.parse(window.localStorage.getItem(cacheKey));
+          const settings = value?.settings;
+          const palettes = value?.palettes;
+          const validSettings =
+            isRecord(settings) &&
+            typeof settings.seed === 'string' && /^#?(?:[\da-f]{3}|[\da-f]{6})$/i.test(settings.seed.trim()) &&
+            ['fidelity', 'tonalSpot', 'vibrant', 'expressive', 'monochrome'].includes(settings.variant) &&
+            [0, 0.5, 1].includes(settings.contrastLevel) &&
+            ['light', 'dark', 'system'].includes(settings.mode);
+          const validRoleMap = (map) =>
+            isRecord(map) &&
+            Object.keys(map).length === roles.length &&
+            roles.every((role) => Object.prototype.hasOwnProperty.call(map, role) && isHex(map[role]));
+
+          if (
+            value?.version === cacheVersion &&
+            validSettings &&
+            isRecord(palettes) &&
+            validRoleMap(palettes.light) &&
+            validRoleMap(palettes.dark)
+          ) {
+            cachedTheme = value;
+          }
+        } catch {
+          // Invalid or unavailable storage falls back to the generated stylesheet.
+        }
+
+        const mode = !cachedTheme
+          ? systemIsDark ? 'dark' : 'light'
+          : cachedTheme.settings.mode === 'dark' ||
+              (cachedTheme.settings.mode === 'system' && systemIsDark)
+            ? 'dark'
+            : 'light';
+        root.dataset.themeMode = mode;
+        root.style.colorScheme = mode;
+
+        let defaultPalettes = null;
+        try {
+          defaultPalettes = JSON.parse(
+            document.getElementById('theme-default-palette')?.textContent ?? 'null',
+          );
+        } catch {
+          // The generated stylesheet remains the final fallback.
+        }
+
+        const palettes = cachedTheme?.palettes ?? defaultPalettes;
+        const palette = palettes?.[mode];
+        if (palette && isRecord(palette)) {
+          for (const role of roles) {
+            if (isHex(palette[role])) {
+              root.style.setProperty(`--md-sys-color-${role}`, palette[role]);
+            }
+          }
+          if (isHex(palette.surface)) {
+            document.querySelector('meta[name="theme-color"]')?.setAttribute('content', palette.surface);
+          }
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
