@@ -7,6 +7,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/pestit/retain/internal/auth"
 )
 
 const healthCheckTimeout = 2 * time.Second
@@ -15,12 +17,13 @@ type databasePinger interface {
 	PingContext(context.Context) error
 }
 
-// NewHandler wires the health endpoint and the embedded frontend behind the
-// same-origin guard. Frontend build output is optional so the server package
-// also works in a fresh checkout.
-func NewHandler(publicOrigin string, database databasePinger, frontend fs.FS) http.Handler {
+// NewHandler wires the health and account endpoints and the embedded frontend
+// behind the same-origin guard. Frontend build output is optional so the
+// server package also works in a fresh checkout.
+func NewHandler(publicOrigin string, database databasePinger, authService *auth.Service, frontend fs.FS) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler(database))
+	RegisterAccountRoutes(mux, authService)
 	mux.Handle("GET /", frontendHandler(frontend))
 	return RequireSameOrigin(publicOrigin, mux)
 }

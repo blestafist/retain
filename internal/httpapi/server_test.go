@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -34,7 +35,7 @@ func TestHealthHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewHandler(testPublicOrigin, fakePinger{err: tt.err}, frontendFiles())
+			handler := NewHandler(testPublicOrigin, fakePinger{err: tt.err}, nil, frontendFiles())
 			response := httptest.NewRecorder()
 			request := newServerRequest(http.MethodGet, "/healthz")
 			handler.ServeHTTP(response, request)
@@ -56,7 +57,7 @@ func TestHealthHandler(t *testing.T) {
 }
 
 func TestStaticHandler(t *testing.T) {
-	handler := NewHandler(testPublicOrigin, fakePinger{}, frontendFiles())
+	handler := NewHandler(testPublicOrigin, fakePinger{}, nil, frontendFiles())
 	tests := []struct {
 		name          string
 		path          string
@@ -97,7 +98,7 @@ func TestStaticHandler(t *testing.T) {
 }
 
 func TestNewHandlerServesInviteSignupShellAndNotFoundForUnknownPaths(t *testing.T) {
-	handler := NewHandler(testPublicOrigin, fakePinger{}, frontendFiles())
+	handler := NewHandler(testPublicOrigin, fakePinger{}, nil, frontendFiles())
 	tests := []struct {
 		name          string
 		path          string
@@ -152,7 +153,7 @@ func TestHandlerRequiresSameOriginForStateChangingRequests(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewHandler(testPublicOrigin, fakePinger{}, frontendFiles())
+			handler := NewHandler(testPublicOrigin, fakePinger{}, nil, frontendFiles())
 			request := newServerRequest(http.MethodPost, "/future-state-change")
 			if tt.origin != "" {
 				request.Header.Set("Origin", tt.origin)
@@ -168,13 +169,71 @@ func TestHandlerRequiresSameOriginForStateChangingRequests(t *testing.T) {
 }
 
 func TestHandlerRejectsWrongHostEvenForSafeRequests(t *testing.T) {
-	handler := NewHandler(testPublicOrigin, fakePinger{}, frontendFiles())
+	handler := NewHandler(testPublicOrigin, fakePinger{}, nil, frontendFiles())
 	request := httptest.NewRequest(http.MethodGet, "http://localhost:8080/healthz", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
+	}
+}
+
+func TestNewHandlerRegistersAccountRoutesBehindCanonicalOriginGuard(t *testing.T) {
+	service, database, _ := newAccountHandlerTest(t)
+	adminID, err := service.CreateAdmin(context.Background(), "admin@example.test", "Admin", handlerTestPassword)
+	if err != nil {
+		t.Fatalf("CreateAdmin() error = %v", err)
+	}
+	invite, err := service.CreateInvite(context.Background(), adminID)
+	if err != nil {
+		t.Fatalf("CreateInvite() error = %v", err)
+	}
+	handler := NewHandler(testPublicOrigin, database.SQL, service, frontendFiles())
+	registerBody := `{"invite":"` + invite.Code + `","email":"learner@example.test","name":"Learner","password":"` + handlerTestPassword + `"}`
+
+	newRequest := func(method, target, body, requestOrigin string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := newServerRequest(method, target)
+		if body != "" {
+			request.Body = io.NopCloser(strings.NewReader(body))
+			request.ContentLength = int64(len(body))
+			request.Header.Set("Content-Type", "application/json")
+		}
+		if requestOrigin != "" {
+			request.Header.Set("Origin", requestOrigin)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+
+	blocked := newRequest(http.MethodPost, "/api/v1/auth/register", registerBody, "")
+	if blocked.Code != http.StatusForbidden {
+		t.Fatalf("registration without Origin status = %d, want %d (body %q)", blocked.Code, http.StatusForbidden, blocked.Body.String())
+	}
+
+	registered := newRequest(http.MethodPost, "/api/v1/auth/register", registerBody, testPublicOrigin)
+	if registered.Code != http.StatusCreated {
+		t.Fatalf("registration with canonical Origin/Host status = %d, want %d (body %q)", registered.Code, http.StatusCreated, registered.Body.String())
+	}
+
+	loginBody := `{"email":"learner@example.test","password":"` + handlerTestPassword + `"}`
+	login := newRequest(http.MethodPost, "/api/v1/auth/login", loginBody, testPublicOrigin)
+	if login.Code != http.StatusNoContent {
+		t.Fatalf("login status = %d, want %d (body %q)", login.Code, http.StatusNoContent, login.Body.String())
+	}
+	cookies := login.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("login cookies = %d, want one", len(cookies))
+	}
+
+	meRequest := newServerRequest(http.MethodGet, "/api/v1/me")
+	meRequest.AddCookie(cookies[0])
+	me := httptest.NewRecorder()
+	handler.ServeHTTP(me, meRequest)
+	if me.Code != http.StatusOK {
+		t.Fatalf("authenticated /me status = %d, want %d (body %q)", me.Code, http.StatusOK, me.Body.String())
 	}
 }
 
