@@ -39,8 +39,8 @@ func validateDeck(deck Deck, path string) error {
 	return nil
 }
 
-// HasECMAScriptNonWhitespace reports whether value matches an ECMAScript
-// regular-expression \S:
+// HasECMAScriptNonWhitespace reports whether value contains a character that
+// matches an ECMAScript regular-expression \S:
 // WhiteSpace (including every Unicode Zs character) plus LineTerminator are
 // excluded, while characters such as U+0085 are not whitespace here.
 func HasECMAScriptNonWhitespace(value string) bool {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/pestit/retain/internal/importer"
@@ -219,7 +218,7 @@ func schoolWordsetsRequiredString(object map[string]json.RawMessage, field, path
 	if err := json.Unmarshal(trimmed, &value); err != nil {
 		return "", schoolWordsetsError(importer.ErrInvalidStructure, fieldPath)
 	}
-	if strings.TrimSpace(value) == "" {
+	if !importer.HasECMAScriptNonWhitespace(value) {
 		return "", schoolWordsetsError(importer.ErrMissingRequiredField, fieldPath)
 	}
 	return value, nil
@@ -239,7 +238,7 @@ func schoolWordsetsRequiredID(object map[string]json.RawMessage, field, path str
 		if err := json.Unmarshal(trimmed, &value); err != nil {
 			return "", schoolWordsetsError(importer.ErrInvalidStructure, fieldPath)
 		}
-		if strings.TrimSpace(value) == "" {
+		if !importer.HasECMAScriptNonWhitespace(value) {
 			return "", schoolWordsetsError(importer.ErrMissingRequiredField, fieldPath)
 		}
 		return value, nil

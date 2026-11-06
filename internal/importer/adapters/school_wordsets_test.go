@@ -182,6 +182,85 @@ func TestParseSchoolWordsetsRequiredFieldsAndStructureErrors(t *testing.T) {
 	}
 }
 
+func TestSchoolWordsetsRequiredTextMatchesECMAScriptWhitespace(t *testing.T) {
+	fields := []struct {
+		name     string
+		path     string
+		document string
+	}{
+		{
+			name:     "class title",
+			path:     "classes[0].class.title",
+			document: `{"classes":[{"class":{"title":@@@,"group_id":"g1"},"wordsets":[{"info":{"id":"w1","name":"Set"},"entries":[]}]}]}`,
+		},
+		{
+			name:     "class group_id",
+			path:     "classes[0].class.group_id",
+			document: `{"classes":[{"class":{"title":"Class","group_id":@@@},"wordsets":[{"info":{"id":"w1","name":"Set"},"entries":[]}]}]}`,
+		},
+		{
+			name:     "wordset id",
+			path:     "classes[0].wordsets[0].info.id",
+			document: `{"classes":[{"class":{"title":"Class","group_id":"g1"},"wordsets":[{"info":{"id":@@@,"name":"Set"},"entries":[]}]}]}`,
+		},
+		{
+			name:     "wordset name",
+			path:     "classes[0].wordsets[0].info.name",
+			document: `{"classes":[{"class":{"title":"Class","group_id":"g1"},"wordsets":[{"info":{"id":"w1","name":@@@},"entries":[]}]}]}`,
+		},
+		{
+			name:     "entry word",
+			path:     "classes[0].wordsets[0].entries[0].word",
+			document: `{"classes":[{"class":{"title":"Class","group_id":"g1"},"wordsets":[{"info":{"id":"w1","name":"Set"},"entries":[{"word":@@@,"translation":"meaning"}]}]}]}`,
+		},
+		{
+			name:     "entry translation",
+			path:     "classes[0].wordsets[0].entries[0].translation",
+			document: `{"classes":[{"class":{"title":"Class","group_id":"g1"},"wordsets":[{"info":{"id":"w1","name":"Set"},"entries":[{"word":"word","translation":@@@}]}]}]}`,
+		},
+	}
+	values := []struct {
+		name    string
+		json    string
+		wantErr bool
+	}{
+		{name: "U+FEFF", json: `"\uFEFF"`, wantErr: true},
+		{name: "U+0085", json: `"\u0085"`},
+	}
+
+	for _, field := range fields {
+		for _, value := range values {
+			t.Run(field.name+"/"+value.name, func(t *testing.T) {
+				document := strings.Replace(field.document, "@@@", value.json, 1)
+				bundle, err := ParseSchoolWordsets([]byte(document))
+				if !value.wantErr {
+					if err != nil {
+						t.Fatalf("ParseSchoolWordsets() error = %v, want nil", err)
+					}
+					if bundle == nil {
+						t.Fatal("ParseSchoolWordsets() bundle = nil, want parsed bundle")
+					}
+					return
+				}
+
+				if !errors.Is(err, importer.ErrMissingRequiredField) {
+					t.Fatalf("ParseSchoolWordsets() error = %v, want ErrMissingRequiredField", err)
+				}
+				var parseErr *importer.ParseError
+				if !errors.As(err, &parseErr) {
+					t.Fatalf("error type = %T, want *importer.ParseError", err)
+				}
+				if parseErr.Path != field.path {
+					t.Fatalf("error path = %q, want source path %q", parseErr.Path, field.path)
+				}
+				if strings.Contains(err.Error(), "decks[") {
+					t.Fatalf("error leaked generic bundle validation path: %v", err)
+				}
+			})
+		}
+	}
+}
+
 func TestSchoolWordsetsDetectIsConservative(t *testing.T) {
 	tests := []struct {
 		name string
