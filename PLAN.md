@@ -6,7 +6,7 @@
 - **Аудитория:** я и друзья (до ~50 пользователей).
 - **Языковые пары:** польский → немецкий (учим немецкий на базе польского), русский → английский (учим английский на базе русского).
 - **Хостинг:** домашний сервер, наружу через Cloudflare Tunnel на своём домене.
-- **Дизайн:** Material Design 3 Expressive, акцентный цвет — болотный зелёный.
+- **Дизайн:** Material Design 3 Expressive, адаптивная тема: акцентный цвет выбирает пользователь, по умолчанию болотный зелёный `#3A4527`.
 
 ---
 
@@ -35,7 +35,7 @@
 | Доступ к БД | **sqlc** | Типобезопасный код из явного SQL |
 | Миграции | **goose** (встроены через `embed`) | Применяются при старте |
 | Алгоритм повторений | **`github.com/open-spaced-repetition/go-fsrs/v3`** | Официальная Go-реализация FSRS |
-| LLM | **`github.com/openai/openai-go`** с `option.WithBaseURL` | Любой OpenAI-совместимый API: OpenAI, OpenRouter, Ollama, LM Studio, vLLM |
+| LLM | **`github.com/openai/openai-go`** с `option.WithBaseURL` | OpenAI-совместимый API; по умолчанию свой облачный эндпоинт `https://ai.pestit.pl/v1` |
 | Аутентификация | Сессии в cookie (HttpOnly, Secure, SameSite=Lax) + пароли на **argon2id** | Просто и безопасно, без JWT |
 | Push-уведомления | Web Push (VAPID), `github.com/SherClockHolmes/webpush-go` | Напоминания о повторениях |
 | Логи | `log/slog` (JSON) | Стандартная библиотека |
@@ -74,7 +74,7 @@
    - Выбор из 4 вариантов (дистракторы из той же колоды) — для новых карточек.
 6. **Озвучка** слова через TTS по кнопке и автоматически (настраивается).
 7. **Импорт** в универсальном формате `retain/v1` и через адаптеры (школьная выгрузка `classes/wordsets`, CSV): предпросмотр перед применением, повторный импорт без потери прогресса (раздел 3.5). **Экспорт** в `retain/v1` и CSV.
-8. **Настройки**: новых в день, максимум повторений в день, желаемое удержание (по умолчанию 0.90), шаги изучения (`1m 10m`), часовой пояс, начало «нового дня» (по умолчанию 04:00), светлая/тёмная/системная тема.
+8. **Настройки**: новых в день, максимум повторений в день, желаемое удержание (по умолчанию 0.90), шаги изучения (`1m 10m`), часовой пояс, начало «нового дня» (по умолчанию 04:00), оформление: акцентный цвет, стиль схемы, контраст, светлая/тёмная/системная тема (раздел 8.1).
 9. **Базовая статистика**: сегодня повторено/выучено, серия дней (streak), сколько карточек к повторению.
 
 ### 3.2 Версия 1.0
@@ -265,15 +265,17 @@ New ──(первый ответ)──▶ Learning ──(прошла шаг
 ### 6.1 Подключение
 - Пакет `internal/llm`, клиент `openai-go` с настраиваемым `base_url`:
   ```
-  LLM_BASE_URL=https://api.openai.com/v1      # или http://ollama:11434/v1, OpenRouter и т.д.
-  LLM_API_KEY=...
-  LLM_MODEL=gpt-4o-mini                       # любая модель провайдера
+  LLM_BASE_URL=https://ai.pestit.pl/v1        # облачный OpenAI-совместимый эндпоинт
+  LLM_API_KEY=...                             # Bearer-токен (без него эндпоинт отвечает 401)
+  LLM_MODEL=...                               # модель по умолчанию из GET /v1/models
+  LLM_MODEL_FAST=...                          # опционально: дешёвая модель для массового дополнения колод
   LLM_TIMEOUT=30s
   LLM_DAILY_LIMIT_PER_USER=300                # запросов в день
   ```
 - Ключ хранится **только на сервере**; клиент ходит в LLM через наш API.
 - Если `LLM_BASE_URL` не задан, все LLM-функции скрыты в UI, приложение работает без них.
-- Так как сервер домашний, можно поднять локальную модель (Ollama/LM Studio) — тот же интерфейс, без внешних запросов.
+- При старте сервер запрашивает `GET /v1/models` и проверяет, что `LLM_MODEL` есть в списке; если нет — предупреждение в логах и в админке. В админке модель можно сменить без рестарта (список берётся из `/v1/models`, выбор хранится в `app_settings`).
+- Запросы к эндпоинту исходящие, Cloudflare Tunnel им не мешает. Ретраи с backoff на 429/5xx, circuit breaker: при недоступности LLM-кнопки временно неактивны, остальное приложение работает.
 
 ### 6.2 Функции
 | Функция | Когда | Что возвращает |
@@ -311,7 +313,11 @@ user_settings(
   request_retention REAL DEFAULT 0.9, maximum_interval INT DEFAULT 36500,
   learning_steps TEXT DEFAULT '1m 10m', relearning_steps TEXT DEFAULT '10m',
   fsrs_weights TEXT /* JSON */, timezone TEXT, day_start_hour INT DEFAULT 4,
-  reminder_time TEXT NULL, tts_auto BOOL, theme TEXT DEFAULT 'system')
+  reminder_time TEXT NULL, tts_auto BOOL,
+  theme_mode TEXT DEFAULT 'system', theme_seed TEXT DEFAULT '#3A4527',
+  theme_variant TEXT DEFAULT 'fidelity', theme_contrast REAL DEFAULT 0)
+
+app_settings(key TEXT PK, value TEXT /* JSON */, updated_at)   -- например, llm_model
 
 decks(
   id INTEGER PK, owner_id → users, parent_id → decks NULL, -- вложенность
@@ -320,6 +326,7 @@ decks(
   lang_native TEXT,                  -- 'pl' | 'ru'
   reverse_cards BOOL DEFAULT 0,
   wrong_article_rating INT DEFAULT 2, -- Hard
+  color_seed TEXT NULL,              -- свой акцент колоды
   source TEXT NULL, external_id TEXT NULL, expected_count INT NULL,
   source_deck_id NULL,               -- если скопирована у друга
   created_at, updated_at, deleted_at NULL)
@@ -384,13 +391,26 @@ push_subscriptions(id PK, user_id → users, endpoint UNIQUE, p256dh, auth, crea
 
 ## 8. Дизайн: Material Design 3 Expressive
 
-### 8.1 Цвет
-- **Seed-цвет**: болотный зелёный `#556B2F` (dark olive green). Финальный оттенок подбирается на макете.
-- Палитра генерируется скриптом `web/scripts/gen-theme.ts` через `@material/material-color-utilities` → CSS-переменные `--md-sys-color-*` (primary, on-primary, primary-container, secondary, tertiary, surface-container-*, error и т.д.) для светлой и тёмной тем.
-- Вариант схемы: **`SchemeTonalSpot`** или **`SchemeFidelity`**. `SchemeExpressive` не подходит: он сильно вращает тон и уводит акцент от болотного зелёного.
-- Tailwind-тема ссылается на эти переменные (`bg-primary-container`, `text-on-surface` и т.д.).
-- Цвета кнопок оценок: Again → `error-container`, Hard → `tertiary-container`, Good → `primary`, Easy → `secondary-container`.
-- Тема: светлая / тёмная / системная. `theme-color` в manifest и `<meta>` синхронизируется с поверхностью.
+### 8.1 Цвет: адаптивная тема
+Вся палитра строится в рантайме из одного **seed-цвета** (MD3 dynamic color). Пользователь меняет акцент — меняется всё приложение.
+
+- **По умолчанию**: болотный зелёный **`#3A4527`**.
+- **Настройки → Оформление**:
+  - Пресеты-«пятна» (MD3 color swatches): болотный `#3A4527` (по умолчанию), плюс 6–8 заранее подобранных оттенков.
+  - Свой цвет: color picker + поле HEX.
+  - **Стиль схемы**: `Fidelity` (по умолчанию — точнее всего держит заданный оттенок), `TonalSpot` (спокойнее), `Vibrant`, `Expressive` (сильнее вращает тон, ярче), `Monochrome`.
+  - **Контраст**: стандартный / средний / высокий (`contrastLevel` 0 / 0.5 / 1).
+  - Тема: светлая / тёмная / системная.
+  - Предпросмотр вживую (карточка, кнопки оценок, график) до сохранения.
+- **Цвет колоды** (опционально): у колоды свой seed; во время сессии по этой колоде тема перекрашивается в её цвет. Помогает различать немецкий и английский с одного взгляда.
+- **Генерация**: `@material/material-color-utilities` (`Hct`, `SchemeFidelity`/`SchemeTonalSpot`/..., `DynamicScheme`, `MaterialDynamicColors`) прямо в браузере → CSS-переменные `--md-sys-color-*` (primary, on-primary, primary-container, secondary, tertiary, surface, surface-container-lowest…highest, outline, error и т.д.) на `:root`. Пересчёт занимает < 5 мс.
+- **Без мигания при загрузке**: последняя рассчитанная палитра кэшируется в `localStorage`; inline-скрипт в `index.html` применяет её до отрисовки React. Без кэша — встроенная палитра по умолчанию, сгенерированная на этапе сборки (`web/scripts/gen-theme.ts`).
+- **Синхронизация**: `theme_seed`, `theme_variant`, `theme_contrast`, `theme_mode` хранятся в `user_settings` и подтягиваются на всех устройствах.
+- Tailwind-тема ссылается только на переменные (`bg-primary-container`, `text-on-surface` и т.д.); **жёстко заданных цветов в компонентах нет** (правило линтера).
+- **Семантические цвета не зависят от seed**: кнопки оценок берут гармонизированные (`Blend.harmonize`) фиксированные оттенки, чтобы Again всегда оставался «красным», а Good — «зелёным» при любом акценте: Again → error, Hard → оранжевый, Good → зелёный, Easy → синий, каждый в своём `container`-варианте.
+- **Графики**: серии берут цвета из `primary` / `tertiary` / `secondary` и семантических ролей.
+- `theme-color` в `<meta>` обновляется вместе с палитрой (цвет статус-бара на Android).
+- **Доступность**: при выборе своего цвета контраст пар `on-*`/`*` проверяется по WCAG AA; если не проходит — предупреждение и предложение поднять контраст. Тесты прогоняют все пресеты × стили × светлая/тёмная.
 
 ### 8.2 Типографика
 - **Roboto Flex** (variable, self-hosted через `@fontsource-variable`) с поддержкой латиницы с диакритикой и кириллицы.
@@ -441,6 +461,8 @@ PATCH  /me/settings
 
 POST   /admin/invites            → {code, url}           (только админ)
 GET    /admin/llm-usage          расход токенов по пользователям
+GET    /admin/llm/models         список моделей с эндпоинта (/v1/models)
+PUT    /admin/llm/model          {model} — сменить модель без рестарта
 
 GET    /decks                    дерево колод + счётчики (new/learning/due, с учётом дочерних)
 POST   /decks
@@ -540,9 +562,9 @@ retain/
 │   ├── push/                     # VAPID, воркер напоминаний
 │   └── httpapi/                  # роуты, хендлеры, ошибки, middleware
 ├── web/                          # React + Vite + TS
-│   ├── scripts/gen-theme.ts      # MD3-палитра из seed-цвета
+│   ├── scripts/gen-theme.ts      # палитра по умолчанию на этапе сборки
 │   ├── src/
-│   │   ├── theme/                # токены: цвет, типографика, форма, motion
+│   │   ├── theme/                # dynamic color из seed, токены: типографика, форма, motion
 │   │   ├── ui/                   # UI-кит MD3 Expressive (Radix + Tailwind + Motion)
 │   │   ├── pages/  components/
 │   │   ├── api/  db/  srs/  sw/
@@ -571,7 +593,7 @@ retain/
 5. **Слово**: поля, история ответов, кривая забывания, S/D/R, чат «Спросить про слово».
 6. **Статистика**: графики из раздела 5.
 7. **Друзья**: активность, лидерборд, общие колоды.
-8. **Настройки**: лимиты, удержание, шаги, напоминания, часовой пояс, тема.
+8. **Настройки**: лимиты, удержание, шаги, напоминания, часовой пояс; **Оформление** — пресеты цвета, color picker, стиль схемы, контраст, тема, живой предпросмотр.
 
 Mobile-first; свайп влево = Again, вправо = Good.
 
@@ -597,7 +619,6 @@ Mobile-first; свайп влево = Again, вправо = Good.
   - `retain` — слушает только внутреннюю docker-сеть (`:8080`), **порты наружу не открываются**; том `/data/retain.db`.
   - `cloudflared` — `tunnel run` с `TUNNEL_TOKEN`, ingress `https://retain.<домен>` → `http://retain:8080`.
   - `litestream` — непрерывная репликация БД в **Cloudflare R2** (обязательно вне дома: диск может умереть).
-  - опционально `ollama` — локальная LLM.
 - **Cloudflare**:
   - TLS терминируется на Cloudflare; cookie `Secure` работает, т.к. клиент видит HTTPS.
   - Реальный IP клиента берём из `CF-Connecting-IP` (доверяем, т.к. туннель — единственный вход).
@@ -619,7 +640,7 @@ Mobile-first; свайп влево = Again, вправо = Good.
 | Этап | Содержимое |
 |---|---|
 | **0. Каркас** | Репозиторий, Makefile, конфиг, SQLite + goose + sqlc, embed фронта, CI |
-| **1. Дизайн-система** | Генерация палитры из seed, токены (цвет, типографика, форма, motion), базовые компоненты UI-кита, `/dev/ui` |
+| **1. Дизайн-система** | Dynamic color из seed в рантайме (стили схем, контраст, кэш без мигания), токены (типографика, форма, motion), базовые компоненты UI-кита, `/dev/ui` с переключателем seed |
 | **2. Аккаунты** | Инвайты, регистрация, логин, сессии, middleware |
 | **3. Колоды и слова** | CRUD, дерево колод, генерация карточек, импорт (preview/apply, адаптеры retain + school-wordsets + csv), экспорт, UI колод |
 | **4. Повторения (ядро)** | `srs` + golden-тесты, очередь, лимиты, review, undo, экран сессии, TTS |
@@ -637,5 +658,4 @@ Mobile-first; свайп влево = Again, вправо = Good.
 
 ## 17. Открытые вопросы
 
-- Какой LLM-провайдер и модель по умолчанию: облачный (OpenAI/OpenRouter) или локальный на домашнем сервере (Ollama)?
-- Финальный оттенок болотного зелёного: `#556B2F` подходит или подобрать на макете?
+- Какая модель на `ai.pestit.pl` будет по умолчанию (`LLM_MODEL`) и поддерживает ли эндпоинт `response_format: json_schema` и стриминг? Это проверяется на этапе 6, fallback уже заложен.
