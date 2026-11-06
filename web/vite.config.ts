@@ -3,6 +3,9 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    outDir: 'dist/generated',
+  },
   test: {
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
   },
