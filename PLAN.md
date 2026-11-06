@@ -517,7 +517,7 @@ POST   /push/subscribe | DELETE /push/subscribe
 
 After registration, the user logs in. The invite URL is a same-origin relative URL.
 
-Errors: `{"error": {"code": "not_found", "message": "..."}}` (messages in English). CSRF protection: SameSite cookie + `Origin` header check.
+Errors: `{"error": {"code": "not_found", "message": "..."}}` (messages in English). CSRF protection: SameSite cookie + `Origin` header check against the configurable canonical origin `PUBLIC_ORIGIN`. A state-changing request's `Origin` must match the full scheme and normalized host/effective port; never derive the scheme from untrusted forwarded headers. Development with Vite uses `http://localhost:5173`; production uses the externally exposed HTTPS origin behind Cloudflare Tunnel.
 
 ---
 
