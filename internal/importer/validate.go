@@ -19,15 +19,15 @@ func ValidateBundle(bundle *Bundle) error {
 }
 
 func validateDeck(deck Deck, path string) error {
-	if !hasECMAScriptNonWhitespace(deck.Name) {
+	if !HasECMAScriptNonWhitespace(deck.Name) {
 		return parseError(ErrMissingRequiredField, joinPath(path, "name"))
 	}
 	for i, note := range deck.Notes {
 		notePath := joinPath(path, "notes["+strconv.Itoa(i)+"]")
-		if !hasECMAScriptNonWhitespace(note.Term) {
+		if !HasECMAScriptNonWhitespace(note.Term) {
 			return parseError(ErrMissingRequiredField, joinPath(notePath, "term"))
 		}
-		if !hasECMAScriptNonWhitespace(note.Translation) {
+		if !HasECMAScriptNonWhitespace(note.Translation) {
 			return parseError(ErrMissingRequiredField, joinPath(notePath, "translation"))
 		}
 	}
@@ -39,10 +39,11 @@ func validateDeck(deck Deck, path string) error {
 	return nil
 }
 
-// hasECMAScriptNonWhitespace matches an ECMAScript regular-expression \S:
+// HasECMAScriptNonWhitespace reports whether value matches an ECMAScript
+// regular-expression \S:
 // WhiteSpace (including every Unicode Zs character) plus LineTerminator are
 // excluded, while characters such as U+0085 are not whitespace here.
-func hasECMAScriptNonWhitespace(value string) bool {
+func HasECMAScriptNonWhitespace(value string) bool {
 	for _, r := range value {
 		if !isECMAScriptWhitespace(r) {
 			return true

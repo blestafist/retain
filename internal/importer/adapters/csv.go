@@ -48,7 +48,7 @@ func (CSVAdapter) Detect(raw []byte) bool {
 		if isHeader(record) {
 			return true
 		}
-		return len(record) == 4 && strings.TrimSpace(record[0]) != "" && strings.TrimSpace(record[1]) != ""
+		return hasRequiredCSVFields(record)
 	}
 }
 
@@ -59,7 +59,7 @@ func (CSVAdapter) Parse(raw []byte) (*importer.Bundle, error) {
 	}
 	reader := csv.NewReader(bytes.NewReader(raw))
 	reader.Comma = ';'
-	reader.FieldsPerRecord = 4
+	reader.FieldsPerRecord = -1
 
 	bundle := &importer.Bundle{
 		Format: "retain/v1",
@@ -82,6 +82,9 @@ func (CSVAdapter) Parse(raw []byte) (*importer.Bundle, error) {
 		if emptyRecord(record) {
 			recordIndex++
 			continue
+		}
+		if len(record) != 4 {
+			return nil, csvParseError(ErrInvalidCSVStructure, recordIndex)
 		}
 		if firstRecord {
 			firstRecord = false
@@ -122,11 +125,15 @@ func isHeader(record []string) bool {
 
 func emptyRecord(record []string) bool {
 	for _, field := range record {
-		if strings.TrimSpace(field) != "" {
+		if importer.HasECMAScriptNonWhitespace(field) {
 			return false
 		}
 	}
 	return true
+}
+
+func hasRequiredCSVFields(record []string) bool {
+	return len(record) == 4 && importer.HasECMAScriptNonWhitespace(record[0]) && importer.HasECMAScriptNonWhitespace(record[1])
 }
 
 func splitTags(value string) []string {

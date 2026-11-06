@@ -103,6 +103,7 @@ func TestCSVAdapterSkipsBlankRecordsConsistently(t *testing.T) {
 	}{
 		{name: "blank row then data", input: "  ; ; ; \nword;translation;;", wantDetect: true, wantNotes: 1},
 		{name: "blank row then exact header and data", input: "  ; ; ; \nterm;translation;example;tags\nword;translation;;", wantDetect: true, wantNotes: 1},
+		{name: "ragged blank row then data", input: " ; \nword;translation;;", wantDetect: true, wantNotes: 1},
 		{name: "only blank rows", input: "  ; ; ; ", wantErr: ErrInvalidCSVStructure},
 	}
 	for _, tt := range tests {
@@ -122,6 +123,43 @@ func TestCSVAdapterSkipsBlankRecordsConsistently(t *testing.T) {
 			}
 			if got := len(bundle.Decks[0].Notes); got != tt.wantNotes {
 				t.Fatalf("notes = %d, want %d", got, tt.wantNotes)
+			}
+		})
+	}
+}
+
+func TestCSVAdapterMatchesECMAScriptWhitespace(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantDetect bool
+		wantErr    error
+		wantTerm   string
+	}{
+		{name: "U+0085 is a valid term and translation", input: "\u0085;\u0085;;", wantDetect: true, wantTerm: "\u0085"},
+		{name: "U+FEFF required term is rejected", input: "\ufeff;translation;;", wantErr: importer.ErrMissingRequiredField},
+		{name: "U+FEFF-only row is blank", input: "\ufeff;\ufeff;;", wantErr: ErrInvalidCSVStructure},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := (CSVAdapter{}).Detect([]byte(tt.input)); got != tt.wantDetect {
+				t.Fatalf("Detect() = %v, want %v", got, tt.wantDetect)
+			}
+			bundle, err := (CSVAdapter{}).Parse([]byte(tt.input))
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("Parse() error = %v, want errors.Is(_, %v)", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			if got := len(bundle.Decks[0].Notes); got != 1 {
+				t.Fatalf("notes = %d, want 1", got)
+			}
+			if got := bundle.Decks[0].Notes[0].Term; got != tt.wantTerm {
+				t.Fatalf("term = %q, want %q", got, tt.wantTerm)
 			}
 		})
 	}
