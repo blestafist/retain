@@ -456,6 +456,8 @@ The entire palette is built at runtime from a single **seed color** (MD3 dynamic
 
 ## 9. API (REST, JSON, `/api/v1`)
 
+Routes below are relative to `/api/v1`. Invite codes are single-use and valid for 7 days. Sessions last 30 days. Passwords must be at least 12 characters long.
+
 ```
 POST   /auth/register            {invite, email, name, password}
 POST   /auth/login               {email, password}       → Set-Cookie
