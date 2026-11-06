@@ -1,0 +1,11 @@
+:root {
+  color-scheme: light dark;
+}
+
+:root[data-theme-mode='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme-mode='dark'] {
+  color-scheme: dark;
+}

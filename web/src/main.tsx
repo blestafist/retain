@@ -1,5 +1,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import './theme/typography.css';
+import './theme/shape.css';
+import './theme/color-scheme.css';
 import { App } from './App';
 import { t } from './i18n/en';
 import { ThemeProvider } from './theme/context';

@@ -1,5 +1,5 @@
 :root {
-  font-family: system-ui, sans-serif;
+  font-family: var(--md-ref-typeface-plain);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -34,9 +34,8 @@ body {
 
 .app-name {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 650;
-  letter-spacing: 0.02em;
+  font: var(--md-sys-typescale-title-medium);
+  letter-spacing: var(--md-sys-typescale-title-medium-letter-spacing);
 }
 
 .main-content {
@@ -52,16 +51,16 @@ body {
 .main-content h1 {
   max-width: 16ch;
   margin: 0;
-  font-size: clamp(2.25rem, 8vw, 4rem);
-  line-height: 1.1;
+  font: var(--md-sys-typescale-display-small-emphasized);
+  letter-spacing: var(--md-sys-typescale-display-small-letter-spacing);
   text-wrap: balance;
 }
 
 .placeholder-description {
   max-width: 42ch;
   margin-block: 1.5rem 0;
-  font-size: 1.125rem;
-  line-height: 1.6;
+  font: var(--md-sys-typescale-body-large);
+  letter-spacing: var(--md-sys-typescale-body-large-letter-spacing);
 }
 
 .skip-link {

@@ -1,0 +1,15 @@
+:root {
+  --md-sys-shape-corner-none: 0;
+  --md-sys-shape-corner-extra-small: 0.25rem;
+  --md-sys-shape-corner-extra-small-increased: 0.5rem;
+  --md-sys-shape-corner-small: 0.5rem;
+  --md-sys-shape-corner-small-increased: 0.75rem;
+  --md-sys-shape-corner-medium: 0.75rem;
+  --md-sys-shape-corner-medium-increased: 1rem;
+  --md-sys-shape-corner-large: 1rem;
+  --md-sys-shape-corner-large-increased: 1.5rem;
+  --md-sys-shape-corner-extra-large: 1.75rem;
+  --md-sys-shape-corner-extra-large-increased: 2rem;
+  --md-sys-shape-corner-extra-extra-large: 3rem;
+  --md-sys-shape-corner-full: 9999px;
+}

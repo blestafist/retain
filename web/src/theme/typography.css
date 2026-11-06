@@ -1,0 +1,46 @@
+@import '@fontsource-variable/roboto-flex/wght.css';
+
+:root {
+  --md-ref-typeface-brand: 'Roboto Flex Variable', 'Roboto Flex', sans-serif;
+  --md-ref-typeface-plain: 'Roboto Flex Variable', 'Roboto Flex', sans-serif;
+
+  --md-sys-typescale-display-large: 400 3.5625rem/4rem var(--md-ref-typeface-brand);
+  --md-sys-typescale-display-medium: 400 2.8125rem/3.25rem var(--md-ref-typeface-brand);
+  --md-sys-typescale-display-small: 400 2.25rem/2.75rem var(--md-ref-typeface-brand);
+  --md-sys-typescale-headline-large: 400 2rem/2.5rem var(--md-ref-typeface-brand);
+  --md-sys-typescale-headline-medium: 400 1.75rem/2.25rem var(--md-ref-typeface-brand);
+  --md-sys-typescale-headline-small: 400 1.5rem/2rem var(--md-ref-typeface-brand);
+  --md-sys-typescale-title-large: 400 1.375rem/1.75rem var(--md-ref-typeface-plain);
+  --md-sys-typescale-title-medium: 500 1rem/1.5rem var(--md-ref-typeface-plain);
+  --md-sys-typescale-title-small: 500 0.875rem/1.25rem var(--md-ref-typeface-plain);
+  --md-sys-typescale-body-large: 400 1rem/1.5rem var(--md-ref-typeface-plain);
+  --md-sys-typescale-body-medium: 400 0.875rem/1.25rem var(--md-ref-typeface-plain);
+  --md-sys-typescale-body-small: 400 0.75rem/1rem var(--md-ref-typeface-plain);
+  --md-sys-typescale-label-large: 500 0.875rem/1.25rem var(--md-ref-typeface-plain);
+  --md-sys-typescale-label-medium: 500 0.75rem/1rem var(--md-ref-typeface-plain);
+  --md-sys-typescale-label-small: 500 0.6875rem/1rem var(--md-ref-typeface-plain);
+
+  --md-sys-typescale-display-large-letter-spacing: -0.015625rem;
+  --md-sys-typescale-display-medium-letter-spacing: 0;
+  --md-sys-typescale-display-small-letter-spacing: 0;
+  --md-sys-typescale-headline-large-letter-spacing: 0;
+  --md-sys-typescale-headline-medium-letter-spacing: 0;
+  --md-sys-typescale-headline-small-letter-spacing: 0;
+  --md-sys-typescale-title-large-letter-spacing: 0;
+  --md-sys-typescale-title-medium-letter-spacing: 0.009375rem;
+  --md-sys-typescale-title-small-letter-spacing: 0.00625rem;
+  --md-sys-typescale-body-large-letter-spacing: 0.03125rem;
+  --md-sys-typescale-body-medium-letter-spacing: 0.015625rem;
+  --md-sys-typescale-body-small-letter-spacing: 0.025rem;
+  --md-sys-typescale-label-large-letter-spacing: 0.00625rem;
+  --md-sys-typescale-label-medium-letter-spacing: 0.03125rem;
+  --md-sys-typescale-label-small-letter-spacing: 0.03125rem;
+
+  --md-sys-typescale-display-large-emphasized: 650 3.5625rem/4rem var(--md-ref-typeface-brand);
+  --md-sys-typescale-headline-large-emphasized: 650 2rem/2.5rem var(--md-ref-typeface-brand);
+  --md-sys-typescale-headline-medium-emphasized: 650 1.75rem/2.25rem var(--md-ref-typeface-brand);
+  --md-sys-typescale-headline-small-emphasized: 650 1.5rem/2rem var(--md-ref-typeface-brand);
+  --md-sys-typescale-title-medium-emphasized: 650 1rem/1.5rem var(--md-ref-typeface-plain);
+
+  font-optical-sizing: auto;
+}
