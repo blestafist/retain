@@ -76,7 +76,7 @@ export function createThemeCache(settings: ThemeSettings): ThemeCache {
   };
 }
 
-export function parseThemeCache(serialized: string | null): ThemeCache | null {
+function parseCompatibleThemeCache(serialized: string | null): (Omit<ThemeCache, 'revision'> & { revision: number }) | null {
   if (serialized === null) {
     return null;
   }
@@ -86,7 +86,9 @@ export function parseThemeCache(serialized: string | null): ThemeCache | null {
     if (
       !hasExactKeys(candidate, CACHE_KEYS) ||
       candidate.version !== THEME_CACHE_VERSION ||
-      candidate.revision !== THEME_CACHE_REVISION
+      typeof candidate.revision !== 'number' ||
+      !Number.isInteger(candidate.revision) ||
+      candidate.revision < 1 || candidate.revision > THEME_CACHE_REVISION
     ) {
       return null;
     }
@@ -106,7 +108,7 @@ export function parseThemeCache(serialized: string | null): ThemeCache | null {
 
     return {
       version: THEME_CACHE_VERSION,
-      revision: THEME_CACHE_REVISION,
+      revision: candidate.revision,
       settings,
       palettes: {
         light: palettes.light,
@@ -116,6 +118,13 @@ export function parseThemeCache(serialized: string | null): ThemeCache | null {
   } catch {
     return null;
   }
+}
+
+export function parseThemeCache(serialized: string | null): ThemeCache | null {
+  const cache = parseCompatibleThemeCache(serialized);
+  return cache?.revision === THEME_CACHE_REVISION
+    ? { ...cache, revision: THEME_CACHE_REVISION }
+    : null;
 }
 
 export function readThemeCache(
@@ -133,19 +142,11 @@ export function loadThemeCache(
 ): ThemeCache {
   try {
     const serialized = storage?.getItem(THEME_CACHE_KEY) ?? null;
-    const cache = parseThemeCache(serialized);
-    if (cache !== null) return cache;
-
-    // Revision 1 has compatible settings, but its rating palettes are stale.
-    const candidate: unknown = JSON.parse(serialized ?? 'null');
-    if (
-      hasExactKeys(candidate, CACHE_KEYS) &&
-      candidate.version === THEME_CACHE_VERSION &&
-      candidate.revision === 1 &&
-      hasExactKeys(candidate.settings, SETTINGS_KEYS)
-    ) {
-      const settings = validateThemeSettings(candidate.settings);
-      if (settings !== null) return createThemeCache(settings);
+    const cache = parseCompatibleThemeCache(serialized);
+    if (cache !== null) {
+      return cache.revision === THEME_CACHE_REVISION
+        ? { ...cache, revision: THEME_CACHE_REVISION }
+        : createThemeCache(cache.settings);
     }
   } catch {
     // Invalid or unavailable storage uses the default theme.

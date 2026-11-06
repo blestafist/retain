@@ -54,7 +54,7 @@
           if (
             hasExactKeys(value, ['version', 'revision', 'settings', 'palettes']) &&
             value.version === cacheVersion &&
-            value.revision === cacheRevision &&
+            Number.isInteger(value.revision) && value.revision >= 1 && value.revision <= cacheRevision &&
             validSettings &&
             hasExactKeys(palettes, ['light', 'dark']) &&
             validRoleMap(palettes.light) &&
