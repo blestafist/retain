@@ -184,6 +184,55 @@ func TestAccountRoutesRegularUserCannotCreateInvite(t *testing.T) {
 	}
 }
 
+func TestSettingsPatchRequiresJSONObject(t *testing.T) {
+	service, _, handler := newAccountHandlerTest(t)
+	adminID, err := service.CreateAdmin(context.Background(), "admin@example.com", "Admin", handlerTestPassword)
+	if err != nil {
+		t.Fatalf("CreateAdmin() error = %v", err)
+	}
+	login := accountRequest(handler, http.MethodPost, "/api/v1/auth/login", `{"email":"admin@example.com","password":"`+handlerTestPassword+`"}`)
+	if login.Code != http.StatusNoContent {
+		t.Fatalf("login status = %d, body %s", login.Code, login.Body)
+	}
+	cookie := login.Result().Cookies()[0]
+
+	emptyPatch := accountRequest(handler, http.MethodPatch, "/api/v1/me/settings", `{}`, cookie)
+	if emptyPatch.Code != http.StatusOK {
+		t.Fatalf("empty settings PATCH status = %d, body %s; want %d", emptyPatch.Code, emptyPatch.Body, http.StatusOK)
+	}
+	var settings auth.Settings
+	if err := json.Unmarshal(emptyPatch.Body.Bytes(), &settings); err != nil {
+		t.Fatalf("decode empty settings PATCH response: %v", err)
+	}
+	if settings.UserID != adminID {
+		t.Errorf("empty settings PATCH user ID = %d, want %d", settings.UserID, adminID)
+	}
+
+	for _, body := range []string{`null`, `[]`, `"string"`, `123`, `true`} {
+		t.Run(body, func(t *testing.T) {
+			response := accountRequest(handler, http.MethodPatch, "/api/v1/me/settings", body, cookie)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("settings PATCH status = %d, body %s; want %d", response.Code, response.Body, http.StatusBadRequest)
+			}
+			if got := response.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+				t.Fatalf("Content-Type = %q, want application/json", got)
+			}
+			var payload struct {
+				Error struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode API error response: %v", err)
+			}
+			if payload.Error.Code != "invalid_json" || payload.Error.Message == "" {
+				t.Errorf("API error = %+v, want safe invalid_json error", payload.Error)
+			}
+		})
+	}
+}
+
 func TestAccountRoutesSanitizeAndMapErrors(t *testing.T) {
 	_, _, handler := newAccountHandlerTest(t)
 	tooLarge := accountRequest(handler, http.MethodPost, "/api/v1/auth/login", strings.Repeat(" ", MaxJSONBodyBytes+1))

@@ -103,6 +103,10 @@ func RegisterAccountRoutes(mux *http.ServeMux, service *auth.Service) {
 			writeJSONDecodeError(w, err)
 			return
 		}
+		if patch == nil {
+			writeJSONDecodeError(w, ErrInvalidJSON)
+			return
+		}
 		settings, err := service.UpdateSettings(r.Context(), user.ID, patch)
 		if err != nil {
 			writeAuthError(w, err)
