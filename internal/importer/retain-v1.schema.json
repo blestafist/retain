@@ -20,7 +20,7 @@
         "name": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "lang_target": { "enum": ["de", "en"] },
         "lang_native": { "enum": ["pl", "ru"] },
-        "expected_count": { "type": "integer", "minimum": 0 },
+        "expected_count": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
         "decks": {
           "type": "array",
           "items": { "$ref": "#/$defs/deck" }

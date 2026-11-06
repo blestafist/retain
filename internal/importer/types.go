@@ -16,7 +16,7 @@ type Deck struct {
 	Name          string `json:"name"`
 	LangTarget    string `json:"lang_target,omitempty"`
 	LangNative    string `json:"lang_native,omitempty"`
-	ExpectedCount *int   `json:"expected_count,omitempty"`
+	ExpectedCount *int64 `json:"expected_count,omitempty"`
 	Decks         []Deck `json:"decks,omitempty"`
 	Notes         []Note `json:"notes,omitempty"`
 }

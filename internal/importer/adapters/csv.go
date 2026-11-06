@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pestit/retain/internal/importer"
 )
@@ -29,6 +30,9 @@ func (CSVAdapter) Name() string { return "csv" }
 // Detect reports whether the first nonempty record resembles a supported CSV
 // header or a data row with all four columns.
 func (CSVAdapter) Detect(raw []byte) bool {
+	if !utf8.Valid(raw) {
+		return false
+	}
 	reader := csv.NewReader(bytes.NewReader(raw))
 	reader.Comma = ';'
 	reader.FieldsPerRecord = -1
@@ -50,6 +54,9 @@ func (CSVAdapter) Detect(raw []byte) bool {
 
 // Parse converts semicolon-separated CSV into a validated retain/v1 Bundle.
 func (CSVAdapter) Parse(raw []byte) (*importer.Bundle, error) {
+	if !utf8.Valid(raw) {
+		return nil, csvParseError(ErrInvalidCSV, 0)
+	}
 	reader := csv.NewReader(bytes.NewReader(raw))
 	reader.Comma = ';'
 	reader.FieldsPerRecord = 4
@@ -71,6 +78,10 @@ func (CSVAdapter) Parse(raw []byte) (*importer.Bundle, error) {
 				return nil, csvParseError(ErrInvalidCSVStructure, recordIndex)
 			}
 			return nil, csvParseError(ErrInvalidCSV, recordIndex)
+		}
+		if emptyRecord(record) {
+			recordIndex++
+			continue
 		}
 		if firstRecord {
 			firstRecord = false
@@ -102,7 +113,7 @@ func isHeader(record []string) bool {
 	}
 	want := [...]string{"term", "translation", "example", "tags"}
 	for i := range want {
-		if strings.ToLower(strings.TrimSpace(record[i])) != want[i] {
+		if record[i] != want[i] {
 			return false
 		}
 	}

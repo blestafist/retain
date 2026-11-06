@@ -1,10 +1,10 @@
 package importer
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -197,13 +197,55 @@ func TestParseRetainRejectsInvalidUTF8(t *testing.T) {
 	}
 }
 
+func TestParseRetainRejectsUnpairedEscapedUTF16Surrogates(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "lone high surrogate", input: `{"format":"retain/v1","source":"\uD800"}`},
+		{name: "lone low surrogate", input: `{"format":"retain/v1","source":"\uDC00"}`},
+		{name: "high followed by non-low", input: `{"format":"retain/v1","source":"\uD800\u0041"}`},
+		{name: "high followed by another high", input: `{"format":"retain/v1","source":"\uD800\uD801"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := []byte(tt.input)
+			if (RetainAdapter{}).Detect(raw) {
+				t.Fatal("Detect() = true for invalid escaped UTF-16")
+			}
+			_, err := ParseRetain(raw)
+			if !errors.Is(err, ErrInvalidJSON) {
+				t.Fatalf("ParseRetain() error = %v, want ErrInvalidJSON", err)
+			}
+			if strings.ContainsRune(err.Error(), '\uFFFD') {
+				t.Fatalf("error contains replacement character: %v", err)
+			}
+		})
+	}
+}
+
+func TestParseRetainAcceptsValidEscapedUTF16SurrogatePair(t *testing.T) {
+	input := []byte(`{"format":"retain/v1","decks":[{"name":"Deck","notes":[{"term":"\uD83D\uDE00","translation":"smile"}]}]}`)
+	bundle, err := ParseRetain(input)
+	if err != nil {
+		t.Fatalf("ParseRetain() error = %v", err)
+	}
+	if got := bundle.Decks[0].Notes[0].Term; got != "😀" {
+		t.Fatalf("decoded term = %q, want 😀", got)
+	}
+
+	// A backslash escaped as data is not a UTF-16 escape sequence.
+	input = []byte(`{"format":"retain/v1","decks":[{"name":"Deck","notes":[{"term":"\\uD800","translation":"literal"}]}]}`)
+	if _, err := ParseRetain(input); err != nil {
+		t.Fatalf("ParseRetain() rejected a literal backslash-u sequence: %v", err)
+	}
+}
+
 func TestParseRetainExpectedCountMatchesJSONSchemaIntegerSemantics(t *testing.T) {
-	maxInt := int(^uint(0) >> 1)
-	outOfRange := strconv.FormatUint(uint64(^uint(0)>>1)+1, 10)
 	tests := []struct {
 		name    string
 		number  string
-		want    int
+		want    int64
 		wantErr error
 	}{
 		{name: "integer", number: "1", want: 1},
@@ -214,10 +256,14 @@ func TestParseRetainExpectedCountMatchesJSONSchemaIntegerSemantics(t *testing.T)
 		{name: "exponent moves decimal point", number: "10.05e2", want: 1005},
 		{name: "zero with exponent", number: "0e999999999999999999999999", want: 0},
 		{name: "negative zero", number: "-0.0", want: 0},
-		{name: "maximum int", number: strconv.FormatUint(uint64(maxInt), 10), want: maxInt},
+		{name: "maximum int64", number: "9223372036854775807", want: 9223372036854775807},
+		{name: "maximum decimal integer", number: "92233720368547758070e-1", want: 9223372036854775807},
+		{name: "maximum decimal notation", number: "9223372036854775807.0", want: 9223372036854775807},
 		{name: "fractional decimal", number: "1.01", wantErr: ErrInvalidStructure},
 		{name: "fractional exponent", number: "1e-1", wantErr: ErrInvalidStructure},
-		{name: "out of range", number: outOfRange, wantErr: ErrInvalidStructure},
+		{name: "above maximum int64", number: "9223372036854775808", wantErr: ErrInvalidStructure},
+		{name: "above maximum int64 exponent", number: "9223372036854775808e0", wantErr: ErrInvalidStructure},
+		{name: "above maximum int64 decimal", number: "9223372036854775808.0", wantErr: ErrInvalidStructure},
 		{name: "huge exponent", number: "1e999999999999999999999999", wantErr: ErrInvalidStructure},
 	}
 
@@ -242,15 +288,76 @@ func TestParseRetainExpectedCountMatchesJSONSchemaIntegerSemantics(t *testing.T)
 	}
 }
 
+func TestValidateBundleRequiredTextMatchesECMAScriptWhitespace(t *testing.T) {
+	fields := []struct {
+		name string
+		set  func(*Deck, string)
+	}{
+		{name: "deck name", set: func(deck *Deck, value string) { deck.Name = value }},
+		{name: "note term", set: func(deck *Deck, value string) { deck.Notes[0].Term = value }},
+		{name: "note translation", set: func(deck *Deck, value string) { deck.Notes[0].Translation = value }},
+	}
+	values := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "U+0085 is non-whitespace", value: "\u0085"},
+		{name: "FEFF is whitespace", value: "\uFEFF", wantErr: true},
+		{name: "ordinary whitespace only", value: " \t\n\r\v\f", wantErr: true},
+	}
+
+	for _, field := range fields {
+		for _, value := range values {
+			t.Run(field.name+"/"+value.name, func(t *testing.T) {
+				deck := Deck{Name: "Deck", Notes: []Note{{Term: "word", Translation: "meaning"}}}
+				field.set(&deck, value.value)
+				err := ValidateBundle(&Bundle{Format: retainFormat, Decks: []Deck{deck}})
+				if value.wantErr {
+					if !errors.Is(err, ErrMissingRequiredField) {
+						t.Fatalf("ValidateBundle() error = %v, want ErrMissingRequiredField", err)
+					}
+				} else if err != nil {
+					t.Fatalf("ValidateBundle() error = %v, want nil", err)
+				}
+			})
+		}
+	}
+}
+
 func TestRetainV1SchemaIsEmbeddedJSON(t *testing.T) {
 	if !json.Valid(RetainV1Schema) {
 		t.Fatal("embedded retain/v1 schema is not valid JSON")
 	}
+	decoder := json.NewDecoder(bytes.NewReader(RetainV1Schema))
+	decoder.UseNumber()
 	var schema map[string]any
-	if err := json.Unmarshal(RetainV1Schema, &schema); err != nil {
+	if err := decoder.Decode(&schema); err != nil {
 		t.Fatalf("unmarshal embedded schema: %v", err)
 	}
 	if schema["title"] != "Retain v1 exchange format" {
 		t.Fatalf("schema title = %v", schema["title"])
+	}
+	defs := schema["$defs"].(map[string]any)
+	deck := defs["deck"].(map[string]any)
+	deckProperties := deck["properties"].(map[string]any)
+	expectedCount := deckProperties["expected_count"].(map[string]any)
+	if expectedCount["type"] != "integer" || expectedCount["maximum"] != json.Number("9223372036854775807") {
+		t.Fatalf("expected_count schema = %#v, want integer <= MaxInt64", expectedCount)
+	}
+	for _, property := range []struct {
+		object   string
+		property string
+	}{
+		{object: "deck", property: "name"},
+		{object: "note", property: "term"},
+		{object: "note", property: "translation"},
+	} {
+		object := defs[property.object].(map[string]any)
+		properties := object["properties"].(map[string]any)
+		text := properties[property.property].(map[string]any)
+		if text["pattern"] != `\S` {
+			t.Errorf("%s.%s pattern = %v, want ECMAScript \\S", property.object, property.property, text["pattern"])
+		}
 	}
 }

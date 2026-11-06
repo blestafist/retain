@@ -82,7 +82,7 @@ func ParseRetain(raw []byte) (*Bundle, error) {
 }
 
 func decodeRoot(raw []byte) (map[string]json.RawMessage, error) {
-	if !utf8.Valid(raw) {
+	if !utf8.Valid(raw) || !validEscapedSurrogates(raw) {
 		return nil, parseError(ErrInvalidJSON, "")
 	}
 	var value json.RawMessage
@@ -90,6 +90,75 @@ func decodeRoot(raw []byte) (map[string]json.RawMessage, error) {
 		return nil, parseError(ErrInvalidJSON, "")
 	}
 	return readObject(value, "")
+}
+
+// validEscapedSurrogates rejects JSON string escapes that encoding/json would
+// otherwise silently replace with U+FFFD. Valid UTF-16 surrogate pairs remain
+// accepted and are decoded normally by encoding/json.
+func validEscapedSurrogates(raw []byte) bool {
+	inString := false
+	for i := 0; i < len(raw); i++ {
+		if !inString {
+			if raw[i] == '"' {
+				inString = true
+			}
+			continue
+		}
+
+		switch raw[i] {
+		case '"':
+			inString = false
+		case '\\':
+			if i+1 >= len(raw) {
+				return false
+			}
+			if raw[i+1] != 'u' {
+				i++
+				continue
+			}
+			unit, ok := readHexCodeUnit(raw[i+2:])
+			if !ok {
+				return false
+			}
+			switch {
+			case unit >= 0xD800 && unit <= 0xDBFF:
+				if i+12 > len(raw) || raw[i+6] != '\\' || raw[i+7] != 'u' {
+					return false
+				}
+				low, ok := readHexCodeUnit(raw[i+8:])
+				if !ok || low < 0xDC00 || low > 0xDFFF {
+					return false
+				}
+				i += 11
+			case unit >= 0xDC00 && unit <= 0xDFFF:
+				return false
+			default:
+				i += 5
+			}
+		}
+	}
+	return true
+}
+
+func readHexCodeUnit(raw []byte) (uint16, bool) {
+	if len(raw) < 4 {
+		return 0, false
+	}
+	var value uint16
+	for _, digit := range raw[:4] {
+		value <<= 4
+		switch {
+		case digit >= '0' && digit <= '9':
+			value |= uint16(digit - '0')
+		case digit >= 'a' && digit <= 'f':
+			value |= uint16(digit-'a') + 10
+		case digit >= 'A' && digit <= 'F':
+			value |= uint16(digit-'A') + 10
+		default:
+			return 0, false
+		}
+	}
+	return value, true
 }
 
 func readDecks(raw json.RawMessage, path string) ([]Deck, error) {
@@ -319,7 +388,7 @@ func readStringArray(raw json.RawMessage, path string) ([]string, error) {
 	return values, nil
 }
 
-func readInteger(raw json.RawMessage, path string) (int, error) {
+func readInteger(raw json.RawMessage, path string) (int64, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || trimmed[0] == '"' || trimmed[0] == '{' || trimmed[0] == '[' || bytes.Equal(trimmed, []byte("null")) {
 		return 0, parseError(ErrInvalidStructure, path)
@@ -333,7 +402,7 @@ func readInteger(raw json.RawMessage, path string) (int, error) {
 
 // parseJSONInteger accepts JSON numbers whose mathematical value is an integer,
 // including decimal and exponent notation, without rounding through float64.
-func parseJSONInteger(number []byte) (int, bool) {
+func parseJSONInteger(number []byte) (int64, bool) {
 	if len(number) == 0 {
 		return 0, false
 	}
@@ -416,10 +485,7 @@ func parseJSONInteger(number []byte) (int, bool) {
 		appendZeros = shift
 	}
 
-	maxDigits := 19
-	if strconv.IntSize == 32 {
-		maxDigits = 10
-	}
+	const maxDigits = 19
 	if keptDigitCount == 0 {
 		return 0, false
 	}
@@ -471,11 +537,11 @@ func parseJSONInteger(number []byte) (int, bool) {
 	if negative {
 		valueText = "-" + valueText
 	}
-	value, err := strconv.ParseInt(valueText, 10, strconv.IntSize)
+	value, err := strconv.ParseInt(valueText, 10, 64)
 	if err != nil {
 		return 0, false
 	}
-	return int(value), true
+	return value, true
 }
 
 func rejectUnknown(obj map[string]json.RawMessage, path string, allowed ...string) error {

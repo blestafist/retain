@@ -2,7 +2,7 @@ package importer
 
 import (
 	"strconv"
-	"strings"
+	"unicode"
 )
 
 // ValidateBundle checks required fields shared by all adapters.
@@ -19,15 +19,15 @@ func ValidateBundle(bundle *Bundle) error {
 }
 
 func validateDeck(deck Deck, path string) error {
-	if strings.TrimSpace(deck.Name) == "" {
+	if !hasECMAScriptNonWhitespace(deck.Name) {
 		return parseError(ErrMissingRequiredField, joinPath(path, "name"))
 	}
 	for i, note := range deck.Notes {
 		notePath := joinPath(path, "notes["+strconv.Itoa(i)+"]")
-		if strings.TrimSpace(note.Term) == "" {
+		if !hasECMAScriptNonWhitespace(note.Term) {
 			return parseError(ErrMissingRequiredField, joinPath(notePath, "term"))
 		}
-		if strings.TrimSpace(note.Translation) == "" {
+		if !hasECMAScriptNonWhitespace(note.Translation) {
 			return parseError(ErrMissingRequiredField, joinPath(notePath, "translation"))
 		}
 	}
@@ -37,4 +37,25 @@ func validateDeck(deck Deck, path string) error {
 		}
 	}
 	return nil
+}
+
+// hasECMAScriptNonWhitespace matches an ECMAScript regular-expression \S:
+// WhiteSpace (including every Unicode Zs character) plus LineTerminator are
+// excluded, while characters such as U+0085 are not whitespace here.
+func hasECMAScriptNonWhitespace(value string) bool {
+	for _, r := range value {
+		if !isECMAScriptWhitespace(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func isECMAScriptWhitespace(r rune) bool {
+	switch r {
+	case '\t', '\n', '\v', '\f', '\r', ' ', '\u00a0', '\ufeff', '\u2028', '\u2029':
+		return true
+	default:
+		return unicode.Is(unicode.Zs, r)
+	}
 }

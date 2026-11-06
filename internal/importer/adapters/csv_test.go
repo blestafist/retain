@@ -9,8 +9,8 @@ import (
 	"github.com/pestit/retain/internal/importer"
 )
 
-func TestCSVAdapterHeaderQuotingMultilineAndTags(t *testing.T) {
-	input := " TERM ;Translation;example; TAGS \r\n" +
+func TestCSVAdapterExactHeaderQuotingMultilineAndTags(t *testing.T) {
+	input := "term;translation;example;tags\r\n" +
 		`"word; phrase";"translation; variant";"first line` + "\n" +
 		`second line";" noun, chapter, , verb "`
 	adapter := CSVAdapter{}
@@ -51,16 +51,79 @@ func TestCSVAdapterWithoutHeaderAndEmptyOptionalFields(t *testing.T) {
 	}
 }
 
-func TestCSVHeaderMustMatchAllNormalizedColumnsInOrder(t *testing.T) {
-	bundle, err := (CSVAdapter{}).Parse([]byte("term;translation;examples;tags\nword;translation;example;tag"))
-	if err != nil {
-		t.Fatalf("Parse() error = %v", err)
+func TestCSVHeaderRequiresExactFieldsInOrder(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantNotes int
+		wantTerm  string
+	}{
+		{name: "exact header", input: "term;translation;example;tags\nword;meaning;;", wantNotes: 1, wantTerm: "word"},
+		{name: "spaces and case are data", input: " TERM ;Translation;example; TAGS \nword;meaning;;", wantNotes: 2, wantTerm: " TERM "},
+		{name: "case mismatch is data", input: "Term;translation;example;tags\nword;meaning;;", wantNotes: 2, wantTerm: "Term"},
+		{name: "wrong order is data", input: "translation;term;example;tags\nword;meaning;;", wantNotes: 2, wantTerm: "translation"},
 	}
-	if got := len(bundle.Decks[0].Notes); got != 2 {
-		t.Fatalf("notes = %d, want first row treated as data", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bundle, err := (CSVAdapter{}).Parse([]byte(tt.input))
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			if got := len(bundle.Decks[0].Notes); got != tt.wantNotes {
+				t.Fatalf("notes = %d, want %d", got, tt.wantNotes)
+			}
+			if got := bundle.Decks[0].Notes[0].Term; got != tt.wantTerm {
+				t.Fatalf("first term = %q, want %q", got, tt.wantTerm)
+			}
+		})
 	}
-	if note := bundle.Decks[0].Notes[0]; note.Term != "term" || note.Translation != "translation" || note.Example != "examples" || !reflect.DeepEqual(note.Tags, []string{"tags"}) {
-		t.Fatalf("unrecognized header row was not retained as data: %#v", note)
+}
+
+func TestCSVAdapterRejectsInvalidUTF8(t *testing.T) {
+	input := append([]byte("word;trans"), 0xff)
+	if (CSVAdapter{}).Detect(input) {
+		t.Fatal("Detect() = true for invalid UTF-8")
+	}
+	_, err := (CSVAdapter{}).Parse(input)
+	if !errors.Is(err, ErrInvalidCSV) {
+		t.Fatalf("Parse() error = %v, want ErrInvalidCSV", err)
+	}
+	if strings.ContainsRune(err.Error(), '\uFFFD') {
+		t.Fatalf("error contains replacement character: %v", err)
+	}
+}
+
+func TestCSVAdapterSkipsBlankRecordsConsistently(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantDetect bool
+		wantNotes  int
+		wantErr    error
+	}{
+		{name: "blank row then data", input: "  ; ; ; \nword;translation;;", wantDetect: true, wantNotes: 1},
+		{name: "blank row then exact header and data", input: "  ; ; ; \nterm;translation;example;tags\nword;translation;;", wantDetect: true, wantNotes: 1},
+		{name: "only blank rows", input: "  ; ; ; ", wantErr: ErrInvalidCSVStructure},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := (CSVAdapter{}).Detect([]byte(tt.input)); got != tt.wantDetect {
+				t.Fatalf("Detect() = %v, want %v", got, tt.wantDetect)
+			}
+			bundle, err := (CSVAdapter{}).Parse([]byte(tt.input))
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("Parse() error = %v, want errors.Is(_, %v)", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			if got := len(bundle.Decks[0].Notes); got != tt.wantNotes {
+				t.Fatalf("notes = %d, want %d", got, tt.wantNotes)
+			}
+		})
 	}
 }
 
@@ -116,7 +179,8 @@ func TestCSVAdapterDetect(t *testing.T) {
 		raw  string
 		want bool
 	}{
-		{name: "normalized header", raw: "\n TERM ; Translation ; EXAMPLE ; Tags \n", want: true},
+		{name: "exact header", raw: "\nterm;translation;example;tags\n", want: true},
+		{name: "near header is data", raw: " TERM ;Translation;example; TAGS \n", want: true},
 		{name: "data row", raw: "word;translation;;", want: true},
 		{name: "blank then data", raw: "\n  ; ; ; \nword;translation;;", want: true},
 		{name: "not enough columns", raw: "word;translation", want: false},
