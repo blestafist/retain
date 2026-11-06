@@ -459,13 +459,13 @@ The entire palette is built at runtime from a single **seed color** (MD3 dynamic
 Routes below are relative to `/api/v1`. Invite codes are single-use and valid for 7 days. Sessions last 30 days. Passwords must be at least 12 characters long.
 
 ```
-POST   /auth/register            {invite, email, name, password}
+POST   /auth/register            {invite, email, name, password}  (creates account; no session or Set-Cookie)
 POST   /auth/login               {email, password}       → Set-Cookie
 POST   /auth/logout
-GET    /me
-PATCH  /me/settings
+GET    /me                       → profile + full settings
+PATCH  /me/settings              partial flat snake_case JSON → full settings
 
-POST   /admin/invites            → {code, url}           (admin only)
+POST   /admin/invites            → {code, url}           (admin only; url: /signup?invite=...)
 GET    /admin/llm-usage          token usage per user
 GET    /admin/llm/models         model list from the endpoint (/v1/models)
 PUT    /admin/llm/model          {model} — switch model without restart
@@ -514,6 +514,8 @@ GET    /friends/leaderboard?period=week
 GET    /push/vapid-key
 POST   /push/subscribe | DELETE /push/subscribe
 ```
+
+After registration, the user logs in. The invite URL is a same-origin relative URL.
 
 Errors: `{"error": {"code": "not_found", "message": "..."}}` (messages in English). CSRF protection: SameSite cookie + `Origin` header check.
 
