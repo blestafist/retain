@@ -11,18 +11,21 @@ func TestLoad(t *testing.T) {
 		environment map[string]string
 		wantPath    string
 		wantAddr    string
+		wantOrigin  string
 		wantErr     string
 	}{
 		{
-			name:     "default settings",
-			wantPath: defaultDatabasePath,
-			wantAddr: defaultHTTPAddr,
+			name:       "default settings",
+			wantPath:   defaultDatabasePath,
+			wantAddr:   defaultHTTPAddr,
+			wantOrigin: defaultPublicOrigin,
 		},
 		{
 			name:        "configured database path",
-			environment: map[string]string{"DATABASE_PATH": "/tmp/retain.db", "HTTP_ADDR": "127.0.0.1:9090"},
+			environment: map[string]string{"DATABASE_PATH": "/tmp/retain.db", "HTTP_ADDR": "127.0.0.1:9090", "PUBLIC_ORIGIN": "https://retain.example.test"},
 			wantPath:    "/tmp/retain.db",
 			wantAddr:    "127.0.0.1:9090",
+			wantOrigin:  "https://retain.example.test",
 		},
 		{
 			name:        "blank database path",
@@ -33,6 +36,46 @@ func TestLoad(t *testing.T) {
 			name:        "blank HTTP address",
 			environment: map[string]string{"HTTP_ADDR": "  "},
 			wantErr:     "HTTP_ADDR must not be blank",
+		},
+		{
+			name:        "blank public origin",
+			environment: map[string]string{"PUBLIC_ORIGIN": "  "},
+			wantErr:     "PUBLIC_ORIGIN must be an absolute HTTP(S) origin",
+		},
+		{
+			name:        "relative public origin",
+			environment: map[string]string{"PUBLIC_ORIGIN": "/app"},
+			wantErr:     "PUBLIC_ORIGIN must be an absolute HTTP(S) origin",
+		},
+		{
+			name:        "unsupported public origin scheme",
+			environment: map[string]string{"PUBLIC_ORIGIN": "ftp://retain.example.test"},
+			wantErr:     "PUBLIC_ORIGIN must be an absolute HTTP(S) origin",
+		},
+		{
+			name:        "public origin with userinfo",
+			environment: map[string]string{"PUBLIC_ORIGIN": "https://user@retain.example.test"},
+			wantErr:     "PUBLIC_ORIGIN must be an absolute HTTP(S) origin",
+		},
+		{
+			name:        "public origin with path",
+			environment: map[string]string{"PUBLIC_ORIGIN": "https://retain.example.test/"},
+			wantErr:     "PUBLIC_ORIGIN must be an absolute HTTP(S) origin",
+		},
+		{
+			name:        "public origin with query",
+			environment: map[string]string{"PUBLIC_ORIGIN": "https://retain.example.test?x=1"},
+			wantErr:     "PUBLIC_ORIGIN must be an absolute HTTP(S) origin",
+		},
+		{
+			name:        "public origin with fragment",
+			environment: map[string]string{"PUBLIC_ORIGIN": "https://retain.example.test#"},
+			wantErr:     "PUBLIC_ORIGIN must be an absolute HTTP(S) origin",
+		},
+		{
+			name:        "public origin with invalid port",
+			environment: map[string]string{"PUBLIC_ORIGIN": "https://retain.example.test:70000"},
+			wantErr:     "PUBLIC_ORIGIN must be an absolute HTTP(S) origin",
 		},
 	}
 
@@ -53,6 +96,9 @@ func TestLoad(t *testing.T) {
 			}
 			if got.HTTPAddr != tt.wantAddr {
 				t.Errorf("HTTPAddr = %q, want %q", got.HTTPAddr, tt.wantAddr)
+			}
+			if got.PublicOrigin != tt.wantOrigin {
+				t.Errorf("PublicOrigin = %q, want %q", got.PublicOrigin, tt.wantOrigin)
 			}
 		})
 	}

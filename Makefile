@@ -9,7 +9,7 @@ help: ## Show available targets
 	@awk 'BEGIN { FS = ":.*##"; print "Available targets:" } /^[a-zA-Z0-9_-]+:.*##/ { printf "  %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 dev: web/node_modules ## Run the Go server and Vite dev server; stop both on exit
-	setsid go run ./cmd/retain &
+	PUBLIC_ORIGIN=http://localhost:5173 setsid go run ./cmd/retain &
 	backend_pid=$$!
 	setsid npm --prefix web run dev -- --host 127.0.0.1 &
 	frontend_pid=$$!

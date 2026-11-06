@@ -6,15 +6,18 @@ import (
 	"strings"
 
 	"github.com/caarlos0/env/v11"
+	"github.com/pestit/retain/internal/origin"
 )
 
 const defaultDatabasePath = "data/retain.db"
 const defaultHTTPAddr = ":8080"
+const defaultPublicOrigin = "http://localhost:8080"
 
 // Config contains the settings required to bootstrap the backend.
 type Config struct {
 	DatabasePath string `env:"DATABASE_PATH" envDefault:"data/retain.db"`
 	HTTPAddr     string `env:"HTTP_ADDR" envDefault:":8080"`
+	PublicOrigin string `env:"PUBLIC_ORIGIN" envDefault:"http://localhost:8080"`
 }
 
 // Load reads and validates backend settings from the process environment.
@@ -32,6 +35,9 @@ func load(environment map[string]string) (Config, error) {
 	}
 	if strings.TrimSpace(cfg.HTTPAddr) == "" {
 		return Config{}, fmt.Errorf("validate configuration: HTTP_ADDR must not be blank")
+	}
+	if _, err := origin.Parse(cfg.PublicOrigin); err != nil {
+		return Config{}, fmt.Errorf("validate configuration: PUBLIC_ORIGIN must be an absolute HTTP(S) origin without userinfo, path, query, or fragment: %w", err)
 	}
 
 	return cfg, nil
