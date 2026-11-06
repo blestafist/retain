@@ -1,0 +1,85 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 20rem;
+  min-height: 100vh;
+  margin: 0;
+  background: Canvas;
+  color: CanvasText;
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  padding: 0 clamp(1.25rem, 5vw, 4rem);
+}
+
+.app-header {
+  display: flex;
+  min-height: 4.5rem;
+  align-items: center;
+  border-bottom: 1px solid currentColor;
+}
+
+.app-name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.main-content {
+  display: flex;
+  width: min(100%, 42rem);
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  align-self: center;
+  padding-block: 4rem;
+}
+
+.main-content h1 {
+  max-width: 16ch;
+  margin: 0;
+  font-size: clamp(2.25rem, 8vw, 4rem);
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+.placeholder-description {
+  max-width: 42ch;
+  margin-block: 1.5rem 0;
+  font-size: 1.125rem;
+  line-height: 1.6;
+}
+
+.skip-link {
+  position: absolute;
+  z-index: 1;
+  top: 0.75rem;
+  left: 0.75rem;
+  min-height: 3rem;
+  padding: 0.75rem 1rem;
+  transform: translateY(-160%);
+  border: 2px solid currentColor;
+  background: Canvas;
+  color: CanvasText;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: 3px solid Highlight;
+  outline-offset: 3px;
+}
