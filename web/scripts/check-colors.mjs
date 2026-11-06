@@ -7,7 +7,7 @@ import ts from 'typescript';
 import postcss from 'postcss';
 
 const namedColors = new Set(('aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen').split(' '));
-const colorProperty = /^(?:color|background(?:-color)?|border(?:-(?:top|right|bottom|left|block|inline))?(?:-color)?|outline(?:-color)?|fill|stroke|stop-color|flood-color|lighting-color|text-decoration(?:-color)?|box-shadow|text-shadow|caret-color|accent-color)$/i;
+const colorProperty = /^(?:color|background(?:-color|-image)?|border(?:-(?:top|right|bottom|left|block|inline))?(?:-color|-image|-image-source)?|mask(?:-image)?|outline(?:-color)?|fill|stroke|stop-color|flood-color|lighting-color|text-decoration(?:-color)?|box-shadow|text-shadow|caret-color|accent-color)$/i;
 const paletteClass = /^(?:bg|text|border|outline|ring|fill|stroke|decoration|shadow|from|via|to|accent|caret|divide|placeholder)-(?:white|black|slate|gray|grey|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)(?:$|[-/])/i;
 const colorUtility = /^(?:bg|text|border|outline|ring|fill|stroke|decoration|shadow|from|via|to|accent|caret|divide|placeholder)-\[(.*)\]$/i;
 
@@ -42,39 +42,69 @@ export function violations(text, filename = 'fixture.tsx') {
     return found;
   }
   const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, true, filename.endsWith('.jsx') ? ts.ScriptKind.JSX : ts.ScriptKind.TSX);
-  const variables = new Map();
-  function collect(node) {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) variables.set(node.name.text, node.initializer);
-    ts.forEachChild(node, collect);
+  // Resolve only local const bindings, respecting enclosing blocks and parameters.
+  function resolve(identifier) {
+    const name = identifier.text;
+    for (let scope = identifier.parent; scope; scope = scope.parent) {
+      if (ts.isFunctionLike(scope) && scope.parameters.some((p) => ts.isIdentifier(p.name) && p.name.text === name)) return;
+      if (!ts.isSourceFile(scope) && !ts.isBlock(scope)) continue;
+      for (const statement of scope.statements) {
+        if (!ts.isVariableStatement(statement)) continue;
+        for (const declaration of statement.declarationList.declarations) {
+          if (ts.isIdentifier(declaration.name) && declaration.name.text === name) {
+            return statement.declarationList.flags & ts.NodeFlags.Const ? declaration.initializer : undefined;
+          }
+        }
+      }
+    }
   }
-  collect(source);
   function inspectExpression(node, callback, seen = new Set()) {
     if (!node) return;
-    if (ts.isIdentifier(node) && variables.has(node.text) && !seen.has(node.text)) {
-      seen.add(node.text);
-      inspectExpression(variables.get(node.text), callback, seen);
+    if (ts.isIdentifier(node)) {
+      const binding = resolve(node);
+      if (binding && !seen.has(binding)) {
+        seen.add(binding);
+        inspectExpression(binding, callback, seen);
+        seen.delete(binding);
+      }
     } else if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) callback(node.text);
     else if (ts.isTemplateExpression(node)) {
       callback(node.head.text);
       for (const span of node.templateSpans) { inspectExpression(span.expression, callback, seen); callback(span.literal.text); }
     } else ts.forEachChild(node, (child) => inspectExpression(child, callback, seen));
   }
-  function inspectStyle(node, seen = new Set()) {
-    if (ts.isIdentifier(node) && variables.has(node.text) && !seen.has(node.text)) {
-      seen.add(node.text);
-      inspectStyle(variables.get(node.text), seen);
-    } else if (ts.isPropertyAssignment(node)) {
-      const name = node.name.getText(source).replace(/^['"]|['"]$/g, '');
-      inspectExpression(node.initializer, (value) => { if (hasColor(value, propertyName(name))) found.push(`${name}: ${value}`); });
-    } else ts.forEachChild(node, (child) => inspectStyle(child, seen));
+  function inspectObject(node, kind, seen = new Set()) {
+    if (!node) return;
+    if (ts.isJsxExpression(node) || ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isNonNullExpression(node)) {
+      inspectObject(node.expression, kind, seen);
+    } else if (ts.isIdentifier(node)) {
+      const binding = resolve(node);
+      if (binding && !seen.has(binding)) {
+        seen.add(binding);
+        inspectObject(binding, kind, seen);
+        seen.delete(binding);
+      }
+    } else if (ts.isObjectLiteralExpression(node)) {
+      for (const property of node.properties) {
+        if (ts.isSpreadAssignment(property)) inspectObject(property.expression, kind, seen);
+        else if (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) {
+          if (!ts.isIdentifier(property.name) && !ts.isStringLiteral(property.name)) continue;
+          const name = property.name.text;
+          const value = ts.isPropertyAssignment(property) ? property.initializer : property.name;
+          if (kind === 'props' && name === 'style') inspectObject(value, 'style', seen);
+          else if (kind === 'props' && (name === 'className' || name === 'class')) inspectExpression(value, (text) => found.push(...classViolations(text)));
+          else if (colorProperty.test(propertyName(name))) inspectExpression(value, (text) => { if (hasColor(text, propertyName(name))) found.push(`${name}: ${text}`); });
+        }
+      }
+    }
   }
   function visit(node) {
     if (ts.isJsxAttribute(node) && node.initializer) {
       const name = node.name.getText(source);
       if (name === 'className' || name === 'class') inspectExpression(node.initializer, (value) => found.push(...classViolations(value)));
-      else if (name === 'style') inspectStyle(node.initializer);
+      else if (name === 'style') inspectObject(node.initializer, 'style');
       else if (colorProperty.test(propertyName(name))) inspectExpression(node.initializer, (value) => { if (hasColor(value, propertyName(name))) found.push(`${name}: ${value}`); });
-    }
+    } else if (ts.isJsxSpreadAttribute(node)) inspectObject(node.expression, 'props');
     ts.forEachChild(node, visit);
   }
   visit(source);
