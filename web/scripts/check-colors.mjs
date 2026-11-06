@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 export function violations(text) {
   const patterns = [
     /#[\da-f]{3,8}\b/gi,
+    /\b(?:color|background(?:-color)?|border-color|outline-color|fill|stroke)\s*:\s*(?!var\(--md-sys-color-|none\b|currentColor\b|inherit\b)[a-z]+\b/gi,
     /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\s*\(/gi,
     /(?:^|[\s"'`:{])(?:[\w-]+:)*(?:bg|text|border|outline|ring|fill|stroke|decoration|shadow|from|via|to|accent|caret|divide|placeholder)-(?:white|black|transparent|current|inherit|slate|gray|grey|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)(?:[-/\d\w]*)/gm,
     /(?:bg|text|border|outline|ring|fill|stroke)-\[(?!var\(--md-sys-color-)[^\]]+\]/g,
