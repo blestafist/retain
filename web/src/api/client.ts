@@ -70,6 +70,56 @@ function parseBody(text: string): unknown {
   }
 }
 
+function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(text) as unknown };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function isJsonContentType(contentType: string | null): boolean {
+  const mediaType = contentType?.split(';', 1)[0]?.trim().toLowerCase();
+  return mediaType === 'application/json'
+    || (mediaType?.startsWith('application/') === true && mediaType.endsWith('+json'));
+}
+
+function isUserSettings(value: unknown): value is UserSettings {
+  if (!isRecord(value)) return false;
+
+  return typeof value.new_per_day === 'number'
+    && typeof value.max_reviews_per_day === 'number'
+    && typeof value.request_retention === 'number'
+    && typeof value.maximum_interval === 'number'
+    && typeof value.learning_steps === 'string'
+    && typeof value.relearning_steps === 'string'
+    && (value.fsrs_weights === null
+      || (Array.isArray(value.fsrs_weights) && value.fsrs_weights.every((weight) => typeof weight === 'number')))
+    && typeof value.timezone === 'string'
+    && typeof value.day_start_hour === 'number'
+    && (typeof value.reminder_time === 'string' || value.reminder_time === null)
+    && typeof value.tts_auto === 'boolean'
+    && (value.theme_mode === 'light' || value.theme_mode === 'dark' || value.theme_mode === 'system')
+    && typeof value.theme_seed === 'string'
+    && typeof value.theme_variant === 'string'
+    && typeof value.theme_contrast === 'number';
+}
+
+function isMeResponse(value: unknown): value is MeResponse {
+  if (!isRecord(value) || !isRecord(value.user)) return false;
+
+  const { user } = value;
+  return typeof user.id === 'number'
+    && typeof user.email === 'string'
+    && typeof user.name === 'string'
+    && (user.is_admin === undefined || typeof user.is_admin === 'boolean')
+    && isUserSettings(value.settings);
+}
+
+function invalidResponseError(status: number): ApiError {
+  return new ApiError(status, 'invalid_response');
+}
+
 function errorFromResponse(status: number, statusText: string, body: unknown): ApiError {
   if (isRecord(body) && isRecord(body.error)) {
     const { code, message } = body.error;
@@ -86,7 +136,11 @@ function errorFromResponse(status: number, statusText: string, body: unknown): A
   return new ApiError(status, 'request_failed', serverMessage || statusText || undefined);
 }
 
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+async function request<T>(
+  path: string,
+  options: RequestOptions = {},
+  validateResponse?: (body: unknown) => body is T,
+): Promise<T> {
   const headers = new Headers(options.headers);
   headers.set('Accept', 'application/json');
   if (options.body !== undefined) headers.set('Content-Type', 'application/json');
@@ -98,11 +152,25 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
   const text = await response.text();
-  const body = parseBody(text);
 
-  if (!response.ok) throw errorFromResponse(response.status, response.statusText, body);
-  if (response.status === 204 || !text) return undefined as T;
-  return body as T;
+  if (!response.ok) throw errorFromResponse(response.status, response.statusText, parseBody(text));
+  if (response.status === 204) {
+    if (validateResponse && !validateResponse(undefined)) throw invalidResponseError(response.status);
+    return undefined as T;
+  }
+  if (!text) {
+    if (validateResponse && !validateResponse(undefined)) throw invalidResponseError(response.status);
+    return undefined as T;
+  }
+  if (!isJsonContentType(response.headers.get('content-type'))) {
+    throw invalidResponseError(response.status);
+  }
+
+  const parsed = parseJson(text);
+  if (!parsed.ok || (validateResponse && !validateResponse(parsed.value))) {
+    throw invalidResponseError(response.status);
+  }
+  return parsed.value as T;
 }
 
 export interface RegisterRequest {
@@ -130,7 +198,7 @@ export function logout(): Promise<void> {
 }
 
 export function getMe(): Promise<MeResponse> {
-  return request('/me');
+  return request('/me', {}, isMeResponse);
 }
 
 export function patchMeSettings(settings: UserSettingsPatch): Promise<UserSettings> {

@@ -6,6 +6,14 @@ export default defineConfig({
   build: {
     outDir: 'dist/generated',
   },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: false,
+      },
+    },
+  },
   test: {
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     server: {
