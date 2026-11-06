@@ -9,7 +9,7 @@ describe('UI primitives', () => {
     expect(html).toContain('aria-label="Progress"');
   });
   it('marks selection and navigation current page', () => {
-    const group = renderToStaticMarkup(<ConnectedButtonGroup label="sessionActions" selected="good" actions={[{ id: 'good', label: 'good', onSelect() {} }]} />);
+    const group = renderToStaticMarkup(<ConnectedButtonGroup label="sessionActions" selected="good" actions={[{ id: 'good', label: 'good', rating: 'good', onSelect() {} }]} />);
     expect(group).toContain('aria-pressed="true"');
     const nav = renderToStaticMarkup(<Navigation current="study" items={[{ id: 'study', label: 'study', href: '/study', icon: null }]} />);
     expect(nav).toContain('aria-current="page"');
