@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Retain v1 exchange format",
+  "type": "object",
+  "properties": {
+    "format": { "const": "retain/v1" },
+    "source": { "type": "string" },
+    "decks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/deck" }
+    }
+  },
+  "required": ["format"],
+  "additionalProperties": false,
+  "$defs": {
+    "deck": {
+      "type": "object",
+      "properties": {
+        "external_id": { "type": "string" },
+        "name": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "lang_target": { "enum": ["de", "en"] },
+        "lang_native": { "enum": ["pl", "ru"] },
+        "expected_count": { "type": "integer", "minimum": 0 },
+        "decks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/deck" }
+        },
+        "notes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/note" }
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "note": {
+      "type": "object",
+      "properties": {
+        "external_id": { "type": "string" },
+        "term": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "translation": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "transcription": { "type": "string" },
+        "example": { "type": "string" },
+        "example_translation": { "type": "string" },
+        "notes": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "alternatives": { "type": "array", "items": { "type": "string" } },
+        "fields": { "type": "object", "additionalProperties": true }
+      },
+      "required": ["term", "translation"],
+      "additionalProperties": false
+    }
+  }
+}
