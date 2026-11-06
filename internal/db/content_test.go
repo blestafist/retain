@@ -467,6 +467,100 @@ func TestContentQueriesCRUDAndOwnerScope(t *testing.T) {
 	}
 }
 
+func TestHardDeleteUserCascadesNestedContent(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+	queries := database.Queries()
+	owner := createTestUser(t, queries, "hard-delete-owner@example.com", false)
+	other := createTestUser(t, queries, "hard-delete-other@example.com", false)
+
+	root := createContentDeck(t, queries, owner.ID, "Root", sql.NullInt64{})
+	child := createContentDeck(t, queries, owner.ID, "Child", sql.NullInt64{Int64: root.ID, Valid: true})
+	grandchild := createContentDeck(t, queries, owner.ID, "Grandchild", sql.NullInt64{Int64: child.ID, Valid: true})
+	decks := []gen.Deck{root, child, grandchild}
+	terms := []string{"root term", "child term", "grandchild term"}
+	notes := make([]gen.Note, 0, len(decks))
+	cards := make([]gen.Card, 0, len(decks))
+	for index, deck := range decks {
+		note := createContentNote(t, queries, owner.ID, deck.ID, terms[index], terms[index], "")
+		card, err := queries.CreateCard(ctx, gen.CreateCardParams{NoteID: note.ID, UserID: owner.ID, Direction: "forward"})
+		if err != nil {
+			t.Fatalf("CreateCard(deck %d) error = %v", deck.ID, err)
+		}
+		notes = append(notes, note)
+		cards = append(cards, card)
+	}
+
+	otherDeck := createContentDeck(t, queries, other.ID, "Other owner's deck", sql.NullInt64{})
+	otherNote := createContentNote(t, queries, other.ID, otherDeck.ID, "other term", "other term", "")
+	otherCard, err := queries.CreateCard(ctx, gen.CreateCardParams{NoteID: otherNote.ID, UserID: other.ID, Direction: "forward"})
+	if err != nil {
+		t.Fatalf("CreateCard(other owner) error = %v", err)
+	}
+
+	if _, err := queries.SoftDeleteDeck(ctx, gen.SoftDeleteDeckParams{ID: root.ID, OwnerID: other.ID}); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("SoftDeleteDeck(other owner) error = %v, want sql.ErrNoRows", err)
+	}
+	if got, err := queries.ListDecksByOwner(ctx, owner.ID); err != nil || len(got) != len(decks) {
+		t.Fatalf("ListDecksByOwner(after rejected cross-owner delete) = %d, %v; want %d", len(got), err, len(decks))
+	}
+
+	if _, err := database.SQL.ExecContext(ctx, "DELETE FROM users WHERE id = ?", owner.ID); err != nil {
+		t.Fatalf("delete user with nested decks, notes, and cards: %v", err)
+	}
+	if _, err := queries.GetUserByID(ctx, owner.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("GetUserByID(deleted user) error = %v, want sql.ErrNoRows", err)
+	}
+
+	for _, item := range []struct {
+		table string
+		ids   []int64
+	}{
+		{table: "decks", ids: []int64{root.ID, child.ID, grandchild.ID}},
+		{table: "notes", ids: []int64{notes[0].ID, notes[1].ID, notes[2].ID}},
+		{table: "cards", ids: []int64{cards[0].ID, cards[1].ID, cards[2].ID}},
+	} {
+		for _, id := range item.ids {
+			var count int
+			if err := database.SQL.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+item.table+" WHERE id = ?", id).Scan(&count); err != nil {
+				t.Fatalf("count deleted %s row %d: %v", item.table, id, err)
+			}
+			if count != 0 {
+				t.Errorf("%s row %d remains after deleting its owner", item.table, id)
+			}
+		}
+	}
+
+	rows, err := database.SQL.QueryContext(ctx, "PRAGMA foreign_key_check")
+	if err != nil {
+		t.Fatalf("PRAGMA foreign_key_check: %v", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var table string
+		var rowID sql.NullInt64
+		var parent string
+		var foreignKeyID int
+		if err := rows.Scan(&table, &rowID, &parent, &foreignKeyID); err != nil {
+			t.Fatalf("scan foreign key violation: %v", err)
+		}
+		t.Errorf("foreign key violation after hard delete: table=%s row=%+v parent=%s fk=%d", table, rowID, parent, foreignKeyID)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate foreign_key_check: %v", err)
+	}
+
+	if got, err := queries.GetDeck(ctx, gen.GetDeckParams{ID: otherDeck.ID, OwnerID: other.ID}); err != nil || got.ID != otherDeck.ID {
+		t.Errorf("GetDeck(other owner's deck after delete) = %+v, %v", got, err)
+	}
+	if got, err := queries.GetNote(ctx, gen.GetNoteParams{ID: otherNote.ID, OwnerID: other.ID}); err != nil || got.ID != otherNote.ID {
+		t.Errorf("GetNote(other owner's note after delete) = %+v, %v", got, err)
+	}
+	if got, err := queries.GetCard(ctx, gen.GetCardParams{ID: otherCard.ID, UserID: other.ID}); err != nil || got.ID != otherCard.ID {
+		t.Errorf("GetCard(other owner's card after delete) = %+v, %v", got, err)
+	}
+}
+
 func TestContentCascadeRestorePreservesProgressAndIndependentDeletes(t *testing.T) {
 	database := openTestDB(t)
 	ctx := context.Background()
