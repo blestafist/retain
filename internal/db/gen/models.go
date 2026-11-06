@@ -3,3 +3,52 @@
 //   sqlc v1.28.0
 
 package gen
+
+import (
+	"database/sql"
+	"time"
+)
+
+type Invite struct {
+	Code      string
+	CreatedBy int64
+	UsedBy    sql.NullInt64
+	ExpiresAt time.Time
+	CreatedAt time.Time
+}
+
+type Session struct {
+	TokenHash []byte
+	UserID    int64
+	ExpiresAt time.Time
+	UserAgent sql.NullString
+	CreatedAt time.Time
+}
+
+type User struct {
+	ID           int64
+	Email        string
+	Name         string
+	PasswordHash string
+	IsAdmin      bool
+	CreatedAt    time.Time
+}
+
+type UserSetting struct {
+	UserID           int64
+	NewPerDay        int64
+	MaxReviewsPerDay int64
+	RequestRetention float64
+	MaximumInterval  int64
+	LearningSteps    string
+	RelearningSteps  string
+	FsrsWeights      sql.NullString
+	Timezone         string
+	DayStartHour     int64
+	ReminderTime     sql.NullString
+	TtsAuto          bool
+	ThemeMode        string
+	ThemeSeed        string
+	ThemeVariant     string
+	ThemeContrast    float64
+}
