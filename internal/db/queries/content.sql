@@ -137,16 +137,7 @@ WHERE id = (
                 AND parent.deleted_at IS NULL
           )
       )
-    ORDER BY candidate.updated_at DESC, candidate.id DESC
-    LIMIT 1
 )
-  AND NOT EXISTS (
-      SELECT 1 FROM decks AS active
-      WHERE active.owner_id = decks.owner_id
-        AND active.source = decks.source
-        AND active.external_id = decks.external_id
-        AND active.deleted_at IS NULL
-  )
 RETURNING *;
 
 -- name: CreateImportBatch :one
@@ -306,21 +297,7 @@ WHERE id = (
       AND candidate.external_id = sqlc.arg(external_id)
       AND candidate.deleted_at IS NOT NULL
       AND candidate.deletion_batch IS NOT NULL
-    ORDER BY candidate.updated_at DESC, candidate.id DESC
-    LIMIT 1
 )
-  AND NOT EXISTS (
-      SELECT 1 FROM notes AS active
-      WHERE active.deck_id = notes.deck_id
-        AND active.deleted_at IS NULL
-        AND active.external_id = notes.external_id
-  )
-  AND NOT EXISTS (
-      SELECT 1 FROM notes AS active
-      WHERE active.deck_id = notes.deck_id
-        AND active.deleted_at IS NULL
-        AND active.term_key = notes.term_key
-  )
 RETURNING *;
 
 -- name: GetNoteByTermKey :one
@@ -357,22 +334,7 @@ WHERE id = (
       AND candidate.term_key = sqlc.arg(term_key)
       AND candidate.deleted_at IS NOT NULL
       AND candidate.deletion_batch IS NOT NULL
-    ORDER BY candidate.updated_at DESC, candidate.id DESC
-    LIMIT 1
 )
-  AND NOT EXISTS (
-      SELECT 1 FROM notes AS active
-      WHERE active.deck_id = notes.deck_id
-        AND active.deleted_at IS NULL
-        AND active.term_key = notes.term_key
-  )
-  AND NOT EXISTS (
-      SELECT 1 FROM notes AS active
-      WHERE active.deck_id = notes.deck_id
-        AND active.deleted_at IS NULL
-        AND active.external_id = notes.external_id
-        AND notes.external_id IS NOT NULL
-  )
 RETURNING *;
 
 -- name: CreateCard :one

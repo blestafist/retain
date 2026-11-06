@@ -477,8 +477,9 @@ func TestHardDeleteUserCascadesNestedContent(t *testing.T) {
 	root := createContentDeck(t, queries, owner.ID, "Root", sql.NullInt64{})
 	child := createContentDeck(t, queries, owner.ID, "Child", sql.NullInt64{Int64: root.ID, Valid: true})
 	grandchild := createContentDeck(t, queries, owner.ID, "Grandchild", sql.NullInt64{Int64: child.ID, Valid: true})
-	decks := []gen.Deck{root, child, grandchild}
-	terms := []string{"root term", "child term", "grandchild term"}
+	greatGrandchild := createContentDeck(t, queries, owner.ID, "Great-grandchild", sql.NullInt64{Int64: grandchild.ID, Valid: true})
+	decks := []gen.Deck{root, child, grandchild, greatGrandchild}
+	terms := []string{"root term", "child term", "grandchild term", "great-grandchild term"}
 	notes := make([]gen.Note, 0, len(decks))
 	cards := make([]gen.Card, 0, len(decks))
 	for index, deck := range decks {
@@ -516,9 +517,9 @@ func TestHardDeleteUserCascadesNestedContent(t *testing.T) {
 		table string
 		ids   []int64
 	}{
-		{table: "decks", ids: []int64{root.ID, child.ID, grandchild.ID}},
-		{table: "notes", ids: []int64{notes[0].ID, notes[1].ID, notes[2].ID}},
-		{table: "cards", ids: []int64{cards[0].ID, cards[1].ID, cards[2].ID}},
+		{table: "decks", ids: []int64{root.ID, child.ID, grandchild.ID, greatGrandchild.ID}},
+		{table: "notes", ids: []int64{notes[0].ID, notes[1].ID, notes[2].ID, notes[3].ID}},
+		{table: "cards", ids: []int64{cards[0].ID, cards[1].ID, cards[2].ID, cards[3].ID}},
 	} {
 		for _, id := range item.ids {
 			var count int
@@ -769,11 +770,11 @@ func TestContentCascadeRestorePreservesProgressAndIndependentDeletes(t *testing.
 	}
 }
 
-func TestContentDeletedImportKeysCanBeReusedWithoutDuplicateRestore(t *testing.T) {
+func TestContentDeletedImportKeysRemainReservedAndRestoreSameRows(t *testing.T) {
 	database := openTestDB(t)
 	ctx := context.Background()
 	queries := database.Queries()
-	owner := createTestUser(t, queries, "identity-reuse-owner@example.com", false)
+	owner := createTestUser(t, queries, "identity-reserved-owner@example.com", false)
 
 	oldDeck := createIdentifiedContentDeck(t, queries, owner.ID, "Old imported deck", sql.NullInt64{}, "school", "reused-deck-id")
 	deletedAt := contentTime(5)
@@ -782,59 +783,70 @@ func TestContentDeletedImportKeysCanBeReusedWithoutDuplicateRestore(t *testing.T
 	}); err != nil {
 		t.Fatalf("SoftDeleteDeck() error = %v", err)
 	}
-	newDeck := createIdentifiedContentDeck(t, queries, owner.ID, "Replacement imported deck", sql.NullInt64{}, "school", "reused-deck-id")
-	if newDeck.ID == oldDeck.ID {
-		t.Fatalf("replacement deck reused deleted row id %d instead of creating a separate active row", newDeck.ID)
+	if _, err := queries.CreateDeck(ctx, gen.CreateDeckParams{
+		OwnerID: owner.ID, Name: "Replacement imported deck", WrongArticleRating: 2,
+		Source: sql.NullString{String: "school", Valid: true}, ExternalID: sql.NullString{String: "reused-deck-id", Valid: true},
+	}); err == nil {
+		t.Fatal("CreateDeck reused a soft-deleted identity, want full unique constraint error")
 	}
-	if _, err := queries.RestoreDeckBySourceExternalID(ctx, gen.RestoreDeckBySourceExternalIDParams{
+	restoredDeck, err := queries.RestoreDeckBySourceExternalID(ctx, gen.RestoreDeckBySourceExternalIDParams{
 		UpdatedAt: contentTime(6), OwnerID: owner.ID,
 		Source: sql.NullString{String: "school", Valid: true}, ExternalID: sql.NullString{String: "reused-deck-id", Valid: true},
-	}); !errors.Is(err, sql.ErrNoRows) {
-		t.Errorf("RestoreDeckBySourceExternalID(with active replacement) error = %v, want sql.ErrNoRows", err)
+	})
+	if err != nil || restoredDeck.ID != oldDeck.ID || restoredDeck.DeletedAt.Valid || restoredDeck.DeletionBatch.Valid {
+		t.Fatalf("RestoreDeckBySourceExternalID() = %+v, %v; want original deck %d", restoredDeck, err, oldDeck.ID)
 	}
 	if got, err := queries.GetDeckBySourceExternalID(ctx, gen.GetDeckBySourceExternalIDParams{
 		OwnerID: owner.ID, Source: sql.NullString{String: "school", Valid: true}, ExternalID: sql.NullString{String: "reused-deck-id", Valid: true},
-	}); err != nil || got.ID != newDeck.ID {
-		t.Fatalf("GetDeckBySourceExternalID() = %+v, %v; want replacement %d", got, err, newDeck.ID)
+	}); err != nil || got.ID != oldDeck.ID {
+		t.Fatalf("GetDeckBySourceExternalID() = %+v, %v; want original %d", got, err, oldDeck.ID)
 	}
 
-	oldNote := createContentNote(t, queries, owner.ID, newDeck.ID, "same term", "same term key", "reused-note-id")
+	oldNote := createContentNote(t, queries, owner.ID, oldDeck.ID, "same term", "same term key", "reused-note-id")
+	card, err := queries.CreateCard(ctx, gen.CreateCardParams{NoteID: oldNote.ID, UserID: owner.ID, Direction: "forward"})
+	if err != nil {
+		t.Fatalf("CreateCard() error = %v", err)
+	}
+	progress := setContentCardProgress(t, database, card.ID, 4)
 	deletedAt = contentTime(7)
 	if _, err := queries.SoftDeleteNote(ctx, gen.SoftDeleteNoteParams{
 		DeletedAt: sql.NullTime{Time: deletedAt, Valid: true}, UpdatedAt: deletedAt, ID: oldNote.ID, OwnerID: owner.ID,
 	}); err != nil {
 		t.Fatalf("SoftDeleteNote() error = %v", err)
 	}
-	newNote := createContentNote(t, queries, owner.ID, newDeck.ID, "replacement term", "same term key", "reused-note-id")
-	if newNote.ID == oldNote.ID {
-		t.Fatalf("replacement note reused deleted row id %d instead of creating a separate active row", newNote.ID)
+	if _, err := database.SQL.ExecContext(ctx, `
+		INSERT INTO notes (deck_id, term, term_key, translation, external_id)
+		VALUES (?, 'replacement term', 'same term key', 'replacement', 'reused-note-id')`, oldDeck.ID); err == nil {
+		t.Fatal("CreateNote reused soft-deleted identities, want full unique constraint error")
 	}
-	if _, err := queries.RestoreNoteByExternalID(ctx, gen.RestoreNoteByExternalIDParams{
-		UpdatedAt: contentTime(8), DeckID: newDeck.ID, OwnerID: owner.ID,
+	restoredNote, err := queries.RestoreNoteByExternalID(ctx, gen.RestoreNoteByExternalIDParams{
+		UpdatedAt: contentTime(8), DeckID: oldDeck.ID, OwnerID: owner.ID,
 		ExternalID: sql.NullString{String: "reused-note-id", Valid: true},
-	}); !errors.Is(err, sql.ErrNoRows) {
-		t.Errorf("RestoreNoteByExternalID(with active replacement) error = %v, want sql.ErrNoRows", err)
+	})
+	if err != nil || restoredNote.ID != oldNote.ID || restoredNote.DeletedAt.Valid || restoredNote.DeletionBatch.Valid {
+		t.Fatalf("RestoreNoteByExternalID() = %+v, %v; want original note %d", restoredNote, err, oldNote.ID)
 	}
 	if got, err := queries.GetNoteByExternalID(ctx, gen.GetNoteByExternalIDParams{
-		DeckID: newDeck.ID, OwnerID: owner.ID, ExternalID: sql.NullString{String: "reused-note-id", Valid: true},
-	}); err != nil || got.ID != newNote.ID {
-		t.Fatalf("GetNoteByExternalID() = %+v, %v; want replacement %d", got, err, newNote.ID)
+		DeckID: oldDeck.ID, OwnerID: owner.ID, ExternalID: sql.NullString{String: "reused-note-id", Valid: true},
+	}); err != nil || got.ID != oldNote.ID {
+		t.Fatalf("GetNoteByExternalID() = %+v, %v; want original %d", got, err, oldNote.ID)
 	}
 	if got, err := queries.GetNoteByTermKey(ctx, gen.GetNoteByTermKeyParams{
-		DeckID: newDeck.ID, OwnerID: owner.ID, TermKey: "same term key",
-	}); err != nil || got.ID != newNote.ID {
-		t.Fatalf("GetNoteByTermKey() = %+v, %v; want replacement %d", got, err, newNote.ID)
+		DeckID: oldDeck.ID, OwnerID: owner.ID, TermKey: "same term key",
+	}); err != nil || got.ID != oldNote.ID {
+		t.Fatalf("GetNoteByTermKey() = %+v, %v; want original %d", got, err, oldNote.ID)
 	}
-	var activeNotes int
+	assertContentCardProgress(t, queries, owner.ID, card.ID, progress)
+	var matchingNotes int
 	if err := database.SQL.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM notes WHERE deck_id = ? AND deleted_at IS NULL AND external_id = ? AND term_key = ?",
-		newDeck.ID, "reused-note-id", "same term key",
-	).Scan(&activeNotes); err != nil || activeNotes != 1 {
-		t.Errorf("active matching note count = %d, %v; want exactly one", activeNotes, err)
+		"SELECT COUNT(*) FROM notes WHERE deck_id = ? AND external_id = ? AND term_key = ?",
+		oldDeck.ID, "reused-note-id", "same term key",
+	).Scan(&matchingNotes); err != nil || matchingNotes != 1 {
+		t.Errorf("matching note count = %d, %v; want exactly one", matchingNotes, err)
 	}
 }
 
-func TestContentDeckRestoreCascadeIsAtomicAndScopedToDeletionBatch(t *testing.T) {
+func TestContentDeckRestoreCascadeRollsBackAtomically(t *testing.T) {
 	database := openTestDB(t)
 	ctx := context.Background()
 	queries := database.Queries()
@@ -855,13 +867,20 @@ func TestContentDeckRestoreCascadeIsAtomicAndScopedToDeletionBatch(t *testing.T)
 		t.Fatalf("SoftDeleteDeck() error = %v", err)
 	}
 
-	conflictingRoot := createContentDeck(t, queries, owner.ID, "Independent root", sql.NullInt64{})
-	conflictingChild := createIdentifiedContentDeck(t, queries, owner.ID, "Independent matching child", sql.NullInt64{Int64: conflictingRoot.ID, Valid: true}, "school", "atomic-child")
+	if _, err := database.SQL.ExecContext(ctx, `
+		CREATE TEMP TRIGGER reject_test_child_restore
+		BEFORE UPDATE OF deleted_at ON main.decks
+		WHEN OLD.external_id = 'atomic-child' AND OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL
+		BEGIN
+			SELECT RAISE(ABORT, 'test restore failure');
+		END`); err != nil {
+		t.Fatalf("create temporary restore failure trigger: %v", err)
+	}
 	if _, err := queries.RestoreDeckBySourceExternalID(ctx, gen.RestoreDeckBySourceExternalIDParams{
 		UpdatedAt: contentTime(5), OwnerID: owner.ID,
 		Source: sql.NullString{String: "school", Valid: true}, ExternalID: sql.NullString{String: "atomic-root", Valid: true},
 	}); err == nil {
-		t.Fatal("RestoreDeckBySourceExternalID(with conflicting descendant) error = nil, want unique constraint failure")
+		t.Fatal("RestoreDeckBySourceExternalID() error = nil, want child restore failure")
 	}
 	if _, err := queries.GetDeck(ctx, gen.GetDeckParams{ID: root.ID, OwnerID: owner.ID}); !errors.Is(err, sql.ErrNoRows) {
 		t.Errorf("GetDeck(root after failed restore) error = %v, want sql.ErrNoRows", err)
@@ -895,24 +914,18 @@ func TestContentDeckRestoreCascadeIsAtomicAndScopedToDeletionBatch(t *testing.T)
 		}
 	}
 
-	if _, err := queries.SoftDeleteDeck(ctx, gen.SoftDeleteDeckParams{
-		DeletedAt: sql.NullTime{Time: contentTime(6), Valid: true}, UpdatedAt: contentTime(6),
-		ID: conflictingRoot.ID, OwnerID: owner.ID,
-	}); err != nil {
-		t.Fatalf("SoftDeleteDeck(conflicting independent subtree) error = %v", err)
+	if _, err := database.SQL.ExecContext(ctx, "DROP TRIGGER reject_test_child_restore"); err != nil {
+		t.Fatalf("drop temporary restore failure trigger: %v", err)
 	}
 	restored, err := queries.RestoreDeckBySourceExternalID(ctx, gen.RestoreDeckBySourceExternalIDParams{
-		UpdatedAt: contentTime(7), OwnerID: owner.ID,
+		UpdatedAt: contentTime(6), OwnerID: owner.ID,
 		Source: sql.NullString{String: "school", Valid: true}, ExternalID: sql.NullString{String: "atomic-root", Valid: true},
 	})
 	if err != nil || restored.ID != root.ID {
 		t.Fatalf("retry RestoreDeckBySourceExternalID() = %+v, %v; want original root", restored, err)
 	}
-	if _, err := queries.GetDeck(ctx, gen.GetDeckParams{ID: conflictingRoot.ID, OwnerID: owner.ID}); !errors.Is(err, sql.ErrNoRows) {
-		t.Errorf("GetDeck(independent root after restore) error = %v, want sql.ErrNoRows", err)
-	}
-	if _, err := queries.GetDeck(ctx, gen.GetDeckParams{ID: conflictingChild.ID, OwnerID: owner.ID}); !errors.Is(err, sql.ErrNoRows) {
-		t.Errorf("GetDeck(independent matching child after restore) error = %v, want sql.ErrNoRows", err)
+	if _, err := queries.GetDeck(ctx, gen.GetDeckParams{ID: child.ID, OwnerID: owner.ID}); err != nil {
+		t.Errorf("GetDeck(child after successful restore) error = %v", err)
 	}
 	assertContentCardProgress(t, queries, owner.ID, card.ID, progress)
 }

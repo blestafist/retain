@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/pestit/retain/internal/db/gen"
 	"github.com/pressly/goose/v3"
@@ -48,7 +49,6 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 	owner := createTestUser(t, gen.New(sqlDB), "compat-migration@example.com", false)
 	ids := seedOriginalContentRows(t, ctx, sqlDB, owner.ID)
 	wantRows := readOriginalContentRows(t, ctx, sqlDB)
-	wantVersion3Objects := readMigrationSchemaObjects(t, ctx, sqlDB)
 	if got := migrationDeckParentDeleteAction(t, ctx, sqlDB); got != "RESTRICT" {
 		t.Fatalf("version-3 decks.parent_id ON DELETE = %q, want RESTRICT", got)
 	}
@@ -73,8 +73,36 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 		fmt.Sprintf("migration-00004-deck-%d", ids.archivedDeck))
 	assertMigrationDeletionBatch(t, ctx, database.SQL, "notes", ids.archivedNote,
 		fmt.Sprintf("migration-00004-note-%d", ids.archivedNote))
-	if got := migrationDeckParentDeleteAction(t, ctx, database.SQL); got != "CASCADE" {
-		t.Fatalf("version-4 decks.parent_id ON DELETE = %q, want CASCADE", got)
+	for _, item := range []struct {
+		table string
+		id    int64
+		at    time.Time
+		batch string
+	}{
+		{"decks", ids.archivedDeck, contentTime(3), fmt.Sprintf("migration-00004-deck-%d", ids.archivedDeck)},
+		{"decks", ids.legacyChild, contentTime(3), fmt.Sprintf("migration-00004-deck-%d", ids.archivedDeck)},
+		{"decks", ids.legacyGrandchild, contentTime(3), fmt.Sprintf("migration-00004-deck-%d", ids.archivedDeck)},
+		{"decks", ids.independentDeck, contentTime(4), fmt.Sprintf("migration-00004-deck-%d", ids.independentDeck)},
+		{"decks", ids.independentChild, contentTime(4), fmt.Sprintf("migration-00004-deck-%d", ids.independentDeck)},
+		{"notes", ids.archivedNote, contentTime(6), fmt.Sprintf("migration-00004-note-%d", ids.archivedNote)},
+		{"cards", ids.archivedCard, contentTime(6), fmt.Sprintf("migration-00004-note-%d", ids.archivedNote)},
+		{"notes", ids.legacyActiveNote, contentTime(3), fmt.Sprintf("migration-00004-deck-%d", ids.archivedDeck)},
+		{"cards", ids.legacyActiveCard, contentTime(3), fmt.Sprintf("migration-00004-deck-%d", ids.archivedDeck)},
+		{"notes", ids.independentNote, contentTime(7), fmt.Sprintf("migration-00004-note-%d", ids.independentNote)},
+		{"cards", ids.independentNoteCard, contentTime(7), fmt.Sprintf("migration-00004-note-%d", ids.independentNote)},
+		{"notes", ids.independentDeckNote, contentTime(4), fmt.Sprintf("migration-00004-deck-%d", ids.independentDeck)},
+		{"cards", ids.independentDeckCard, contentTime(4), fmt.Sprintf("migration-00004-deck-%d", ids.independentDeck)},
+	} {
+		assertMigrationDeletion(t, ctx, database.SQL, item.table, item.id, item.at, item.batch)
+	}
+	for _, item := range []struct {
+		table string
+		id    int64
+	}{{"decks", ids.foreignDeck}, {"notes", ids.foreignNote}, {"cards", ids.foreignCard}} {
+		assertMigrationDeletedState(t, ctx, database.SQL, item.table, item.id, false)
+	}
+	if got := migrationDeckParentDeleteAction(t, ctx, database.SQL); got != "RESTRICT" {
+		t.Fatalf("version-4 decks.parent_id ON DELETE = %q, want RESTRICT", got)
 	}
 	assertLatestMigrationSchema(t, ctx, database.SQL)
 	assertForeignKeysEnabled(t, ctx, database.SQL)
@@ -84,7 +112,7 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 		table, column, parent, action string
 	}{
 		{"decks", "owner_id", "users", "CASCADE"},
-		{"decks", "parent_id", "decks", "CASCADE"},
+		{"decks", "parent_id", "decks", "RESTRICT"},
 		{"notes", "deck_id", "decks", "CASCADE"},
 		{"notes", "import_batch_id", "import_batches", "SET NULL"},
 		{"cards", "note_id", "notes", "CASCADE"},
@@ -92,58 +120,28 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 	} {
 		assertMigrationForeignKey(t, ctx, database.SQL, foreignKey.table, foreignKey.column, foreignKey.parent, foreignKey.action)
 	}
-	assertPartialUniqueIndex(t, ctx, database.SQL, "decks", "decks_owner_source_external_active_uq")
-	assertPartialUniqueIndex(t, ctx, database.SQL, "notes", "notes_deck_term_key_active_uq")
-	assertPartialUniqueIndex(t, ctx, database.SQL, "notes", "notes_deck_external_active_uq")
+	assertFullUniqueIndex(t, ctx, database.SQL, "decks", []string{"owner_id", "source", "external_id"})
+	assertFullUniqueIndex(t, ctx, database.SQL, "notes", []string{"deck_id", "term_key"})
+	assertFullUniqueIndex(t, ctx, database.SQL, "notes", []string{"deck_id", "external_id"})
+	assertFullUniqueIndex(t, ctx, database.SQL, "cards", []string{"note_id", "user_id", "direction"})
 
-	// The down rebuild is safe for data expressible by the original schema, and restores its exact
-	// explicit indexes. Reapplying v4 must preserve that data again.
+	// v3 cannot represent cascade ownership or card tombstones, so Down must refuse this legacy
+	// content atomically rather than discard deletion markers.
 	migrations = newEmbeddedMigrationProvider(t, database.SQL)
-	if _, err := migrations.DownTo(ctx, 3); err != nil {
-		t.Fatalf("roll back migration 4: %v", err)
-	}
-	assertMigrationVersion(t, ctx, database.SQL, 3)
-	if got := migrationDeckParentDeleteAction(t, ctx, database.SQL); got != "RESTRICT" {
-		t.Fatalf("down migration decks.parent_id ON DELETE = %q, want RESTRICT", got)
-	}
-	assertOriginalContentRowsEqual(t, ctx, database.SQL, wantRows)
-	assertMigrationSchemaObjects(t, ctx, database.SQL, wantVersion3Objects)
-	assertForeignKeysEnabled(t, ctx, database.SQL)
-	if _, err := migrations.Up(ctx); err != nil {
-		t.Fatalf("reapply migration 4: %v", err)
+	if _, err := migrations.DownTo(ctx, 3); err == nil {
+		t.Fatal("down migration with legacy tombstones succeeded, want safe refusal")
 	}
 	assertMigrationVersion(t, ctx, database.SQL, 4)
 	assertOriginalContentRowsEqual(t, ctx, database.SQL, wantRows)
+	assertLatestMigrationSchema(t, ctx, database.SQL)
 	assertMigrationDeletionBatch(t, ctx, database.SQL, "decks", ids.archivedDeck,
 		fmt.Sprintf("migration-00004-deck-%d", ids.archivedDeck))
 	assertMigrationDeletionBatch(t, ctx, database.SQL, "notes", ids.archivedNote,
 		fmt.Sprintf("migration-00004-note-%d", ids.archivedNote))
-	assertLatestMigrationSchema(t, ctx, database.SQL)
+	assertMigrationDeletion(t, ctx, database.SQL, "cards", ids.legacyActiveCard, contentTime(3),
+		fmt.Sprintf("migration-00004-deck-%d", ids.archivedDeck))
 	assertForeignKeysEnabled(t, ctx, database.SQL)
 	assertForeignKeyCheckClean(t, ctx, database.SQL)
-	// A down migration must not erase card tombstones that the original schema could not represent.
-	rollbackDeletedAt := contentTime(6)
-	if _, err := database.SQL.ExecContext(ctx,
-		"UPDATE cards SET deleted_at = ?, deletion_batch = ? WHERE id = ?",
-		rollbackDeletedAt, "rollback-must-preserve", ids.cardIDs[0],
-	); err != nil {
-		t.Fatalf("set card tombstone for down-safety check: %v", err)
-	}
-	migrations = newEmbeddedMigrationProvider(t, database.SQL)
-	if _, err := migrations.DownTo(ctx, 3); err == nil {
-		t.Fatal("down migration with a card tombstone succeeded, want safe refusal")
-	}
-	if err := cleanupFailedMigration(ctx, database.SQL); err != nil {
-		t.Fatalf("clean up refused down migration: %v", err)
-	}
-	assertMigrationVersion(t, ctx, database.SQL, 4)
-	assertMigrationDeletedState(t, ctx, database.SQL, "cards", ids.cardIDs[0], true)
-	assertForeignKeysEnabled(t, ctx, database.SQL)
-	if _, err := database.SQL.ExecContext(ctx,
-		"UPDATE cards SET deleted_at = NULL, deletion_batch = NULL WHERE id = ?", ids.cardIDs[0]); err != nil {
-		t.Fatalf("restore card after down-safety check: %v", err)
-	}
-	assertMigrationDeletedState(t, ctx, database.SQL, "cards", ids.cardIDs[0], false)
 
 	// Active identity constraints reject duplicates, while the partial indexes allow replacing a
 	// soft-deleted imported row. Deck and note cascade/restore triggers preserve FSRS state.
@@ -183,18 +181,10 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 	for _, id := range ids.cardIDs {
 		assertMigrationDeletedState(t, ctx, database.SQL, "cards", id, true)
 	}
-	replacementDeck, err := database.SQL.ExecContext(ctx, `
+	if _, err := database.SQL.ExecContext(ctx, `
 		INSERT INTO decks (owner_id, name, source, external_id)
-		VALUES (?, 'Replacement root', 'school-wordsets', 'root-1')`, owner.ID)
-	if err != nil {
-		t.Fatalf("reuse deleted deck identity: %v", err)
-	}
-	replacementDeckID, err := replacementDeck.LastInsertId()
-	if err != nil {
-		t.Fatalf("read replacement deck ID: %v", err)
-	}
-	if _, err := database.SQL.ExecContext(ctx, "DELETE FROM decks WHERE id = ?", replacementDeckID); err != nil {
-		t.Fatalf("remove replacement deck: %v", err)
+		VALUES (?, 'Replacement root', 'school-wordsets', 'root-1')`, owner.ID); err == nil {
+		t.Fatal("insert replacement for soft-deleted deck identity succeeded, want full UNIQUE error")
 	}
 	if _, err := database.SQL.ExecContext(ctx,
 		"UPDATE decks SET deleted_at = NULL, deletion_batch = NULL, updated_at = ? WHERE id = ?",
@@ -224,12 +214,8 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 	}
 	if _, err := database.SQL.ExecContext(ctx, `
 		INSERT INTO notes (deck_id, term, term_key, translation, external_id)
-		VALUES (?, 'Replacement root word', 'root word', 'replacement', 'root-word-1')`, ids.rootDeck); err != nil {
-		t.Fatalf("reuse deleted note identities: %v", err)
-	}
-	if _, err := database.SQL.ExecContext(ctx,
-		"DELETE FROM notes WHERE deck_id = ? AND term_key = ? AND deleted_at IS NULL", ids.rootDeck, "root word"); err != nil {
-		t.Fatalf("remove replacement note: %v", err)
+		VALUES (?, 'Replacement root word', 'root word', 'replacement', 'legacy-word-1')`, ids.rootDeck); err == nil {
+		t.Fatal("insert replacement for soft-deleted note identity succeeded, want full UNIQUE error")
 	}
 	if _, err := database.SQL.ExecContext(ctx,
 		"UPDATE notes SET deleted_at = NULL, deletion_batch = NULL, updated_at = ? WHERE id = ?",
@@ -241,6 +227,20 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 	assertMigrationRowsEqual(t, "FSRS state after note restore", fsrsBefore,
 		readMigrationRows(t, ctx, database.SQL, "cards",
 			"id,state,due,stability,difficulty,elapsed_days,scheduled_days,step,reps,lapses,last_review,suspended,is_leech"))
+
+	// The original v3 schema permits this logical owner mismatch. Migration normalization must not
+	// touch the foreign owner's child, and RESTRICT must roll back a hard-delete cascade that skips it.
+	if _, err := database.SQL.ExecContext(ctx, "DELETE FROM decks WHERE id = ?", ids.archivedDeck); err == nil {
+		t.Fatal("hard-delete owner deck with a cross-owner child succeeded, want FK RESTRICT failure")
+	}
+	assertMigrationDeletedState(t, ctx, database.SQL, "decks", ids.archivedDeck, true)
+	assertMigrationDeletedState(t, ctx, database.SQL, "decks", ids.legacyChild, true)
+	assertMigrationDeletedState(t, ctx, database.SQL, "decks", ids.foreignDeck, false)
+	assertMigrationDeletedState(t, ctx, database.SQL, "notes", ids.foreignNote, false)
+	assertMigrationDeletedState(t, ctx, database.SQL, "cards", ids.foreignCard, false)
+	if _, err := database.SQL.ExecContext(ctx, "DELETE FROM decks WHERE id = ?", ids.foreignDeck); err != nil {
+		t.Fatalf("remove cross-owner fixture after rollback check: %v", err)
+	}
 
 	if _, err := database.SQL.ExecContext(ctx, "DELETE FROM users WHERE id = ?", owner.ID); err != nil {
 		t.Fatalf("delete owner with nested decks, notes, cards, and import batch: %v", err)
@@ -257,7 +257,7 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 	assertForeignKeyCheckClean(t, ctx, database.SQL)
 }
 
-func TestMigrateFailureRollsBackAndRestoresForeignKeys(t *testing.T) {
+func TestMigrateFailureRollsBackAtomically(t *testing.T) {
 	ctx := context.Background()
 	dsn, _, err := dataSourceName(filepath.Join(t.TempDir(), "failed-migration.db"))
 	if err != nil {
@@ -279,13 +279,9 @@ func TestMigrateFailureRollsBackAndRestoresForeignKeys(t *testing.T) {
 	}
 
 	brokenMigrations := fstest.MapFS{
-		"00001_deliberately_broken.sql": &fstest.MapFile{Data: []byte(`-- +goose NO TRANSACTION
--- +goose Up
-PRAGMA foreign_keys = OFF;
-BEGIN IMMEDIATE;
+		"00001_deliberately_broken.sql": &fstest.MapFile{Data: []byte(`-- +goose Up
 CREATE TABLE migration_partial_ddl (id INTEGER PRIMARY KEY);
 INSERT INTO missing_migration_table VALUES (1);
-COMMIT;
 -- +goose Down
 DROP TABLE migration_partial_ddl;
 `)},
@@ -313,12 +309,26 @@ DROP TABLE migration_partial_ddl;
 }
 
 type originalContentIDs struct {
-	rootDeck     int64
-	archivedDeck int64
-	archivedNote int64
-	deckIDs      []int64
-	noteIDs      []int64
-	cardIDs      []int64
+	rootDeck                  int64
+	archivedDeck              int64
+	archivedNote              int64
+	legacyChild               int64
+	legacyGrandchild          int64
+	independentDeck            int64
+	independentChild           int64
+	legacyActiveNote           int64
+	legacyActiveCard           int64
+	independentNote            int64
+	independentNoteCard        int64
+	independentDeckNote        int64
+	independentDeckCard        int64
+	archivedCard               int64
+	foreignDeck                int64
+	foreignNote                int64
+	foreignCard                int64
+	deckIDs                    []int64
+	noteIDs                    []int64
+	cardIDs                    []int64
 }
 
 func seedOriginalContentRows(t *testing.T, ctx context.Context, database *sql.DB, ownerID int64) originalContentIDs {
@@ -360,6 +370,25 @@ func seedOriginalContentRows(t *testing.T, ctx context.Context, database *sql.DB
 		VALUES (?, 'Archived before v4', ?, ?, ?)`,
 		ownerID, contentTime(1), contentTime(2), contentTime(3),
 	)
+	legacyChild := insertID(`
+		INSERT INTO decks (owner_id, parent_id, name, created_at, updated_at)
+		VALUES (?, ?, 'Legacy active child', ?, ?)`, ownerID, archivedDeck, contentTime(3), contentTime(4))
+	legacyGrandchild := insertID(`
+		INSERT INTO decks (owner_id, parent_id, name, created_at, updated_at)
+		VALUES (?, ?, 'Legacy active grandchild', ?, ?)`, ownerID, legacyChild, contentTime(4), contentTime(5))
+	independentDeck := insertID(`
+		INSERT INTO decks (owner_id, parent_id, name, created_at, updated_at, deleted_at)
+		VALUES (?, ?, 'Independently archived child', ?, ?, ?)`,
+		ownerID, archivedDeck, contentTime(2), contentTime(3), contentTime(4))
+	independentChild := insertID(`
+		INSERT INTO decks (owner_id, parent_id, name, created_at, updated_at)
+		VALUES (?, ?, 'Descendant of independently archived child', ?, ?)`,
+		ownerID, independentDeck, contentTime(3), contentTime(4))
+	other := createTestUser(t, gen.New(database), "migration-other-owner@example.com", false)
+	foreignDeck := insertID(`
+		INSERT INTO decks (owner_id, parent_id, name, created_at, updated_at)
+		VALUES (?, ?, 'Cross-owner legacy child', ?, ?)`,
+		other.ID, archivedDeck, contentTime(3), contentTime(4))
 	batchID := "original-v3-import"
 	hash := bytes.Repeat([]byte{0x7b}, 32)
 	if _, err := database.ExecContext(ctx, `
@@ -374,6 +403,38 @@ func seedOriginalContentRows(t *testing.T, ctx context.Context, database *sql.DB
 		VALUES (?, 'archived word', 'archived word', 'archived translation', ?, ?, ?)`,
 		archivedDeck, contentTime(4), contentTime(5), contentTime(6),
 	)
+	legacyActiveNote := insertID(`
+		INSERT INTO notes (deck_id, term, term_key, translation, created_at, updated_at)
+		VALUES (?, 'legacy active child word', 'legacy active child word', 'translation', ?, ?)`,
+		legacyChild, contentTime(5), contentTime(6))
+	independentNote := insertID(`
+		INSERT INTO notes (deck_id, term, term_key, translation, created_at, updated_at, deleted_at)
+		VALUES (?, 'independently deleted word', 'independently deleted word', 'translation', ?, ?, ?)`,
+		legacyGrandchild, contentTime(5), contentTime(6), contentTime(7))
+	independentDeckNote := insertID(`
+		INSERT INTO notes (deck_id, term, term_key, translation, created_at, updated_at)
+		VALUES (?, 'independent deck word', 'independent deck word', 'translation', ?, ?)`,
+		independentChild, contentTime(5), contentTime(6))
+	foreignNote := insertID(`
+		INSERT INTO notes (deck_id, term, term_key, translation, created_at, updated_at)
+		VALUES (?, 'foreign owner word', 'foreign owner word', 'translation', ?, ?)`,
+		foreignDeck, contentTime(5), contentTime(6))
+	insertCard := func(noteID, userID int64, index int) int64 {
+		t.Helper()
+		return insertID(`
+			INSERT INTO cards (
+				note_id, user_id, direction, state, due, stability, difficulty, elapsed_days,
+				scheduled_days, step, reps, lapses, last_review, suspended, is_leech, updated_at
+			) VALUES (?, ?, 'forward', 2, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			noteID, userID, contentTime(12+index), 4.5+float64(index), 3.5+float64(index)/10,
+			10+index, 20+index, index+1, 30+index, 1+index, contentTime(10+index),
+			index%2, (index+1)%2, contentTime(20+index))
+	}
+	archivedCard := insertCard(archivedNote, ownerID, 4)
+	legacyActiveCard := insertCard(legacyActiveNote, ownerID, 5)
+	independentNoteCard := insertCard(independentNote, ownerID, 6)
+	independentDeckCard := insertCard(independentDeckNote, ownerID, 7)
+	foreignCard := insertCard(foreignNote, other.ID, 8)
 
 	decks := []int64{root, child, grandchild}
 	notes := make([]int64, 0, len(decks))
@@ -390,20 +451,18 @@ func seedOriginalContentRows(t *testing.T, ctx context.Context, database *sql.DB
 			deckID, term, term, "translation of "+term, "legacy-word-"+string(rune('1'+index)),
 			batchID, contentTime(8+index), contentTime(9+index),
 		)
-		cardID := insertID(`
-			INSERT INTO cards (
-				note_id, user_id, direction, state, due, stability, difficulty, elapsed_days,
-				scheduled_days, step, reps, lapses, last_review, suspended, is_leech, updated_at
-			) VALUES (?, ?, 'forward', 2, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			noteID, ownerID, contentTime(12+index), 4.5+float64(index), 3.5+float64(index)/10,
-			10+index, 20+index, index+1, 30+index, 1+index, contentTime(10+index),
-			index%2, (index+1)%2, contentTime(20+index),
-		)
+		cardID := insertCard(noteID, ownerID, index)
 		notes = append(notes, noteID)
 		cards = append(cards, cardID)
 	}
 	return originalContentIDs{
 		rootDeck: root, archivedDeck: archivedDeck, archivedNote: archivedNote,
+		legacyChild: legacyChild, legacyGrandchild: legacyGrandchild,
+		independentDeck: independentDeck, independentChild: independentChild,
+		legacyActiveNote: legacyActiveNote, legacyActiveCard: legacyActiveCard,
+		independentNote: independentNote, independentNoteCard: independentNoteCard,
+		independentDeckNote: independentDeckNote, independentDeckCard: independentDeckCard,
+		archivedCard: archivedCard, foreignDeck: foreignDeck, foreignNote: foreignNote, foreignCard: foreignCard,
 		deckIDs: decks, noteIDs: notes, cardIDs: cards,
 	}
 }
@@ -411,8 +470,8 @@ func seedOriginalContentRows(t *testing.T, ctx context.Context, database *sql.DB
 func readOriginalContentRows(t *testing.T, ctx context.Context, database *sql.DB) map[string][][]any {
 	t.Helper()
 	return map[string][][]any{
-		"decks":          readMigrationRows(t, ctx, database, "decks", "id,owner_id,parent_id,name,description,position,lang_target,lang_native,reverse_cards,wrong_article_rating,color_seed,source,external_id,expected_count,source_deck_id,created_at,updated_at,deleted_at"),
-		"notes":          readMigrationRows(t, ctx, database, "notes", "id,deck_id,term,term_key,translation,transcription,example,example_translation,notes,tags,alternatives,fields,external_id,import_batch_id,created_at,updated_at,deleted_at"),
+		"decks":          readMigrationRows(t, ctx, database, "decks", "id,owner_id,parent_id,name,description,position,lang_target,lang_native,reverse_cards,wrong_article_rating,color_seed,source,external_id,expected_count,source_deck_id,created_at,updated_at"),
+		"notes":          readMigrationRows(t, ctx, database, "notes", "id,deck_id,term,term_key,translation,transcription,example,example_translation,notes,tags,alternatives,fields,external_id,import_batch_id,created_at,updated_at"),
 		"cards":          readMigrationRows(t, ctx, database, "cards", "id,note_id,user_id,direction,state,due,stability,difficulty,elapsed_days,scheduled_days,step,reps,lapses,last_review,suspended,is_leech,updated_at"),
 		"import_batches": readMigrationRows(t, ctx, database, "import_batches", "id,user_id,adapter,filename,raw,raw_sha256,status,summary,created_at,applied_at"),
 	}
@@ -530,11 +589,15 @@ func assertLatestMigrationSchema(t *testing.T, ctx context.Context, database *sq
 	objects := readMigrationSchemaObjects(t, ctx, database)
 	wantNames := []string{
 		"index.sessions_expires_at_idx",
-		"index.decks_owner_parent_idx", "index.decks_parent_id_idx", "index.decks_owner_source_external_active_uq",
-		"index.import_batches_user_created_idx", "index.notes_deck_id_idx", "index.notes_deck_term_key_active_uq",
-		"index.notes_deck_external_active_uq", "index.cards_user_due_idx", "index.cards_note_id_idx",
+		"index.decks_owner_parent_idx", "index.decks_parent_id_idx",
+		"index.import_batches_user_created_idx", "index.notes_deck_id_idx",
+		"index.cards_user_due_idx", "index.cards_note_id_idx",
+		"trigger.decks_deletion_markers_insert", "trigger.decks_deletion_markers_update",
+		"trigger.notes_deletion_markers_insert", "trigger.notes_deletion_markers_update",
+		"trigger.cards_deletion_markers_insert", "trigger.cards_deletion_markers_update",
 		"trigger.decks_soft_delete_cascade", "trigger.decks_restore_cascade",
 		"trigger.notes_soft_delete_cards", "trigger.notes_restore_cards",
+		"trigger.decks_hard_delete_descendants",
 	}
 	if len(objects) != len(wantNames) {
 		t.Errorf("latest schema has %d explicit indexes/triggers, want %d: %#v", len(objects), len(wantNames), objects)
@@ -542,15 +605,6 @@ func assertLatestMigrationSchema(t *testing.T, ctx context.Context, database *sq
 	for _, name := range wantNames {
 		if _, ok := objects[name]; !ok {
 			t.Errorf("latest schema is missing %s", name)
-		}
-	}
-	for _, name := range []string{
-		"index.decks_owner_source_external_active_uq",
-		"index.notes_deck_term_key_active_uq",
-		"index.notes_deck_external_active_uq",
-	} {
-		if !strings.Contains(objects[name], "WHERE deleted_at IS NULL") {
-			t.Errorf("%s is not active-row-only: %s", name, objects[name])
 		}
 	}
 }
@@ -590,30 +644,62 @@ func assertLatestMigrationColumns(t *testing.T, ctx context.Context, database *s
 	}
 }
 
-func assertPartialUniqueIndex(t *testing.T, ctx context.Context, database *sql.DB, table, wantName string) {
+func assertFullUniqueIndex(t *testing.T, ctx context.Context, database *sql.DB, table string, wantColumns []string) {
 	t.Helper()
 	rows, err := database.QueryContext(ctx, "PRAGMA index_list("+table+")")
 	if err != nil {
 		t.Fatalf("read %s indexes: %v", table, err)
 	}
-	defer rows.Close()
+	var indexNames []string
 	for rows.Next() {
 		var sequence, isUnique, isPartial int
 		var name, origin string
 		if err := rows.Scan(&sequence, &name, &isUnique, &origin, &isPartial); err != nil {
 			t.Fatalf("scan %s index: %v", table, err)
 		}
-		if name == wantName {
-			if isUnique != 1 || isPartial != 1 {
-				t.Errorf("%s index flags = unique %d partial %d, want 1/1", name, isUnique, isPartial)
-			}
-			return
+		if isUnique == 1 && isPartial == 0 {
+			indexNames = append(indexNames, name)
 		}
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		t.Fatalf("iterate %s indexes: %v", table, err)
 	}
-	t.Errorf("%s index is missing from %s", wantName, table)
+	if err := rows.Close(); err != nil {
+		t.Fatalf("close %s indexes: %v", table, err)
+	}
+	for _, name := range indexNames {
+		columns := readMigrationIndexColumns(t, ctx, database, name)
+		if reflect.DeepEqual(columns, wantColumns) {
+			return
+		}
+	}
+	t.Errorf("%s is missing a full unique index on %v", table, wantColumns)
+}
+
+func readMigrationIndexColumns(t *testing.T, ctx context.Context, database *sql.DB, index string) []string {
+	t.Helper()
+	quotedIndex := `"` + strings.ReplaceAll(index, `"`, `""`) + `"`
+	rows, err := database.QueryContext(ctx, "PRAGMA index_info("+quotedIndex+")")
+	if err != nil {
+		t.Fatalf("read index %s columns: %v", index, err)
+	}
+	defer rows.Close()
+	var columns []string
+	for rows.Next() {
+		var sequence, columnID int
+		var name sql.NullString
+		if err := rows.Scan(&sequence, &columnID, &name); err != nil {
+			t.Fatalf("scan index %s column: %v", index, err)
+		}
+		if name.Valid {
+			columns = append(columns, name.String)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate index %s columns: %v", index, err)
+	}
+	return columns
 }
 
 func migrationDeckParentDeleteAction(t *testing.T, ctx context.Context, database *sql.DB) string {
@@ -704,6 +790,29 @@ func assertMigrationDeletionBatch(t *testing.T, ctx context.Context, database *s
 	}
 	if !got.Valid || got.String != want {
 		t.Errorf("%s %d deletion_batch = %+v, want %q", table, id, got, want)
+	}
+}
+
+func assertMigrationDeletion(
+	t *testing.T,
+	ctx context.Context,
+	database *sql.DB,
+	table string,
+	id int64,
+	wantDeletedAt time.Time,
+	wantBatch string,
+) {
+	t.Helper()
+	var deletedAt sql.NullTime
+	var deletionBatch sql.NullString
+	if err := database.QueryRowContext(ctx,
+		"SELECT deleted_at, deletion_batch FROM "+table+" WHERE id = ?", id,
+	).Scan(&deletedAt, &deletionBatch); err != nil {
+		t.Fatalf("read %s %d deletion state: %v", table, id, err)
+	}
+	if !deletedAt.Valid || !deletedAt.Time.Equal(wantDeletedAt) || !deletionBatch.Valid || deletionBatch.String != wantBatch {
+		t.Errorf("%s %d deletion state = (%+v, %+v), want (%s, %q)",
+			table, id, deletedAt, deletionBatch, wantDeletedAt, wantBatch)
 	}
 }
 

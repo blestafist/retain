@@ -1,147 +1,140 @@
--- +goose NO TRANSACTION
-
--- Upgrade the schema as it was originally shipped in 00003_content.sql. Foreign keys must be
--- disabled before the explicit transaction because SQLite cannot change a foreign key in place.
 -- +goose Up
-PRAGMA foreign_keys = OFF;
-BEGIN IMMEDIATE;
+-- Preserve the original v3 tables and their full UNIQUE constraints. The marker columns let a
+-- cascade restore exactly the rows deleted with its owner without rebuilding content tables.
+ALTER TABLE decks ADD COLUMN deletion_batch TEXT;
+ALTER TABLE notes ADD COLUMN deletion_batch TEXT;
+ALTER TABLE cards ADD COLUMN deleted_at DATETIME;
+ALTER TABLE cards ADD COLUMN deletion_batch TEXT;
 
-CREATE TABLE decks_new (
-    id INTEGER PRIMARY KEY,
-    owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    parent_id INTEGER REFERENCES decks_new(id) ON DELETE CASCADE,
-    name TEXT NOT NULL CHECK (length(trim(name)) > 0),
-    description TEXT,
-    position INTEGER NOT NULL DEFAULT 0,
-    lang_target TEXT CHECK (lang_target IS NULL OR lang_target IN ('de', 'en')),
-    lang_native TEXT CHECK (lang_native IS NULL OR lang_native IN ('pl', 'ru')),
-    reverse_cards BOOLEAN NOT NULL DEFAULT 0 CHECK (reverse_cards IN (0, 1)),
-    wrong_article_rating INTEGER NOT NULL DEFAULT 2 CHECK (wrong_article_rating BETWEEN 1 AND 4),
-    color_seed TEXT CHECK (
-        color_seed IS NULL OR
-        color_seed GLOB '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'
+-- v3 allowed soft-deleted parents to retain active descendants. Give pre-existing tombstones
+-- distinct batches, then apply each tombstone to only active descendants with the same owner.
+UPDATE decks
+SET deletion_batch = 'migration-00004-deck-' || id
+WHERE deleted_at IS NOT NULL;
+
+-- A deleted child deck is a separate deletion root. Stopping recursion at it preserves its own
+-- timestamp and batch; that child is seeded independently and cascades to its active descendants.
+WITH RECURSIVE cascaded(deck_id, owner_id, deleted_at, deletion_batch) AS (
+    SELECT id, owner_id, deleted_at, deletion_batch
+    FROM decks
+    WHERE deleted_at IS NOT NULL
+    UNION
+    SELECT child.id, parent.owner_id, parent.deleted_at, parent.deletion_batch
+    FROM decks AS child
+    JOIN cascaded AS parent ON child.parent_id = parent.deck_id
+    WHERE child.owner_id = parent.owner_id
+      AND child.deleted_at IS NULL
+)
+UPDATE decks
+SET deleted_at = (
+        SELECT cascaded.deleted_at FROM cascaded
+        WHERE cascaded.deck_id = decks.id
+        LIMIT 1
     ),
-    source TEXT,
-    external_id TEXT,
-    expected_count INTEGER CHECK (expected_count IS NULL OR expected_count >= 0),
-    -- Kept as a scalar until deck sharing is introduced; this is intentionally not a foreign key.
-    source_deck_id INTEGER,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at DATETIME,
-    deletion_batch TEXT,
-    CHECK ((deleted_at IS NULL) = (deletion_batch IS NULL))
+    deletion_batch = (
+        SELECT cascaded.deletion_batch FROM cascaded
+        WHERE cascaded.deck_id = decks.id
+        LIMIT 1
+    )
+WHERE deleted_at IS NULL
+  AND id IN (SELECT deck_id FROM cascaded);
+
+UPDATE notes
+SET deletion_batch = 'migration-00004-note-' || id
+WHERE deleted_at IS NOT NULL;
+
+-- Active notes below a deleted deck join that deck's cascade. Independently deleted notes retain
+-- their legacy timestamp and receive their own batch above.
+UPDATE notes
+SET deleted_at = (
+        SELECT decks.deleted_at FROM decks WHERE decks.id = notes.deck_id
+    ),
+    deletion_batch = (
+        SELECT decks.deletion_batch FROM decks WHERE decks.id = notes.deck_id
+    )
+WHERE deleted_at IS NULL
+  AND EXISTS (
+      SELECT 1 FROM decks
+      WHERE decks.id = notes.deck_id AND decks.deleted_at IS NOT NULL
+  );
+
+-- Cards did not have tombstones in v3. Their note is the authoritative deletion boundary, while
+-- card scheduling state and review history remain untouched.
+UPDATE cards
+SET deleted_at = (
+        SELECT notes.deleted_at FROM notes WHERE notes.id = cards.note_id
+    ),
+    deletion_batch = (
+        SELECT notes.deletion_batch FROM notes WHERE notes.id = cards.note_id
+    )
+WHERE EXISTS (
+    SELECT 1 FROM notes
+    WHERE notes.id = cards.note_id AND notes.deleted_at IS NOT NULL
 );
 
-INSERT INTO decks_new (
-    id, owner_id, parent_id, name, description, position, lang_target, lang_native,
-    reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count,
-    source_deck_id, created_at, updated_at, deleted_at, deletion_batch
-)
-SELECT
-    id, owner_id, parent_id, name, description, position, lang_target, lang_native,
-    reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count,
-    source_deck_id, created_at, updated_at, deleted_at,
-    CASE WHEN deleted_at IS NULL THEN NULL ELSE 'migration-00004-deck-' || id END
-FROM decks;
+-- Keep the nullable marker pair consistent without rebuilding the v3 tables.
+-- +goose StatementBegin
+CREATE TRIGGER decks_deletion_markers_insert
+BEFORE INSERT ON decks
+WHEN (NEW.deleted_at IS NULL) <> (NEW.deletion_batch IS NULL)
+  OR (NEW.deletion_batch IS NOT NULL AND length(NEW.deletion_batch) = 0)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid deck deletion markers');
+END;
+-- +goose StatementEnd
 
-DROP TABLE decks;
-ALTER TABLE decks_new RENAME TO decks;
+-- +goose StatementBegin
+CREATE TRIGGER decks_deletion_markers_update
+BEFORE UPDATE OF deleted_at, deletion_batch ON decks
+WHEN (NEW.deleted_at IS NULL) <> (NEW.deletion_batch IS NULL)
+  OR (NEW.deletion_batch IS NOT NULL AND length(NEW.deletion_batch) = 0)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid deck deletion markers');
+END;
+-- +goose StatementEnd
 
-CREATE TABLE notes_new (
-    id INTEGER PRIMARY KEY,
-    deck_id INTEGER NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
-    term TEXT NOT NULL CHECK (length(trim(term)) > 0),
-    term_key TEXT NOT NULL CHECK (length(trim(term_key)) > 0),
-    translation TEXT NOT NULL CHECK (length(trim(translation)) > 0),
-    transcription TEXT,
-    example TEXT,
-    example_translation TEXT,
-    notes TEXT,
-    tags TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(tags) AND json_type(tags) = 'array'),
-    alternatives TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(alternatives) AND json_type(alternatives) = 'array'),
-    fields TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(fields) AND json_type(fields) = 'object'),
-    external_id TEXT,
-    import_batch_id TEXT REFERENCES import_batches(id) ON DELETE SET NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at DATETIME,
-    deletion_batch TEXT,
-    CHECK ((deleted_at IS NULL) = (deletion_batch IS NULL))
-);
+-- +goose StatementBegin
+CREATE TRIGGER notes_deletion_markers_insert
+BEFORE INSERT ON notes
+WHEN (NEW.deleted_at IS NULL) <> (NEW.deletion_batch IS NULL)
+  OR (NEW.deletion_batch IS NOT NULL AND length(NEW.deletion_batch) = 0)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid note deletion markers');
+END;
+-- +goose StatementEnd
 
-INSERT INTO notes_new (
-    id, deck_id, term, term_key, translation, transcription, example, example_translation,
-    notes, tags, alternatives, fields, external_id, import_batch_id, created_at, updated_at,
-    deleted_at, deletion_batch
-)
-SELECT
-    id, deck_id, term, term_key, translation, transcription, example, example_translation,
-    notes, tags, alternatives, fields, external_id, import_batch_id, created_at, updated_at,
-    deleted_at,
-    CASE WHEN deleted_at IS NULL THEN NULL ELSE 'migration-00004-note-' || id END
-FROM notes;
+-- +goose StatementBegin
+CREATE TRIGGER notes_deletion_markers_update
+BEFORE UPDATE OF deleted_at, deletion_batch ON notes
+WHEN (NEW.deleted_at IS NULL) <> (NEW.deletion_batch IS NULL)
+  OR (NEW.deletion_batch IS NOT NULL AND length(NEW.deletion_batch) = 0)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid note deletion markers');
+END;
+-- +goose StatementEnd
 
-DROP TABLE notes;
-ALTER TABLE notes_new RENAME TO notes;
+-- +goose StatementBegin
+CREATE TRIGGER cards_deletion_markers_insert
+BEFORE INSERT ON cards
+WHEN (NEW.deleted_at IS NULL) <> (NEW.deletion_batch IS NULL)
+  OR (NEW.deletion_batch IS NOT NULL AND length(NEW.deletion_batch) = 0)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid card deletion markers');
+END;
+-- +goose StatementEnd
 
-CREATE TABLE cards_new (
-    id INTEGER PRIMARY KEY,
-    note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    direction TEXT NOT NULL CHECK (direction IN ('forward', 'reverse')),
-    state INTEGER NOT NULL DEFAULT 0 CHECK (state BETWEEN 0 AND 3),
-    due DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    stability REAL CHECK (stability IS NULL OR stability > 0),
-    difficulty REAL CHECK (difficulty IS NULL OR difficulty BETWEEN 1 AND 10),
-    elapsed_days INTEGER NOT NULL DEFAULT 0 CHECK (elapsed_days >= 0),
-    scheduled_days INTEGER NOT NULL DEFAULT 0 CHECK (scheduled_days >= 0),
-    step INTEGER NOT NULL DEFAULT 0 CHECK (step >= 0),
-    reps INTEGER NOT NULL DEFAULT 0 CHECK (reps >= 0),
-    lapses INTEGER NOT NULL DEFAULT 0 CHECK (lapses >= 0),
-    last_review DATETIME,
-    suspended BOOLEAN NOT NULL DEFAULT 0 CHECK (suspended IN (0, 1)),
-    is_leech BOOLEAN NOT NULL DEFAULT 0 CHECK (is_leech IN (0, 1)),
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at DATETIME,
-    deletion_batch TEXT,
-    CHECK ((deleted_at IS NULL) = (deletion_batch IS NULL)),
-    UNIQUE (note_id, user_id, direction)
-);
+-- +goose StatementBegin
+CREATE TRIGGER cards_deletion_markers_update
+BEFORE UPDATE OF deleted_at, deletion_batch ON cards
+WHEN (NEW.deleted_at IS NULL) <> (NEW.deletion_batch IS NULL)
+  OR (NEW.deletion_batch IS NOT NULL AND length(NEW.deletion_batch) = 0)
+BEGIN
+    SELECT RAISE(ABORT, 'invalid card deletion markers');
+END;
+-- +goose StatementEnd
 
-INSERT INTO cards_new (
-    id, note_id, user_id, direction, state, due, stability, difficulty, elapsed_days,
-    scheduled_days, step, reps, lapses, last_review, suspended, is_leech, updated_at,
-    deleted_at, deletion_batch
-)
-SELECT
-    id, note_id, user_id, direction, state, due, stability, difficulty, elapsed_days,
-    scheduled_days, step, reps, lapses, last_review, suspended, is_leech, updated_at,
-    NULL, NULL
-FROM cards;
-
-DROP TABLE cards;
-ALTER TABLE cards_new RENAME TO cards;
-
-CREATE INDEX decks_owner_parent_idx ON decks(owner_id, parent_id, position, id);
-CREATE INDEX decks_parent_id_idx ON decks(parent_id);
-CREATE UNIQUE INDEX decks_owner_source_external_active_uq
-    ON decks(owner_id, source, external_id)
-    WHERE deleted_at IS NULL AND source IS NOT NULL AND external_id IS NOT NULL;
-
-CREATE INDEX notes_deck_id_idx ON notes(deck_id);
-CREATE UNIQUE INDEX notes_deck_term_key_active_uq
-    ON notes(deck_id, term_key)
-    WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX notes_deck_external_active_uq
-    ON notes(deck_id, external_id)
-    WHERE deleted_at IS NULL AND external_id IS NOT NULL;
-
-CREATE INDEX cards_user_due_idx ON cards(user_id, due);
-CREATE INDEX cards_note_id_idx ON cards(note_id);
-
--- A random marker groups only rows changed by this exact cascade. It prevents a restore from
--- reactivating descendants or notes that were deleted independently at an earlier time.
+-- A private batch groups only rows changed by this exact cascade. Descendant queries always
+-- filter by owner_id, so corrupt legacy cross-owner links are never soft-deleted as foreign data.
 -- +goose StatementBegin
 CREATE TRIGGER decks_soft_delete_cascade
 AFTER UPDATE OF deleted_at ON decks
@@ -182,39 +175,16 @@ BEGIN
               FROM decks AS child
               JOIN subtree AS parent ON child.parent_id = parent.id
               WHERE child.owner_id = NEW.owner_id
-                AND child.deleted_at IS NOT NULL
+                AND child.deleted_at = NEW.deleted_at
                 AND child.deletion_batch = NEW.deletion_batch
           )
           SELECT id FROM subtree
       );
-
-    UPDATE cards
-    SET deleted_at = NEW.deleted_at,
-        deletion_batch = NEW.deletion_batch,
-        updated_at = NEW.updated_at
-    WHERE deleted_at IS NULL
-      AND note_id IN (
-          SELECT notes.id
-          FROM notes
-          WHERE notes.deleted_at = NEW.deleted_at
-            AND notes.deletion_batch = NEW.deletion_batch
-            AND notes.deck_id IN (
-                WITH RECURSIVE subtree(id) AS (
-                    SELECT NEW.id
-                    UNION
-                    SELECT child.id
-                    FROM decks AS child
-                    JOIN subtree AS parent ON child.parent_id = parent.id
-                    WHERE child.owner_id = NEW.owner_id
-                      AND child.deleted_at IS NOT NULL
-                      AND child.deletion_batch = NEW.deletion_batch
-                )
-                SELECT id FROM subtree
-            )
-      );
 END;
 -- +goose StatementEnd
 
+-- Restore only rows that carry this exact cascade's timestamp and marker. Independent deletions
+-- inside the subtree keep their own marker and remain deleted.
 -- +goose StatementBegin
 CREATE TRIGGER decks_restore_cascade
 AFTER UPDATE OF deleted_at ON decks
@@ -322,170 +292,45 @@ BEGIN
 END;
 -- +goose StatementEnd
 
-COMMIT;
-PRAGMA foreign_keys = ON;
+-- parent_id remains ON DELETE RESTRICT. Delete owned children before the parent; a cross-owner
+-- legacy child is intentionally skipped and makes SQLite reject (and roll back) the parent delete.
+-- This trigger recurses through nested decks, so the connection enables recursive_triggers.
+-- +goose StatementBegin
+CREATE TRIGGER decks_hard_delete_descendants
+BEFORE DELETE ON decks
+BEGIN
+    DELETE FROM decks
+    WHERE parent_id = OLD.id AND owner_id = OLD.owner_id;
+END;
+-- +goose StatementEnd
 
 -- +goose Down
--- Refuse lossy rollback before touching user tables. The 00003 schema had global uniqueness,
--- no card tombstones, and no deletion-batch markers. The migration's own synthetic markers are
--- safe to discard; markers written by the application and newly soft-deleted cards are not.
-PRAGMA foreign_keys = OFF;
-BEGIN IMMEDIATE;
-
+-- The v3 schema cannot represent cards' tombstones or cascade ownership. Refuse rollback rather
+-- than silently discard those markers; Goose wraps this guard and the schema changes atomically.
 CREATE TEMP TABLE migration_00004_down_guard (
     allowed INTEGER NOT NULL CHECK (allowed = 1)
 );
 INSERT INTO migration_00004_down_guard
 SELECT CASE WHEN
-    EXISTS (
-        SELECT 1 FROM decks
-        WHERE deletion_batch IS NOT NULL
-          AND deletion_batch <> 'migration-00004-deck-' || id
-    ) OR
-    EXISTS (
-        SELECT 1 FROM notes
-        WHERE deletion_batch IS NOT NULL
-          AND deletion_batch <> 'migration-00004-note-' || id
-    ) OR
-    EXISTS (SELECT 1 FROM cards WHERE deleted_at IS NOT NULL OR deletion_batch IS NOT NULL) OR
-    EXISTS (
-        SELECT 1 FROM decks
-        WHERE source IS NOT NULL AND external_id IS NOT NULL
-        GROUP BY owner_id, source, external_id
-        HAVING COUNT(*) > 1
-    ) OR
-    EXISTS (
-        SELECT 1 FROM notes
-        GROUP BY deck_id, term_key
-        HAVING COUNT(*) > 1
-    ) OR
-    EXISTS (
-        SELECT 1 FROM notes
-        WHERE external_id IS NOT NULL
-        GROUP BY deck_id, external_id
-        HAVING COUNT(*) > 1
-    )
+    EXISTS (SELECT 1 FROM decks WHERE deleted_at IS NOT NULL OR deletion_batch IS NOT NULL) OR
+    EXISTS (SELECT 1 FROM notes WHERE deleted_at IS NOT NULL OR deletion_batch IS NOT NULL) OR
+    EXISTS (SELECT 1 FROM cards WHERE deleted_at IS NOT NULL OR deletion_batch IS NOT NULL)
 THEN 0 ELSE 1 END;
 DROP TABLE migration_00004_down_guard;
 
+DROP TRIGGER decks_hard_delete_descendants;
 DROP TRIGGER notes_restore_cards;
 DROP TRIGGER notes_soft_delete_cards;
 DROP TRIGGER decks_restore_cascade;
 DROP TRIGGER decks_soft_delete_cascade;
+DROP TRIGGER cards_deletion_markers_update;
+DROP TRIGGER cards_deletion_markers_insert;
+DROP TRIGGER notes_deletion_markers_update;
+DROP TRIGGER notes_deletion_markers_insert;
+DROP TRIGGER decks_deletion_markers_update;
+DROP TRIGGER decks_deletion_markers_insert;
 
-CREATE TABLE cards_new (
-    id INTEGER PRIMARY KEY,
-    note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    direction TEXT NOT NULL CHECK (direction IN ('forward', 'reverse')),
-    state INTEGER NOT NULL DEFAULT 0 CHECK (state BETWEEN 0 AND 3),
-    due DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    stability REAL CHECK (stability IS NULL OR stability > 0),
-    difficulty REAL CHECK (difficulty IS NULL OR difficulty BETWEEN 1 AND 10),
-    elapsed_days INTEGER NOT NULL DEFAULT 0 CHECK (elapsed_days >= 0),
-    scheduled_days INTEGER NOT NULL DEFAULT 0 CHECK (scheduled_days >= 0),
-    step INTEGER NOT NULL DEFAULT 0 CHECK (step >= 0),
-    reps INTEGER NOT NULL DEFAULT 0 CHECK (reps >= 0),
-    lapses INTEGER NOT NULL DEFAULT 0 CHECK (lapses >= 0),
-    last_review DATETIME,
-    suspended BOOLEAN NOT NULL DEFAULT 0 CHECK (suspended IN (0, 1)),
-    is_leech BOOLEAN NOT NULL DEFAULT 0 CHECK (is_leech IN (0, 1)),
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (note_id, user_id, direction)
-);
-
-INSERT INTO cards_new (
-    id, note_id, user_id, direction, state, due, stability, difficulty, elapsed_days,
-    scheduled_days, step, reps, lapses, last_review, suspended, is_leech, updated_at
-)
-SELECT
-    id, note_id, user_id, direction, state, due, stability, difficulty, elapsed_days,
-    scheduled_days, step, reps, lapses, last_review, suspended, is_leech, updated_at
-FROM cards;
-
-DROP TABLE cards;
-ALTER TABLE cards_new RENAME TO cards;
-CREATE INDEX cards_user_due_idx ON cards(user_id, due);
-CREATE INDEX cards_note_id_idx ON cards(note_id);
-
-CREATE TABLE notes_new (
-    id INTEGER PRIMARY KEY,
-    deck_id INTEGER NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
-    term TEXT NOT NULL CHECK (length(trim(term)) > 0),
-    term_key TEXT NOT NULL CHECK (length(trim(term_key)) > 0),
-    translation TEXT NOT NULL CHECK (length(trim(translation)) > 0),
-    transcription TEXT,
-    example TEXT,
-    example_translation TEXT,
-    notes TEXT,
-    tags TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(tags) AND json_type(tags) = 'array'),
-    alternatives TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(alternatives) AND json_type(alternatives) = 'array'),
-    fields TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(fields) AND json_type(fields) = 'object'),
-    external_id TEXT,
-    import_batch_id TEXT REFERENCES import_batches(id) ON DELETE SET NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at DATETIME,
-    UNIQUE (deck_id, term_key),
-    UNIQUE (deck_id, external_id)
-);
-
-INSERT INTO notes_new (
-    id, deck_id, term, term_key, translation, transcription, example, example_translation,
-    notes, tags, alternatives, fields, external_id, import_batch_id, created_at, updated_at,
-    deleted_at
-)
-SELECT
-    id, deck_id, term, term_key, translation, transcription, example, example_translation,
-    notes, tags, alternatives, fields, external_id, import_batch_id, created_at, updated_at,
-    deleted_at
-FROM notes;
-
-DROP TABLE notes;
-ALTER TABLE notes_new RENAME TO notes;
-CREATE INDEX notes_deck_id_idx ON notes(deck_id);
-
-CREATE TABLE decks_new (
-    id INTEGER PRIMARY KEY,
-    owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    parent_id INTEGER REFERENCES decks_new(id) ON DELETE RESTRICT,
-    name TEXT NOT NULL CHECK (length(trim(name)) > 0),
-    description TEXT,
-    position INTEGER NOT NULL DEFAULT 0,
-    lang_target TEXT CHECK (lang_target IS NULL OR lang_target IN ('de', 'en')),
-    lang_native TEXT CHECK (lang_native IS NULL OR lang_native IN ('pl', 'ru')),
-    reverse_cards BOOLEAN NOT NULL DEFAULT 0 CHECK (reverse_cards IN (0, 1)),
-    wrong_article_rating INTEGER NOT NULL DEFAULT 2 CHECK (wrong_article_rating BETWEEN 1 AND 4),
-    color_seed TEXT CHECK (
-        color_seed IS NULL OR
-        color_seed GLOB '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'
-    ),
-    source TEXT,
-    external_id TEXT,
-    expected_count INTEGER CHECK (expected_count IS NULL OR expected_count >= 0),
-    -- Kept as a scalar until deck sharing is introduced; this is intentionally not a foreign key.
-    source_deck_id INTEGER,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at DATETIME,
-    UNIQUE (owner_id, source, external_id)
-);
-
-INSERT INTO decks_new (
-    id, owner_id, parent_id, name, description, position, lang_target, lang_native,
-    reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count,
-    source_deck_id, created_at, updated_at, deleted_at
-)
-SELECT
-    id, owner_id, parent_id, name, description, position, lang_target, lang_native,
-    reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count,
-    source_deck_id, created_at, updated_at, deleted_at
-FROM decks;
-
-DROP TABLE decks;
-ALTER TABLE decks_new RENAME TO decks;
-CREATE INDEX decks_owner_parent_idx ON decks(owner_id, parent_id, position, id);
-CREATE INDEX decks_parent_id_idx ON decks(parent_id);
-
-COMMIT;
-PRAGMA foreign_keys = ON;
+ALTER TABLE cards DROP COLUMN deletion_batch;
+ALTER TABLE cards DROP COLUMN deleted_at;
+ALTER TABLE notes DROP COLUMN deletion_batch;
+ALTER TABLE decks DROP COLUMN deletion_batch;

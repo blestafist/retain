@@ -79,6 +79,7 @@ func dataSourceName(path string) (string, string, error) {
 	query.Add("_pragma", "journal_mode(WAL)")
 	query.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", busyTimeoutMilliseconds))
 	query.Add("_pragma", "foreign_keys(ON)")
+	query.Add("_pragma", "recursive_triggers(ON)")
 	fileURL.RawQuery = query.Encode()
 
 	return fileURL.String(), absolutePath, nil
