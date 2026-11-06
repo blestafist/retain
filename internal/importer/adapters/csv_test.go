@@ -236,9 +236,9 @@ func TestCSVAdapterDetect(t *testing.T) {
 	}
 }
 
-func TestAllRegistersNativeAndCSVAdapters(t *testing.T) {
+func TestAllRegistersNativeSchoolWordsetsAndCSVAdapters(t *testing.T) {
 	registered := All()
-	if len(registered) != 2 || registered[0].Name() != "retain" || registered[1].Name() != "csv" {
+	if len(registered) != 3 || registered[0].Name() != "retain" || registered[1].Name() != "school-wordsets" || registered[2].Name() != "csv" {
 		t.Fatalf("registered adapters = %#v", registered)
 	}
 	registered[0] = CSVAdapter{}

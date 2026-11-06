@@ -4,6 +4,7 @@ import "github.com/pestit/retain/internal/importer"
 
 var registered = []importer.Adapter{
 	importer.RetainAdapter{},
+	SchoolWordsetsAdapter{},
 	CSVAdapter{},
 }
 
