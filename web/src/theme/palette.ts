@@ -150,7 +150,6 @@ const DYNAMIC_ROLES: readonly DynamicRole[] = [
 ];
 
 const RATING_SEEDS = {
-  again: '#E00040',
   hard: '#B35A00',
   good: '#386A20',
   easy: '#005AC1',
@@ -228,6 +227,10 @@ export function createThemePalette(
     );
   }
 
+  roles['rating-again'] = roles.error;
+  roles['on-rating-again'] = roles['on-error'];
+  roles['rating-again-container'] = roles['error-container'];
+  roles['on-rating-again-container'] = roles['on-error-container'];
   addRatingRoles(roles, settings, mode);
 
   return roles as ThemeRoleMap;

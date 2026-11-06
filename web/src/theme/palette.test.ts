@@ -170,6 +170,26 @@ describe('MD3 palette generation', () => {
     }
   });
 
+  it('maps Again to dynamic error roles across presets, styles, contrast levels and modes', () => {
+    for (const preset of THEME_PRESETS) {
+      for (const variant of THEME_VARIANTS) {
+        for (const contrastLevel of CONTRAST_LEVELS) {
+          for (const mode of MODES) {
+            const palette = createThemePalette(
+              settingsFor({ seed: preset.seed, variant, contrastLevel }),
+              mode,
+            );
+
+            expect(palette['rating-again']).toBe(palette.error);
+            expect(palette['on-rating-again']).toBe(palette['on-error']);
+            expect(palette['rating-again-container']).toBe(palette['error-container']);
+            expect(palette['on-rating-again-container']).toBe(palette['on-error-container']);
+          }
+        }
+      }
+    }
+  });
+
   it('harmonizes rating hues without making their meaning depend on the seed', () => {
     const hue = (color: string) => Hct.fromInt(argbFromHex(color)).hue;
     const semanticSeeds = [
