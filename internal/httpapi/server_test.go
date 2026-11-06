@@ -96,6 +96,48 @@ func TestStaticHandler(t *testing.T) {
 	}
 }
 
+func TestNewHandlerServesInviteSignupShellAndNotFoundForUnknownPaths(t *testing.T) {
+	handler := NewHandler(testPublicOrigin, fakePinger{}, frontendFiles())
+	tests := []struct {
+		name          string
+		path          string
+		wantStatus    int
+		wantBody      string
+		wantContentTy string
+	}{
+		{
+			name:          "invite signup shell",
+			path:          "/signup?invite=invite-code",
+			wantStatus:    http.StatusOK,
+			wantBody:      "<main>Retain</main>",
+			wantContentTy: "text/html; charset=utf-8",
+		},
+		{name: "unknown study route", path: "/study", wantStatus: http.StatusNotFound},
+		{name: "missing asset", path: "/assets/missing-a1b2c3d4.js", wantStatus: http.StatusNotFound},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := newServerRequest(http.MethodGet, tt.path)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+
+			if response.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d (body %q)", response.Code, tt.wantStatus, response.Body.String())
+			}
+			if tt.wantBody != "" && response.Body.String() != tt.wantBody {
+				t.Errorf("body = %q, want %q", response.Body.String(), tt.wantBody)
+			}
+			if tt.wantContentTy != "" && response.Header().Get("Content-Type") != tt.wantContentTy {
+				t.Errorf("Content-Type = %q, want %q", response.Header().Get("Content-Type"), tt.wantContentTy)
+			}
+			if tt.name == "invite signup shell" && response.Header().Get("Location") != "" {
+				t.Errorf("signup response redirected to %q; want query-preserving shell response", response.Header().Get("Location"))
+			}
+		})
+	}
+}
+
 func TestHandlerRequiresSameOriginForStateChangingRequests(t *testing.T) {
 	tests := []struct {
 		name       string

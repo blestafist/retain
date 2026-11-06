@@ -52,7 +52,7 @@ func frontendHandler(frontend fs.FS) http.Handler {
 	files := http.FileServer(http.FS(generated))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/")
-		if name == "" {
+		if r.URL.Path == "/" || r.URL.Path == "/signup" {
 			name = "index.html"
 		}
 		if name == ".gitkeep" || !fs.ValidPath(name) {
