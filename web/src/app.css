@@ -85,3 +85,188 @@ body {
   outline: 3px solid var(--md-sys-color-primary);
   outline-offset: 3px;
 }
+
+.auth-content {
+  width: min(100%, 36rem);
+  padding-block: clamp(2rem, 8vh, 5rem);
+}
+
+.auth-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: clamp(1.5rem, 6vw, 3rem);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-extra-large);
+  background: var(--md-sys-color-surface-container-low);
+  box-shadow: 0 1.5rem 3rem var(--md-sys-color-shadow);
+}
+
+.auth-card h1 {
+  margin: 0;
+  font: var(--md-sys-typescale-headline-large-emphasized);
+  letter-spacing: var(--md-sys-typescale-headline-large-letter-spacing);
+  text-wrap: balance;
+}
+
+.auth-kicker {
+  margin: 0;
+  color: var(--md-sys-color-primary);
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-letter-spacing);
+  text-transform: uppercase;
+}
+
+.auth-description {
+  margin: 0;
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-body-large);
+  letter-spacing: var(--md-sys-typescale-body-large-letter-spacing);
+}
+
+.auth-form {
+  display: grid;
+  gap: 1.25rem;
+  margin-block-start: 0.5rem;
+}
+
+.auth-field {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.auth-field label {
+  color: var(--md-sys-color-on-surface);
+  font: var(--md-sys-typescale-label-large);
+}
+
+.auth-input {
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: var(--md-sys-shape-corner-medium);
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--md-sys-color-on-surface);
+  font: var(--md-sys-typescale-body-large);
+}
+
+.auth-input:hover {
+  border-color: var(--md-sys-color-on-surface);
+}
+
+.auth-input:focus-visible {
+  border-color: var(--md-sys-color-primary);
+  outline: 3px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+
+.auth-input[aria-invalid='true'] {
+  border-color: var(--md-sys-color-error);
+}
+
+.auth-field-hint,
+.auth-field-error {
+  font: var(--md-sys-typescale-body-medium);
+}
+
+.auth-field-hint {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.auth-field-error {
+  color: var(--md-sys-color-error);
+}
+
+.auth-form-error {
+  margin: 0;
+  padding: 0.875rem 1rem;
+  border-inline-start: 4px solid var(--md-sys-color-error);
+  border-radius: var(--md-sys-shape-corner-small);
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-error-container);
+  font: var(--md-sys-typescale-body-medium);
+  overflow-wrap: anywhere;
+}
+
+.auth-submit {
+  width: 100%;
+  min-height: 3rem;
+  margin-block-start: 0.25rem;
+}
+
+.auth-switch {
+  margin: 0.5rem 0 0;
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-body-medium);
+  text-align: center;
+}
+
+.auth-switch a,
+.auth-primary-link {
+  color: var(--md-sys-color-primary);
+  font: var(--md-sys-typescale-label-large);
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.18em;
+}
+
+.auth-switch a:focus-visible,
+.auth-primary-link:focus-visible {
+  border-radius: var(--md-sys-shape-corner-extra-small);
+  outline: 3px solid var(--md-sys-color-primary);
+  outline-offset: 3px;
+}
+
+.auth-success {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.auth-primary-link {
+  display: inline-flex;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: center;
+  margin-block-start: 0.25rem;
+  padding-inline: 1.5rem;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  text-decoration: none;
+}
+
+.auth-primary-link:focus-visible {
+  outline-color: var(--md-sys-color-on-surface);
+}
+
+.auth-loading {
+  margin: 0;
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-body-large);
+  text-align: center;
+}
+
+.profile-card {
+  align-items: flex-start;
+}
+
+.profile-name {
+  margin: 0;
+  color: var(--md-sys-color-on-surface);
+  font: var(--md-sys-typescale-title-large);
+}
+
+.profile-email {
+  margin: -0.75rem 0 0.5rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-body-large);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 37.5rem) {
+  .auth-card {
+    box-shadow: none;
+  }
+}
