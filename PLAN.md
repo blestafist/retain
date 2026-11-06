@@ -183,9 +183,10 @@ If you convert files yourself, emitting `retain/v1` is enough — no adapter nee
 1. `POST /import/preview`: the file is stored in `import_batches` along with the raw source (gzip), the adapter is auto-detected. The response contains the deck tree and per-deck counts: new / changed / unchanged / warnings.
 2. The user picks the language pair and where to put the decks, then `POST /import/{batch_id}/apply`. Everything is applied in a single transaction.
 3. **Re-import** (the teacher added words to a chapter): a deck is matched by `(owner, source, external_id)`, a note by `external_id`, falling back to `term_key`.
-   - New words are added.
-   - Changed words get their translation updated; **FSRS progress is preserved**.
-   - Words that disappeared from the source are kept by default. Option: suspend them.
+    - New words are added.
+    - Changed words get their translation updated; **FSRS progress is preserved**.
+    - Words that disappeared from the source are kept by default. Option: suspend them.
+    - Matching soft-deleted decks/notes/cards are restored rather than duplicated; their card progress is preserved.
 4. Sources stay in `import_batches`, so they can be re-parsed with an improved adapter without re-uploading.
 5. After import you can run "Enrich with LLM" for empty fields.
 
@@ -331,7 +332,7 @@ decks(
   source TEXT NULL, external_id TEXT NULL, expected_count INT NULL,
   source_deck_id NULL,               -- if copied from a friend
   created_at, updated_at, deleted_at NULL)
-  UNIQUE(owner_id, source, external_id), INDEX(parent_id)
+   UNIQUE among active rows(owner_id, source, external_id), INDEX(parent_id)
 
 deck_shares(deck_id → decks, user_id → users, mode TEXT /* copy|subscribe */)
 
@@ -343,7 +344,7 @@ notes(                               -- a word or phrase
   fields TEXT /* JSON: kind, pos, article, plural, governs, reflexive, verb_forms, cefr, mnemonic, ... */,
   external_id TEXT NULL, import_batch_id → import_batches NULL,
   created_at, updated_at, deleted_at NULL)
-  UNIQUE(deck_id, term_key), UNIQUE(deck_id, external_id)
+   UNIQUE among active rows(deck_id, term_key), UNIQUE among active rows(deck_id, external_id)
 
 import_batches(
   id TEXT PK, user_id → users, adapter TEXT, filename TEXT,
@@ -358,7 +359,7 @@ cards(
   due DATETIME, stability REAL, difficulty REAL,
   elapsed_days INT, scheduled_days INT, step INT,
   reps INT, lapses INT, last_review DATETIME NULL,
-  suspended BOOL, is_leech BOOL, updated_at)
+   suspended BOOL, is_leech BOOL, updated_at, deleted_at NULL)
   INDEX(user_id, due), INDEX(note_id)
 
 review_logs(                         -- append-only
@@ -385,6 +386,8 @@ push_subscriptions(id PK, user_id → users, endpoint UNIQUE, p256dh, auth, crea
 ```
 
 Cards are tied to `user_id`: when subscribed to a friend's deck, notes are shared but progress is per user.
+
+Deleting a deck soft-deletes its entire descendant subtree, notes, and cards. Re-importing a matching source/external ID restores the existing deck/note/card rows and preserves card progress; active-row uniqueness allows deleted rows to coexist with replacements until restoration.
 
 Background jobs (`jobs`) are run by a simple in-process worker pool; on restart, jobs in `running` status go back to the queue.
 
