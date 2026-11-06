@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix web
+
+      - name: Install pinned generators and linter
+        run: |
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.28.0
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
+
+      - name: Generate database code
+        run: make gen
+
+      - name: Verify generated code is up to date
+        run: |
+          git diff --exit-code -- internal/db/gen
+          test -z "$(git ls-files --others --exclude-standard -- internal/db/gen)"
+
+      - name: Build
+        run: make build
+
+      - name: Verify embedded frontend assets
+        run: |
+          DATABASE_PATH="$RUNNER_TEMP/retain-ci.db" HTTP_ADDR=127.0.0.1:18080 ./bin/retain &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18080/healthz >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          html=$(curl --fail --silent http://127.0.0.1:18080/)
+          grep -F '<div id="root"></div>' <<< "$html"
+          asset=$(sed -nE 's/.*src="([^"]+\.js)".*/\1/p' <<< "$html")
+          test -n "$asset"
+          curl --fail --silent "http://127.0.0.1:18080$asset" >/dev/null
