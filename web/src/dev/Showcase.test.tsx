@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within, fireEvent } from '@testing-library/react';
+import { cleanup, render, screen, within, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -11,7 +11,7 @@ import { DEFAULT_THEME_SETTINGS } from '../theme/settings';
 import Showcase, { hasLowContrast } from './Showcase';
 
 afterEach(cleanup);
-beforeEach(() => localStorage.clear());
+beforeEach(() => { localStorage.clear(); window.history.replaceState(null, '', '/'); });
 describe('development showcase', () => {
   it('gates the exact route to development', () => {
     expect(isDevShowcase(true, '/dev/ui')).toBe(true);
@@ -92,10 +92,32 @@ describe('development showcase', () => {
     const decks = within(nav).getByRole('link', { name: t('decks') });
     for (const link of within(nav).getAllByRole('link')) expect(preview.querySelector(link.getAttribute('href')!)).toBeTruthy();
     await user.click(decks);
-    expect(decks.getAttribute('aria-current')).toBe('page');
+    await waitFor(() => expect(decks.getAttribute('aria-current')).toBe('page'));
     expect(decks.firstElementChild?.className).toContain('bg-secondary-container');
     expect(home.getAttribute('aria-current')).toBeNull();
     expect(home.firstElementChild?.className).not.toContain('bg-secondary-container');
+  });
+  it('syncs navigation with direct hashes and history hash changes', () => {
+    window.history.replaceState(null, '', '#dark-decks');
+    render(<ThemeProvider><Showcase /></ThemeProvider>);
+    const dark = within(document.querySelector('[data-theme-preview="dark"]') as HTMLElement).getByRole('navigation');
+    const light = within(document.querySelector('[data-theme-preview="light"]') as HTMLElement).getByRole('navigation');
+    const selected = (nav: HTMLElement, id: 'home' | 'decks' | 'settings') => within(nav).getByRole('link', { name: t(id) }).getAttribute('aria-current');
+    expect(selected(dark, 'decks')).toBe('page');
+    expect(selected(light, 'home')).toBe('page');
+    window.history.replaceState(null, '', '#light-settings');
+    fireEvent(window, new HashChangeEvent('hashchange'));
+    expect(selected(light, 'settings')).toBe('page');
+    expect(selected(dark, 'home')).toBe('page');
+    expect(selected(dark, 'decks')).toBeNull();
+    window.history.replaceState(null, '', '#dark-decks');
+    fireEvent(window, new HashChangeEvent('hashchange'));
+    expect(selected(dark, 'decks')).toBe('page');
+    expect(selected(light, 'home')).toBe('page');
+    window.history.replaceState(null, '', '#unknown');
+    fireEvent(window, new HashChangeEvent('hashchange'));
+    expect(selected(dark, 'home')).toBe('page');
+    expect(selected(light, 'home')).toBe('page');
   });
   it('detects insufficient palette contrast', () => {
     const palettes = createThemePalettes(DEFAULT_THEME_SETTINGS);

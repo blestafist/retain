@@ -39,8 +39,17 @@ function Controls() {
     {hasLowContrast(palettes) && <div role="alert" className="mt-4 flex flex-wrap items-center gap-3 rounded-xl bg-error-container p-4 text-on-error-container"><p>{t('contrastWarning')}</p><Button variant="tonal" onClick={() => update({ contrastLevel: settings.contrastLevel === 0 ? 0.5 : 1 })} disabled={settings.contrastLevel === 1}>{t('raiseContrast')}</Button></div>}
   </section>;
 }
+function currentFromHash(mode: 'light' | 'dark') {
+  return (['home', 'decks', 'settings'] as const).find((id) => window.location.hash === `#${mode}-${id}`) ?? 'home';
+}
 function PreviewContent({ mode, portalContainer }: { portalContainer: HTMLElement | null; mode: 'light' | 'dark' }) {
-  const [current, setCurrent] = useState('home');
+  const [current, setCurrent] = useState(() => currentFromHash(mode));
+  useEffect(() => {
+    const sync = () => setCurrent(currentFromHash(mode));
+    sync();
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, [mode]);
   const [rating, setRating] = useState('good');
   const show = useSnackbar();
   const notify = () => show({ message: 'snackbarMessage' });
@@ -53,7 +62,7 @@ function PreviewContent({ mode, portalContainer }: { portalContainer: HTMLElemen
     <section className={section}><h3 className={heading}>{t('wavyProgress')}</h3><WavyProgress value={65} /><h3 className={`${heading} mt-4`}>{t('loadingIndicator')}</h3><LoadingIndicator /></section>
     <section className={section}><h3 className={heading}>{t('fabMenu')}</h3><FabMenu actions={actions} portalContainer={portalContainer} /><h3 className={`${heading} mt-4`}>{t('splitButton')}</h3><SplitButton portalContainer={portalContainer} action={{ id: 'study', label: 'study', onSelect: notify }} options={actions} /></section>
     <section className={section}><h3 className={heading}>{t('floatingToolbar')}</h3><FloatingToolbar actions={toolbar} /></section>
-    <section id={`${mode}-settings`} className={section}><h3 className={heading}>{t('responsiveNav')}</h3><Navigation current={current} onNavigate={setCurrent} items={(['home', 'decks', 'settings'] as const).map((id) => ({ id, label: id, href: `#${mode}-${id}`, icon: <DecorativeShape shape="clover" className="h-5 w-5" /> }))} /></section>
+    <section id={`${mode}-settings`} className={section}><h3 className={heading}>{t('responsiveNav')}</h3><Navigation current={current} items={(['home', 'decks', 'settings'] as const).map((id) => ({ id, label: id, href: `#${mode}-${id}`, icon: <DecorativeShape shape="clover" className="h-5 w-5" /> }))} /></section>
     <section className={section}><h3 className={heading}>{t('snackbar')}</h3><Button onClick={notify}>{t('showSnackbar')}</Button><h3 className={`${heading} mt-4`}>{t('sheet')}</h3><Sheet portalContainer={portalContainer} trigger={<Button variant="tonal">{t('openSheet')}</Button>} title="suggestions" description="suggestionsDescription"><p>{t('sheetContent')}</p></Sheet></section>
     <section className={section}><h3 className={heading}>{t('shapes')}</h3><div className="flex gap-4 text-tertiary">{(['cookie', 'clover', 'sunny'] as const).map((shape) => <DecorativeShape key={shape} shape={shape} className="h-12 w-12" />)}</div></section>
   </div></>;
