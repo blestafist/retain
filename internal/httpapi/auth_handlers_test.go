@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -196,6 +197,17 @@ func TestSettingsPatchRequiresJSONObject(t *testing.T) {
 	}
 	cookie := login.Result().Cookies()[0]
 
+	beforeResponse := accountRequest(handler, http.MethodGet, "/api/v1/me", "", cookie)
+	if beforeResponse.Code != http.StatusOK {
+		t.Fatalf("settings baseline GET status = %d, body %s", beforeResponse.Code, beforeResponse.Body)
+	}
+	var beforeAccount struct {
+		Settings auth.Settings `json:"settings"`
+	}
+	if err := json.Unmarshal(beforeResponse.Body.Bytes(), &beforeAccount); err != nil {
+		t.Fatalf("decode settings baseline: %v", err)
+	}
+
 	emptyPatch := accountRequest(handler, http.MethodPatch, "/api/v1/me/settings", `{}`, cookie)
 	if emptyPatch.Code != http.StatusOK {
 		t.Fatalf("empty settings PATCH status = %d, body %s; want %d", emptyPatch.Code, emptyPatch.Body, http.StatusOK)
@@ -206,6 +218,9 @@ func TestSettingsPatchRequiresJSONObject(t *testing.T) {
 	}
 	if settings.UserID != adminID {
 		t.Errorf("empty settings PATCH user ID = %d, want %d", settings.UserID, adminID)
+	}
+	if !reflect.DeepEqual(settings, beforeAccount.Settings) {
+		t.Errorf("empty settings PATCH changed settings: before %+v, after %+v", beforeAccount.Settings, settings)
 	}
 
 	for _, body := range []string{`null`, `[]`, `"string"`, `123`, `true`} {
