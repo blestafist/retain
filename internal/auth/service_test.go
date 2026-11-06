@@ -59,6 +59,10 @@ func newServiceTest(t *testing.T) (*Service, *db.DB, *serviceTestClock) {
 	return service, database, c
 }
 
+func fsrsWeightsJSON(length int) string {
+	return "[" + strings.TrimSuffix(strings.Repeat("1,", length), ",") + "]"
+}
+
 func createServiceTestInvite(t *testing.T, service *Service, adminID int64) Invite {
 	t.Helper()
 	invite, err := service.CreateInvite(context.Background(), adminID)
@@ -479,7 +483,7 @@ func TestSettingsPatchValidationAndIsolation(t *testing.T) {
 		"request_retention":   json.RawMessage(`0.95`),
 		"learning_steps":      json.RawMessage(`"30s 2h"`),
 		"relearning_steps":    json.RawMessage(`"15m"`),
-		"fsrs_weights":        json.RawMessage(`[ 1, 2.5 ]`),
+		"fsrs_weights":        json.RawMessage(" [ " + strings.Trim(fsrsWeightsJSON(17), "[]") + " ] "),
 		"timezone":            json.RawMessage(`"America/New_York"`),
 		"day_start_hour":      json.RawMessage(`5`),
 		"reminder_time":       json.RawMessage(`"19:30"`),
@@ -495,7 +499,7 @@ func TestSettingsPatchValidationAndIsolation(t *testing.T) {
 	}
 	if updated.UserID != firstID || updated.NewPerDay != 35 || updated.MaxReviewsPerDay != 250 ||
 		updated.RequestRetention != 0.95 || updated.LearningSteps != "30s 2h" || updated.RelearningSteps != "15m" ||
-		string(updated.FsrsWeights) != `[1,2.5]` || updated.Timezone != "America/New_York" || updated.DayStartHour != 5 ||
+		string(updated.FsrsWeights) != fsrsWeightsJSON(17) || updated.Timezone != "America/New_York" || updated.DayStartHour != 5 ||
 		updated.ReminderTime == nil || *updated.ReminderTime != "19:30" || !updated.TtsAuto || updated.ThemeMode != "dark" ||
 		updated.ThemeSeed != "#ABCDEF" || updated.ThemeVariant != "expressive" || updated.ThemeContrast != 0.5 ||
 		updated.MaximumInterval != 36500 {
@@ -562,6 +566,56 @@ func TestSettingsPatchValidationAndIsolation(t *testing.T) {
 	}
 	if _, err := service.UpdateSettings(ctx, secondID+999, map[string]json.RawMessage{"new_per_day": json.RawMessage(`5`)}); !errors.Is(err, ErrUnauthenticated) {
 		t.Errorf("UpdateSettings(missing user) error = %v, want ErrUnauthenticated", err)
+	}
+}
+
+func TestSettingsPatchFSRSWeights(t *testing.T) {
+	ctx := context.Background()
+	service, _, _ := newServiceTest(t)
+	userID, err := service.CreateAdmin(ctx, "weights@example.com", "Weights", serviceTestPassword)
+	if err != nil {
+		t.Fatalf("CreateAdmin() error = %v", err)
+	}
+
+	valid17 := fsrsWeightsJSON(17)
+	valid19 := fsrsWeightsJSON(19)
+	stringElement := strings.Replace(valid17, "1", `"weight"`, 1)
+	nullElement := strings.Replace(valid17, "1", "null", 1)
+	tests := []struct {
+		name       string
+		weights    string
+		wantStored string
+	}{
+		{name: "valid 17 weights", weights: " [ " + strings.Trim(valid17, "[]") + " ] ", wantStored: valid17},
+		{name: "valid 19 weights", weights: valid19, wantStored: valid19},
+		{name: "object", weights: `{}`},
+		{name: "string", weights: `"weights"`},
+		{name: "scalar", weights: `1`},
+		{name: "empty array", weights: `[]`},
+		{name: "16 weights", weights: fsrsWeightsJSON(16)},
+		{name: "18 weights", weights: fsrsWeightsJSON(18)},
+		{name: "20 weights", weights: fsrsWeightsJSON(20)},
+		{name: "string element", weights: stringElement},
+		{name: "null element", weights: nullElement},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			updated, err := service.UpdateSettings(ctx, userID, map[string]json.RawMessage{
+				"fsrs_weights": json.RawMessage(test.weights),
+			})
+			if test.wantStored == "" {
+				if !errors.Is(err, ErrInvalidInput) {
+					t.Errorf("UpdateSettings(PATCH fsrs_weights) error = %v, want ErrInvalidInput", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("UpdateSettings(PATCH valid fsrs_weights) error = %v", err)
+			}
+			if got := string(updated.FsrsWeights); got != test.wantStored {
+				t.Errorf("stored fsrs_weights = %q, want compact %q", got, test.wantStored)
+			}
+		})
 	}
 }
 

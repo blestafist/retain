@@ -123,11 +123,11 @@ func applySettingsPatch(current gen.UserSetting, patch map[string]json.RawMessag
 				current.FsrsWeights = sql.NullString{}
 				continue
 			}
-			var compact bytes.Buffer
-			if err := json.Compact(&compact, raw); err != nil {
-				return gen.UserSetting{}, ErrInvalidInput
+			compact, err := compactFSRSWeights(raw)
+			if err != nil {
+				return gen.UserSetting{}, err
 			}
-			current.FsrsWeights = sql.NullString{String: compact.String(), Valid: true}
+			current.FsrsWeights = sql.NullString{String: compact, Valid: true}
 		case "timezone":
 			if err := decodeNonNull(raw, &current.Timezone); err != nil {
 				return gen.UserSetting{}, err
@@ -184,6 +184,27 @@ func decodeNonNull(raw json.RawMessage, destination any) error {
 	return nil
 }
 
+func compactFSRSWeights(raw []byte) (string, error) {
+	var values []any
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return "", ErrInvalidInput
+	}
+	if len(values) != 17 && len(values) != 19 {
+		return "", ErrInvalidInput
+	}
+	for _, value := range values {
+		weight, ok := value.(float64)
+		if !ok || math.IsNaN(weight) || math.IsInf(weight, 0) {
+			return "", ErrInvalidInput
+		}
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil {
+		return "", ErrInvalidInput
+	}
+	return compact.String(), nil
+}
+
 func validateSettings(settings gen.UserSetting) error {
 	if settings.NewPerDay < 0 || settings.MaxReviewsPerDay < 0 ||
 		math.IsNaN(settings.RequestRetention) || math.IsInf(settings.RequestRetention, 0) ||
@@ -217,8 +238,10 @@ func validateSettings(settings gen.UserSetting) error {
 	if settings.ThemeContrast != 0 && settings.ThemeContrast != 0.5 && settings.ThemeContrast != 1 {
 		return ErrInvalidInput
 	}
-	if settings.FsrsWeights.Valid && !json.Valid([]byte(settings.FsrsWeights.String)) {
-		return ErrInvalidInput
+	if settings.FsrsWeights.Valid {
+		if _, err := compactFSRSWeights([]byte(settings.FsrsWeights.String)); err != nil {
+			return ErrInvalidInput
+		}
 	}
 	return nil
 }
