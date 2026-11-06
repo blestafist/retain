@@ -6,6 +6,7 @@ require (
 	github.com/caarlos0/env/v11 v11.3.1
 	github.com/pressly/goose/v3 v3.24.1
 	golang.org/x/crypto v0.31.0
+	golang.org/x/term v0.27.0
 	modernc.org/sqlite v1.34.5
 )
 
