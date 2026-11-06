@@ -56,9 +56,20 @@ jobs:
 
       - name: Verify embedded frontend assets
         run: |
-          DATABASE_PATH="$RUNNER_TEMP/retain-ci.db" HTTP_ADDR=127.0.0.1:18080 ./bin/retain &
+          DATABASE_PATH="$RUNNER_TEMP/retain-ci.db" HTTP_ADDR=127.0.0.1:18080 PUBLIC_ORIGIN=http://127.0.0.1:18080 ./bin/retain &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+
+          assert_status() {
+            expected=$1
+            description=$2
+            shift 2
+            actual=$(curl --silent --show-error --output "$RUNNER_TEMP/retain-smoke-response" --write-out '%{http_code}' "$@")
+            if [ "$actual" != "$expected" ]; then
+              echo "Expected $description to return HTTP $expected, got $actual" >&2
+              return 1
+            fi
+          }
 
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:18080/healthz >/dev/null; then
@@ -67,8 +78,11 @@ jobs:
             sleep 1
           done
 
-          html=$(curl --fail --silent http://127.0.0.1:18080/)
+          assert_status 200 'GET /healthz' http://127.0.0.1:18080/healthz
+          assert_status 403 'POST /api/v1/auth/logout without Origin' --request POST http://127.0.0.1:18080/api/v1/auth/logout
+          assert_status 200 'GET /' http://127.0.0.1:18080/
+          html=$(cat "$RUNNER_TEMP/retain-smoke-response")
           grep -F '<div id="root"></div>' <<< "$html"
           asset=$(sed -nE 's/.*src="([^"]+\.js)".*/\1/p' <<< "$html")
           test -n "$asset"
-          curl --fail --silent "http://127.0.0.1:18080$asset" >/dev/null
+          assert_status 200 "GET $asset" "http://127.0.0.1:18080$asset"
