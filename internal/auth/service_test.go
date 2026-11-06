@@ -21,6 +21,41 @@ const serviceTestPassword = "correct horse battery staple"
 
 var serviceTestNow = time.Date(2026, time.March, 14, 9, 26, 53, 0, time.UTC)
 
+func TestNormalizeDisplayName(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{name: "empty", input: "", wantErr: true},
+		{name: "whitespace only", input: " \t\n ", wantErr: true},
+		{name: "over 100 code points", input: strings.Repeat("界", maxNameRunes+1), wantErr: true},
+		{name: "control character", input: "Name\u007f", wantErr: true},
+		{name: "invalid UTF-8", input: string([]byte{0xff}), wantErr: true},
+		{name: "trimmed valid name", input: "  Ada Lovelace  ", want: "Ada Lovelace"},
+		{name: "100 code points", input: strings.Repeat("界", maxNameRunes), want: strings.Repeat("界", maxNameRunes)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NormalizeDisplayName(tt.input)
+			if tt.wantErr {
+				if !errors.Is(err, ErrInvalidInput) {
+					t.Fatalf("NormalizeDisplayName() error = %v, want ErrInvalidInput", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NormalizeDisplayName() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("NormalizeDisplayName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 type serviceTestClock struct {
 	mu  sync.RWMutex
 	now time.Time

@@ -178,6 +178,39 @@ func TestRunAdminCommandRejectsInvalidArgumentsBeforeOpeningDatabase(t *testing.
 	}
 }
 
+func TestRunAdminCommandRejectsInvalidNameBeforeOpeningDatabase(t *testing.T) {
+	tests := []struct {
+		name string
+		arg  string
+	}{
+		{name: "whitespace only", arg: "--name= \t "},
+		{name: "over 100 code points", arg: "--name=" + strings.Repeat("界", 101)},
+		{name: "control character", arg: "--name=Invalid\u007fName"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			databasePath := filepath.Join(t.TempDir(), "not-created", "retain.db")
+			readerCalls := 0
+			err := runAdminCommand(context.Background(), []string{"create", "--email=user@example.test", tt.arg}, config.Config{
+				DatabasePath: databasePath,
+			}, func(string) ([]byte, error) {
+				readerCalls++
+				return []byte(adminBootstrapTestPassword), nil
+			}, io.Discard)
+			if !errors.Is(err, auth.ErrInvalidInput) {
+				t.Fatalf("runAdminCommand() error = %v, want auth.ErrInvalidInput", err)
+			}
+			if readerCalls != 0 {
+				t.Errorf("password reader calls = %d, want 0", readerCalls)
+			}
+			if _, err := os.Stat(filepath.Dir(databasePath)); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("database directory stat error = %v, want os.ErrNotExist", err)
+			}
+		})
+	}
+}
+
 func TestRunAdminCommandHelpDoesNotOpenDatabaseOrReadPassword(t *testing.T) {
 	tests := []struct {
 		name string

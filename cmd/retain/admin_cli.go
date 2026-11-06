@@ -68,6 +68,15 @@ func parseAdminCreateArgs(args []string) (adminCreateArgs, *flag.FlagSet, error)
 	if !validAdminEmail(parsed.email) {
 		return parsed, fs, auth.ErrInvalidInput
 	}
+	name := parsed.name
+	if name == "" {
+		name, _, _ = strings.Cut(parsed.email, "@")
+	}
+	normalizedName, err := auth.NormalizeDisplayName(name)
+	if err != nil {
+		return parsed, fs, err
+	}
+	parsed.name = normalizedName
 	return parsed, fs, nil
 }
 
@@ -87,10 +96,6 @@ func runParsedAdminCreate(ctx context.Context, parsed adminCreateArgs, creator a
 	if readPassword == nil {
 		return errors.New("password reader is required")
 	}
-	if parsed.name == "" {
-		parsed.name, _, _ = strings.Cut(parsed.email, "@")
-	}
-
 	password, err := readPassword("Password: ")
 	if err != nil {
 		return adminPasswordReadError("read password", err)

@@ -434,14 +434,14 @@ func normalizeAccount(email, name, password string) (normalizedAccount, error) {
 	if !ok {
 		return normalizedAccount{}, ErrInvalidInput
 	}
-	name = strings.TrimSpace(name)
-	if !validName(name) {
+	normalizedName, err := NormalizeDisplayName(name)
+	if err != nil {
 		return normalizedAccount{}, ErrInvalidInput
 	}
 	if err := ValidatePassword(password); err != nil {
 		return normalizedAccount{}, ErrInvalidInput
 	}
-	return normalizedAccount{email: normalizedEmail, name: name}, nil
+	return normalizedAccount{email: normalizedEmail, name: normalizedName}, nil
 }
 
 func normalizeEmail(email string) (string, bool) {
@@ -454,6 +454,15 @@ func normalizeEmail(email string) (string, bool) {
 		return "", false
 	}
 	return email, true
+}
+
+// NormalizeDisplayName trims and validates an account display name.
+func NormalizeDisplayName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if !validName(name) {
+		return "", ErrInvalidInput
+	}
+	return name, nil
 }
 
 func validName(name string) bool {
