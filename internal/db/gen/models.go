@@ -9,12 +9,86 @@ import (
 	"time"
 )
 
+type Card struct {
+	ID            int64
+	NoteID        int64
+	UserID        int64
+	Direction     string
+	State         int64
+	Due           time.Time
+	Stability     sql.NullFloat64
+	Difficulty    sql.NullFloat64
+	ElapsedDays   int64
+	ScheduledDays int64
+	Step          int64
+	Reps          int64
+	Lapses        int64
+	LastReview    sql.NullTime
+	Suspended     bool
+	IsLeech       bool
+	UpdatedAt     time.Time
+}
+
+type Deck struct {
+	ID                 int64
+	OwnerID            int64
+	ParentID           sql.NullInt64
+	Name               string
+	Description        sql.NullString
+	Position           int64
+	LangTarget         sql.NullString
+	LangNative         sql.NullString
+	ReverseCards       bool
+	WrongArticleRating int64
+	ColorSeed          sql.NullString
+	Source             sql.NullString
+	ExternalID         sql.NullString
+	ExpectedCount      sql.NullInt64
+	SourceDeckID       sql.NullInt64
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          sql.NullTime
+}
+
+type ImportBatch struct {
+	ID        string
+	UserID    int64
+	Adapter   string
+	Filename  sql.NullString
+	Raw       []byte
+	RawSha256 []byte
+	Status    string
+	Summary   string
+	CreatedAt time.Time
+	AppliedAt sql.NullTime
+}
+
 type Invite struct {
 	Code      string
 	CreatedBy int64
 	UsedBy    sql.NullInt64
 	ExpiresAt time.Time
 	CreatedAt time.Time
+}
+
+type Note struct {
+	ID                 int64
+	DeckID             int64
+	Term               string
+	TermKey            string
+	Translation        string
+	Transcription      sql.NullString
+	Example            sql.NullString
+	ExampleTranslation sql.NullString
+	Notes              sql.NullString
+	Tags               string
+	Alternatives       string
+	Fields             string
+	ExternalID         sql.NullString
+	ImportBatchID      sql.NullString
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          sql.NullTime
 }
 
 type Session struct {

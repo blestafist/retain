@@ -63,7 +63,7 @@ func TestOpenRejectsBlankPath(t *testing.T) {
 	}
 }
 
-func TestOpenAppliesMigrationsOnceAndCreatesAccountSchema(t *testing.T) {
+func TestOpenAppliesMigrationsOnceAndCreatesAccountAndContentSchema(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "retain.db")
 
@@ -80,9 +80,9 @@ func TestOpenAppliesMigrationsOnceAndCreatesAccountSchema(t *testing.T) {
 			_ = database.Close()
 			t.Fatalf("read current migration version: %v", err)
 		}
-		if currentVersion != 2 {
+		if currentVersion != 3 {
 			_ = database.Close()
-			t.Errorf("current migration version = %d, want 2", currentVersion)
+			t.Errorf("current migration version = %d, want 3", currentVersion)
 		}
 
 		var productTables int
@@ -92,9 +92,9 @@ func TestOpenAppliesMigrationsOnceAndCreatesAccountSchema(t *testing.T) {
 			_ = database.Close()
 			t.Fatalf("count product tables: %v", err)
 		}
-		if productTables != 4 {
+		if productTables != 8 {
 			_ = database.Close()
-			t.Errorf("product tables = %d, want 4", productTables)
+			t.Errorf("product tables = %d, want 8", productTables)
 		}
 
 		if err := database.Close(); err != nil {
