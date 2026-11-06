@@ -68,19 +68,85 @@ WHERE decks.id = sqlc.arg(id)
   AND decks.owner_id = sqlc.arg(owner_id)
   AND decks.deleted_at IS NULL
   AND (
-      sqlc.narg(parent_id) IS NULL OR EXISTS (
-          SELECT 1 FROM decks AS parent
-          WHERE parent.id = sqlc.narg(parent_id)
-            AND parent.owner_id = decks.owner_id
-            AND parent.deleted_at IS NULL
+      sqlc.narg(parent_id) IS NULL OR (
+          EXISTS (
+              SELECT 1 FROM decks AS parent
+              WHERE parent.id = sqlc.narg(parent_id)
+                AND parent.owner_id = decks.owner_id
+                AND parent.deleted_at IS NULL
+                AND NOT EXISTS (
+                    WITH RECURSIVE descendants(id) AS (
+                        SELECT decks.id
+                        UNION
+                        SELECT child.id
+                        FROM decks AS child
+                        JOIN descendants AS descendant ON child.parent_id = descendant.id
+                        WHERE child.owner_id = decks.owner_id
+                          AND child.deleted_at IS NULL
+                    )
+                    SELECT 1 FROM descendants
+                    WHERE id = parent.id
+                )
+            )
       )
   )
 RETURNING *;
 
 -- name: SoftDeleteDeck :one
 UPDATE decks
-SET deleted_at = ?, updated_at = ?
+SET deleted_at = ?,
+    deletion_batch = lower(hex(randomblob(16))),
+    updated_at = ?
 WHERE id = ? AND owner_id = ? AND deleted_at IS NULL
+RETURNING *;
+
+-- name: GetDeckBySourceExternalID :one
+SELECT * FROM decks
+WHERE owner_id = ?
+  AND source = ?
+  AND external_id = ?
+  AND deleted_at IS NULL;
+
+-- name: GetDeletedDeckBySourceExternalID :one
+SELECT * FROM decks
+WHERE owner_id = ?
+  AND source = ?
+  AND external_id = ?
+  AND deleted_at IS NOT NULL
+ORDER BY updated_at DESC, id DESC
+LIMIT 1;
+
+-- name: RestoreDeckBySourceExternalID :one
+UPDATE decks
+SET deleted_at = NULL,
+    deletion_batch = NULL,
+    updated_at = sqlc.arg(updated_at)
+WHERE id = (
+    SELECT candidate.id
+    FROM decks AS candidate
+    WHERE candidate.owner_id = sqlc.arg(owner_id)
+      AND candidate.source = sqlc.arg(source)
+      AND candidate.external_id = sqlc.arg(external_id)
+      AND candidate.deleted_at IS NOT NULL
+      AND candidate.deletion_batch IS NOT NULL
+      AND (
+          candidate.parent_id IS NULL OR EXISTS (
+              SELECT 1 FROM decks AS parent
+              WHERE parent.id = candidate.parent_id
+                AND parent.owner_id = candidate.owner_id
+                AND parent.deleted_at IS NULL
+          )
+      )
+    ORDER BY candidate.updated_at DESC, candidate.id DESC
+    LIMIT 1
+)
+  AND NOT EXISTS (
+      SELECT 1 FROM decks AS active
+      WHERE active.owner_id = decks.owner_id
+        AND active.source = decks.source
+        AND active.external_id = decks.external_id
+        AND active.deleted_at IS NULL
+  )
 RETURNING *;
 
 -- name: CreateImportBatch :one
@@ -193,7 +259,9 @@ RETURNING *;
 
 -- name: SoftDeleteNote :one
 UPDATE notes
-SET deleted_at = ?, updated_at = ?
+SET deleted_at = ?,
+    deletion_batch = lower(hex(randomblob(16))),
+    updated_at = ?
 WHERE notes.id = ?
   AND notes.deleted_at IS NULL
   AND EXISTS (
@@ -201,6 +269,109 @@ WHERE notes.id = ?
       WHERE decks.id = notes.deck_id
         AND decks.owner_id = ?
         AND decks.deleted_at IS NULL
+  )
+RETURNING *;
+
+-- name: GetNoteByExternalID :one
+SELECT notes.* FROM notes
+JOIN decks ON decks.id = notes.deck_id
+WHERE notes.deck_id = ?
+  AND decks.owner_id = ?
+  AND notes.external_id = ?
+  AND notes.deleted_at IS NULL
+  AND decks.deleted_at IS NULL;
+
+-- name: GetDeletedNoteByExternalID :one
+SELECT notes.* FROM notes
+JOIN decks ON decks.id = notes.deck_id
+WHERE notes.deck_id = ?
+  AND decks.owner_id = ?
+  AND notes.external_id = ?
+  AND notes.deleted_at IS NOT NULL
+ORDER BY notes.updated_at DESC, notes.id DESC
+LIMIT 1;
+
+-- name: RestoreNoteByExternalID :one
+UPDATE notes
+SET deleted_at = NULL,
+    deletion_batch = NULL,
+    updated_at = sqlc.arg(updated_at)
+WHERE id = (
+    SELECT candidate.id
+    FROM notes AS candidate
+    JOIN decks ON decks.id = candidate.deck_id
+    WHERE candidate.deck_id = sqlc.arg(deck_id)
+      AND decks.owner_id = sqlc.arg(owner_id)
+      AND decks.deleted_at IS NULL
+      AND candidate.external_id = sqlc.arg(external_id)
+      AND candidate.deleted_at IS NOT NULL
+      AND candidate.deletion_batch IS NOT NULL
+    ORDER BY candidate.updated_at DESC, candidate.id DESC
+    LIMIT 1
+)
+  AND NOT EXISTS (
+      SELECT 1 FROM notes AS active
+      WHERE active.deck_id = notes.deck_id
+        AND active.deleted_at IS NULL
+        AND active.external_id = notes.external_id
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM notes AS active
+      WHERE active.deck_id = notes.deck_id
+        AND active.deleted_at IS NULL
+        AND active.term_key = notes.term_key
+  )
+RETURNING *;
+
+-- name: GetNoteByTermKey :one
+SELECT notes.* FROM notes
+JOIN decks ON decks.id = notes.deck_id
+WHERE notes.deck_id = ?
+  AND decks.owner_id = ?
+  AND notes.term_key = ?
+  AND notes.deleted_at IS NULL
+  AND decks.deleted_at IS NULL;
+
+-- name: GetDeletedNoteByTermKey :one
+SELECT notes.* FROM notes
+JOIN decks ON decks.id = notes.deck_id
+WHERE notes.deck_id = ?
+  AND decks.owner_id = ?
+  AND notes.term_key = ?
+  AND notes.deleted_at IS NOT NULL
+ORDER BY notes.updated_at DESC, notes.id DESC
+LIMIT 1;
+
+-- name: RestoreNoteByTermKey :one
+UPDATE notes
+SET deleted_at = NULL,
+    deletion_batch = NULL,
+    updated_at = sqlc.arg(updated_at)
+WHERE id = (
+    SELECT candidate.id
+    FROM notes AS candidate
+    JOIN decks ON decks.id = candidate.deck_id
+    WHERE candidate.deck_id = sqlc.arg(deck_id)
+      AND decks.owner_id = sqlc.arg(owner_id)
+      AND decks.deleted_at IS NULL
+      AND candidate.term_key = sqlc.arg(term_key)
+      AND candidate.deleted_at IS NOT NULL
+      AND candidate.deletion_batch IS NOT NULL
+    ORDER BY candidate.updated_at DESC, candidate.id DESC
+    LIMIT 1
+)
+  AND NOT EXISTS (
+      SELECT 1 FROM notes AS active
+      WHERE active.deck_id = notes.deck_id
+        AND active.deleted_at IS NULL
+        AND active.term_key = notes.term_key
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM notes AS active
+      WHERE active.deck_id = notes.deck_id
+        AND active.deleted_at IS NULL
+        AND active.external_id = notes.external_id
+        AND notes.external_id IS NOT NULL
   )
 RETURNING *;
 
@@ -214,7 +385,12 @@ WHERE notes.id = CAST(sqlc.arg(note_id) AS INTEGER)
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
 ON CONFLICT (note_id, user_id, direction) DO UPDATE
-SET direction = excluded.direction
+SET deleted_at = NULL,
+    deletion_batch = NULL,
+    updated_at = CASE
+        WHEN cards.deleted_at IS NULL THEN cards.updated_at
+        ELSE CURRENT_TIMESTAMP
+    END
 RETURNING *;
 
 -- name: GetCard :one
@@ -223,6 +399,7 @@ JOIN notes ON notes.id = cards.note_id
 JOIN decks ON decks.id = notes.deck_id
 WHERE cards.id = ?
   AND cards.user_id = ?
+  AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL;
 
@@ -231,6 +408,7 @@ SELECT cards.* FROM cards
 JOIN notes ON notes.id = cards.note_id
 JOIN decks ON decks.id = notes.deck_id
 WHERE cards.user_id = ?
+  AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
 ORDER BY cards.due, cards.id;
@@ -241,6 +419,7 @@ JOIN notes ON notes.id = cards.note_id
 JOIN decks ON decks.id = notes.deck_id
 WHERE cards.note_id = ?
   AND cards.user_id = ?
+  AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
 ORDER BY cards.id;

@@ -331,7 +331,7 @@ decks(
   color_seed TEXT NULL,              -- per-deck accent color
   source TEXT NULL, external_id TEXT NULL, expected_count INT NULL,
   source_deck_id NULL,               -- if copied from a friend
-  created_at, updated_at, deleted_at NULL)
+  created_at, updated_at, deleted_at NULL, deletion_batch TEXT NULL)
    UNIQUE(owner_id, source, external_id), INDEX(parent_id)
 
 deck_shares(deck_id → decks, user_id → users, mode TEXT /* copy|subscribe */)
@@ -343,7 +343,7 @@ notes(                               -- a word or phrase
   tags TEXT /* JSON */, alternatives TEXT /* JSON */,
   fields TEXT /* JSON: kind, pos, article, plural, governs, reflexive, verb_forms, cefr, mnemonic, ... */,
   external_id TEXT NULL, import_batch_id → import_batches NULL,
-  created_at, updated_at, deleted_at NULL)
+  created_at, updated_at, deleted_at NULL, deletion_batch TEXT NULL)
    UNIQUE(deck_id, term_key), UNIQUE(deck_id, external_id)
 
 import_batches(
@@ -359,7 +359,7 @@ cards(
   due DATETIME, stability REAL, difficulty REAL,
   elapsed_days INT, scheduled_days INT, step INT,
   reps INT, lapses INT, last_review DATETIME NULL,
-   suspended BOOL, is_leech BOOL, updated_at, deleted_at NULL)
+   suspended BOOL, is_leech BOOL, updated_at, deleted_at NULL, deletion_batch TEXT NULL)
   INDEX(user_id, due), INDEX(note_id)
 
 review_logs(                         -- append-only
@@ -387,7 +387,7 @@ push_subscriptions(id PK, user_id → users, endpoint UNIQUE, p256dh, auth, crea
 
 Cards are tied to `user_id`: when subscribed to a friend's deck, notes are shared but progress is per user.
 
-Deleting a deck soft-deletes its entire descendant subtree, notes, and cards. Soft-deleted rows retain their unique identities; re-importing a matching source/external ID restores the existing deck/note/card rows instead of creating duplicates, preserving card progress.
+Deleting a deck soft-deletes its entire descendant subtree, notes, and cards. A private `deletion_batch` marker groups rows changed by one cascade so restoring a deck only restores the exact subtree rows deleted with it, never independently deleted records. Soft-deleted rows retain their unique identities; re-importing a matching source/external ID restores existing deck/note/card rows instead of creating duplicates, preserving card progress.
 
 Background jobs (`jobs`) are run by a simple in-process worker pool; on restart, jobs in `running` status go back to the queue.
 

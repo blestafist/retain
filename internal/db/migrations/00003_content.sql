@@ -22,11 +22,15 @@ CREATE TABLE decks (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME,
-    UNIQUE (owner_id, source, external_id)
+    deletion_batch TEXT,
+    CHECK ((deleted_at IS NULL) = (deletion_batch IS NULL))
 );
 
 CREATE INDEX decks_owner_parent_idx ON decks(owner_id, parent_id, position, id);
 CREATE INDEX decks_parent_id_idx ON decks(parent_id);
+CREATE UNIQUE INDEX decks_owner_source_external_active_uq
+    ON decks(owner_id, source, external_id)
+    WHERE deleted_at IS NULL AND source IS NOT NULL AND external_id IS NOT NULL;
 
 CREATE TABLE import_batches (
     id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
@@ -61,11 +65,17 @@ CREATE TABLE notes (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME,
-    UNIQUE (deck_id, term_key),
-    UNIQUE (deck_id, external_id)
+    deletion_batch TEXT,
+    CHECK ((deleted_at IS NULL) = (deletion_batch IS NULL))
 );
 
 CREATE INDEX notes_deck_id_idx ON notes(deck_id);
+CREATE UNIQUE INDEX notes_deck_term_key_active_uq
+    ON notes(deck_id, term_key)
+    WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX notes_deck_external_active_uq
+    ON notes(deck_id, external_id)
+    WHERE deleted_at IS NULL AND external_id IS NOT NULL;
 
 CREATE TABLE cards (
     id INTEGER PRIMARY KEY,
@@ -85,13 +95,205 @@ CREATE TABLE cards (
     suspended BOOLEAN NOT NULL DEFAULT 0 CHECK (suspended IN (0, 1)),
     is_leech BOOLEAN NOT NULL DEFAULT 0 CHECK (is_leech IN (0, 1)),
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME,
+    deletion_batch TEXT,
+    CHECK ((deleted_at IS NULL) = (deletion_batch IS NULL)),
     UNIQUE (note_id, user_id, direction)
 );
 
 CREATE INDEX cards_user_due_idx ON cards(user_id, due);
 CREATE INDEX cards_note_id_idx ON cards(note_id);
 
+-- A random marker groups only rows changed by this exact cascade. It prevents a restore from
+-- reactivating descendants or notes that were deleted independently at an earlier time.
+-- +goose StatementBegin
+CREATE TRIGGER decks_soft_delete_cascade
+AFTER UPDATE OF deleted_at ON decks
+WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL
+BEGIN
+    UPDATE decks
+    SET deleted_at = NEW.deleted_at,
+        deletion_batch = NEW.deletion_batch,
+        updated_at = NEW.updated_at
+    WHERE deleted_at IS NULL
+      AND id IN (
+          WITH RECURSIVE descendants(id) AS (
+              SELECT child.id
+              FROM decks AS child
+              WHERE child.parent_id = NEW.id
+                AND child.owner_id = NEW.owner_id
+                AND child.deleted_at IS NULL
+              UNION
+              SELECT child.id
+              FROM decks AS child
+              JOIN descendants AS parent ON child.parent_id = parent.id
+              WHERE child.owner_id = NEW.owner_id
+                AND child.deleted_at IS NULL
+          )
+          SELECT id FROM descendants
+      );
+
+    UPDATE notes
+    SET deleted_at = NEW.deleted_at,
+        deletion_batch = NEW.deletion_batch,
+        updated_at = NEW.updated_at
+    WHERE deleted_at IS NULL
+      AND deck_id IN (
+          WITH RECURSIVE subtree(id) AS (
+              SELECT NEW.id
+              UNION
+              SELECT child.id
+              FROM decks AS child
+              JOIN subtree AS parent ON child.parent_id = parent.id
+              WHERE child.owner_id = NEW.owner_id
+                AND child.deleted_at IS NOT NULL
+                AND child.deletion_batch = NEW.deletion_batch
+          )
+          SELECT id FROM subtree
+      );
+
+    UPDATE cards
+    SET deleted_at = NEW.deleted_at,
+        deletion_batch = NEW.deletion_batch,
+        updated_at = NEW.updated_at
+    WHERE deleted_at IS NULL
+      AND note_id IN (
+          SELECT notes.id
+          FROM notes
+          WHERE notes.deleted_at = NEW.deleted_at
+            AND notes.deletion_batch = NEW.deletion_batch
+            AND notes.deck_id IN (
+                WITH RECURSIVE subtree(id) AS (
+                    SELECT NEW.id
+                    UNION
+                    SELECT child.id
+                    FROM decks AS child
+                    JOIN subtree AS parent ON child.parent_id = parent.id
+                    WHERE child.owner_id = NEW.owner_id
+                      AND child.deleted_at IS NOT NULL
+                      AND child.deletion_batch = NEW.deletion_batch
+                )
+                SELECT id FROM subtree
+            )
+      );
+END;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE TRIGGER decks_restore_cascade
+AFTER UPDATE OF deleted_at ON decks
+WHEN OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL
+BEGIN
+    UPDATE cards
+    SET deleted_at = NULL,
+        deletion_batch = NULL,
+        updated_at = NEW.updated_at
+    WHERE deleted_at = OLD.deleted_at
+      AND deletion_batch = OLD.deletion_batch
+      AND note_id IN (
+          SELECT notes.id
+          FROM notes
+          WHERE notes.deleted_at = OLD.deleted_at
+            AND notes.deletion_batch = OLD.deletion_batch
+            AND notes.deck_id IN (
+                WITH RECURSIVE subtree(id) AS (
+                    SELECT NEW.id
+                    UNION
+                    SELECT child.id
+                    FROM decks AS child
+                    JOIN subtree AS parent ON child.parent_id = parent.id
+                    WHERE child.owner_id = NEW.owner_id
+                      AND child.deleted_at = OLD.deleted_at
+                      AND child.deletion_batch = OLD.deletion_batch
+                )
+                SELECT id FROM subtree
+            )
+      );
+
+    UPDATE notes
+    SET deleted_at = NULL,
+        deletion_batch = NULL,
+        updated_at = NEW.updated_at
+    WHERE deleted_at = OLD.deleted_at
+      AND deletion_batch = OLD.deletion_batch
+      AND deck_id IN (
+          WITH RECURSIVE subtree(id) AS (
+              SELECT NEW.id
+              UNION
+              SELECT child.id
+              FROM decks AS child
+              JOIN subtree AS parent ON child.parent_id = parent.id
+              WHERE child.owner_id = NEW.owner_id
+                AND child.deleted_at = OLD.deleted_at
+                AND child.deletion_batch = OLD.deletion_batch
+          )
+          SELECT id FROM subtree
+      );
+
+    UPDATE decks
+    SET deleted_at = NULL,
+        deletion_batch = NULL,
+        updated_at = NEW.updated_at
+    WHERE deleted_at = OLD.deleted_at
+      AND deletion_batch = OLD.deletion_batch
+      AND owner_id = NEW.owner_id
+      AND id IN (
+          WITH RECURSIVE descendants(id) AS (
+              SELECT child.id
+              FROM decks AS child
+              WHERE child.parent_id = NEW.id
+                AND child.owner_id = NEW.owner_id
+                AND child.deleted_at = OLD.deleted_at
+                AND child.deletion_batch = OLD.deletion_batch
+              UNION
+              SELECT child.id
+              FROM decks AS child
+              JOIN descendants AS parent ON child.parent_id = parent.id
+              WHERE child.owner_id = NEW.owner_id
+                AND child.deleted_at = OLD.deleted_at
+                AND child.deletion_batch = OLD.deletion_batch
+          )
+          SELECT id FROM descendants
+      );
+END;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE TRIGGER notes_soft_delete_cards
+AFTER UPDATE OF deleted_at ON notes
+WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL
+BEGIN
+    UPDATE cards
+    SET deleted_at = NEW.deleted_at,
+        deletion_batch = NEW.deletion_batch,
+        updated_at = NEW.updated_at
+    WHERE note_id = NEW.id AND deleted_at IS NULL;
+END;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE TRIGGER notes_restore_cards
+AFTER UPDATE OF deleted_at ON notes
+WHEN OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL
+BEGIN
+    UPDATE cards
+    SET deleted_at = NULL,
+        deletion_batch = NULL,
+        updated_at = NEW.updated_at
+    WHERE note_id = NEW.id
+      AND deleted_at = OLD.deleted_at
+      AND deletion_batch = OLD.deletion_batch;
+END;
+-- +goose StatementEnd
+
 -- +goose Down
+DROP TRIGGER notes_restore_cards;
+DROP TRIGGER notes_soft_delete_cards;
+DROP TRIGGER decks_restore_cascade;
+DROP TRIGGER decks_soft_delete_cascade;
+DROP INDEX notes_deck_external_active_uq;
+DROP INDEX notes_deck_term_key_active_uq;
+DROP INDEX decks_owner_source_external_active_uq;
 DROP TABLE cards;
 DROP INDEX notes_deck_id_idx;
 DROP TABLE notes;

@@ -27,6 +27,8 @@ type Card struct {
 	Suspended     bool
 	IsLeech       bool
 	UpdatedAt     time.Time
+	DeletedAt     sql.NullTime
+	DeletionBatch sql.NullString
 }
 
 type Deck struct {
@@ -48,6 +50,7 @@ type Deck struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	DeletedAt          sql.NullTime
+	DeletionBatch      sql.NullString
 }
 
 type ImportBatch struct {
@@ -89,6 +92,7 @@ type Note struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	DeletedAt          sql.NullTime
+	DeletionBatch      sql.NullString
 }
 
 type Session struct {

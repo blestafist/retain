@@ -21,8 +21,13 @@ WHERE notes.id = CAST(?3 AS INTEGER)
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
 ON CONFLICT (note_id, user_id, direction) DO UPDATE
-SET direction = excluded.direction
-RETURNING id, note_id, user_id, direction, state, due, stability, difficulty, elapsed_days, scheduled_days, step, reps, lapses, last_review, suspended, is_leech, updated_at
+SET deleted_at = NULL,
+    deletion_batch = NULL,
+    updated_at = CASE
+        WHEN cards.deleted_at IS NULL THEN cards.updated_at
+        ELSE CURRENT_TIMESTAMP
+    END
+RETURNING id, note_id, user_id, direction, state, due, stability, difficulty, elapsed_days, scheduled_days, step, reps, lapses, last_review, suspended, is_leech, updated_at, deleted_at, deletion_batch
 `
 
 type CreateCardParams struct {
@@ -52,6 +57,8 @@ func (q *Queries) CreateCard(ctx context.Context, arg CreateCardParams) (Card, e
 		&i.Suspended,
 		&i.IsLeech,
 		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletionBatch,
 	)
 	return i, err
 }
@@ -82,7 +89,7 @@ WHERE ?2 IS NULL OR EXISTS (
       AND parent.owner_id = ?1
       AND parent.deleted_at IS NULL
 )
-RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at
+RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch
 `
 
 type CreateDeckParams struct {
@@ -139,6 +146,7 @@ func (q *Queries) CreateDeck(ctx context.Context, arg CreateDeckParams) (Deck, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.DeletionBatch,
 	)
 	return i, err
 }
@@ -213,7 +221,7 @@ WHERE decks.id = CAST(?13 AS INTEGER)
             AND import_batches.user_id = ?14
       )
   )
-RETURNING id, deck_id, term, term_key, translation, transcription, example, example_translation, notes, tags, alternatives, fields, external_id, import_batch_id, created_at, updated_at, deleted_at
+RETURNING id, deck_id, term, term_key, translation, transcription, example, example_translation, notes, tags, alternatives, fields, external_id, import_batch_id, created_at, updated_at, deleted_at, deletion_batch
 `
 
 type CreateNoteParams struct {
@@ -269,16 +277,18 @@ func (q *Queries) CreateNote(ctx context.Context, arg CreateNoteParams) (Note, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.DeletionBatch,
 	)
 	return i, err
 }
 
 const getCard = `-- name: GetCard :one
-SELECT cards.id, cards.note_id, cards.user_id, cards.direction, cards.state, cards.due, cards.stability, cards.difficulty, cards.elapsed_days, cards.scheduled_days, cards.step, cards.reps, cards.lapses, cards.last_review, cards.suspended, cards.is_leech, cards.updated_at FROM cards
+SELECT cards.id, cards.note_id, cards.user_id, cards.direction, cards.state, cards.due, cards.stability, cards.difficulty, cards.elapsed_days, cards.scheduled_days, cards.step, cards.reps, cards.lapses, cards.last_review, cards.suspended, cards.is_leech, cards.updated_at, cards.deleted_at, cards.deletion_batch FROM cards
 JOIN notes ON notes.id = cards.note_id
 JOIN decks ON decks.id = notes.deck_id
 WHERE cards.id = ?
   AND cards.user_id = ?
+  AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
 `
@@ -309,12 +319,14 @@ func (q *Queries) GetCard(ctx context.Context, arg GetCardParams) (Card, error) 
 		&i.Suspended,
 		&i.IsLeech,
 		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletionBatch,
 	)
 	return i, err
 }
 
 const getDeck = `-- name: GetDeck :one
-SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at FROM decks
+SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch FROM decks
 WHERE id = ? AND owner_id = ? AND deleted_at IS NULL
 `
 
@@ -345,6 +357,177 @@ func (q *Queries) GetDeck(ctx context.Context, arg GetDeckParams) (Deck, error) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.DeletionBatch,
+	)
+	return i, err
+}
+
+const getDeckBySourceExternalID = `-- name: GetDeckBySourceExternalID :one
+SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch FROM decks
+WHERE owner_id = ?
+  AND source = ?
+  AND external_id = ?
+  AND deleted_at IS NULL
+`
+
+type GetDeckBySourceExternalIDParams struct {
+	OwnerID    int64
+	Source     sql.NullString
+	ExternalID sql.NullString
+}
+
+func (q *Queries) GetDeckBySourceExternalID(ctx context.Context, arg GetDeckBySourceExternalIDParams) (Deck, error) {
+	row := q.db.QueryRowContext(ctx, getDeckBySourceExternalID, arg.OwnerID, arg.Source, arg.ExternalID)
+	var i Deck
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerID,
+		&i.ParentID,
+		&i.Name,
+		&i.Description,
+		&i.Position,
+		&i.LangTarget,
+		&i.LangNative,
+		&i.ReverseCards,
+		&i.WrongArticleRating,
+		&i.ColorSeed,
+		&i.Source,
+		&i.ExternalID,
+		&i.ExpectedCount,
+		&i.SourceDeckID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletionBatch,
+	)
+	return i, err
+}
+
+const getDeletedDeckBySourceExternalID = `-- name: GetDeletedDeckBySourceExternalID :one
+SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch FROM decks
+WHERE owner_id = ?
+  AND source = ?
+  AND external_id = ?
+  AND deleted_at IS NOT NULL
+ORDER BY updated_at DESC, id DESC
+LIMIT 1
+`
+
+type GetDeletedDeckBySourceExternalIDParams struct {
+	OwnerID    int64
+	Source     sql.NullString
+	ExternalID sql.NullString
+}
+
+func (q *Queries) GetDeletedDeckBySourceExternalID(ctx context.Context, arg GetDeletedDeckBySourceExternalIDParams) (Deck, error) {
+	row := q.db.QueryRowContext(ctx, getDeletedDeckBySourceExternalID, arg.OwnerID, arg.Source, arg.ExternalID)
+	var i Deck
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerID,
+		&i.ParentID,
+		&i.Name,
+		&i.Description,
+		&i.Position,
+		&i.LangTarget,
+		&i.LangNative,
+		&i.ReverseCards,
+		&i.WrongArticleRating,
+		&i.ColorSeed,
+		&i.Source,
+		&i.ExternalID,
+		&i.ExpectedCount,
+		&i.SourceDeckID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletionBatch,
+	)
+	return i, err
+}
+
+const getDeletedNoteByExternalID = `-- name: GetDeletedNoteByExternalID :one
+SELECT notes.id, notes.deck_id, notes.term, notes.term_key, notes.translation, notes.transcription, notes.example, notes.example_translation, notes.notes, notes.tags, notes.alternatives, notes.fields, notes.external_id, notes.import_batch_id, notes.created_at, notes.updated_at, notes.deleted_at, notes.deletion_batch FROM notes
+JOIN decks ON decks.id = notes.deck_id
+WHERE notes.deck_id = ?
+  AND decks.owner_id = ?
+  AND notes.external_id = ?
+  AND notes.deleted_at IS NOT NULL
+ORDER BY notes.updated_at DESC, notes.id DESC
+LIMIT 1
+`
+
+type GetDeletedNoteByExternalIDParams struct {
+	DeckID     int64
+	OwnerID    int64
+	ExternalID sql.NullString
+}
+
+func (q *Queries) GetDeletedNoteByExternalID(ctx context.Context, arg GetDeletedNoteByExternalIDParams) (Note, error) {
+	row := q.db.QueryRowContext(ctx, getDeletedNoteByExternalID, arg.DeckID, arg.OwnerID, arg.ExternalID)
+	var i Note
+	err := row.Scan(
+		&i.ID,
+		&i.DeckID,
+		&i.Term,
+		&i.TermKey,
+		&i.Translation,
+		&i.Transcription,
+		&i.Example,
+		&i.ExampleTranslation,
+		&i.Notes,
+		&i.Tags,
+		&i.Alternatives,
+		&i.Fields,
+		&i.ExternalID,
+		&i.ImportBatchID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletionBatch,
+	)
+	return i, err
+}
+
+const getDeletedNoteByTermKey = `-- name: GetDeletedNoteByTermKey :one
+SELECT notes.id, notes.deck_id, notes.term, notes.term_key, notes.translation, notes.transcription, notes.example, notes.example_translation, notes.notes, notes.tags, notes.alternatives, notes.fields, notes.external_id, notes.import_batch_id, notes.created_at, notes.updated_at, notes.deleted_at, notes.deletion_batch FROM notes
+JOIN decks ON decks.id = notes.deck_id
+WHERE notes.deck_id = ?
+  AND decks.owner_id = ?
+  AND notes.term_key = ?
+  AND notes.deleted_at IS NOT NULL
+ORDER BY notes.updated_at DESC, notes.id DESC
+LIMIT 1
+`
+
+type GetDeletedNoteByTermKeyParams struct {
+	DeckID  int64
+	OwnerID int64
+	TermKey string
+}
+
+func (q *Queries) GetDeletedNoteByTermKey(ctx context.Context, arg GetDeletedNoteByTermKeyParams) (Note, error) {
+	row := q.db.QueryRowContext(ctx, getDeletedNoteByTermKey, arg.DeckID, arg.OwnerID, arg.TermKey)
+	var i Note
+	err := row.Scan(
+		&i.ID,
+		&i.DeckID,
+		&i.Term,
+		&i.TermKey,
+		&i.Translation,
+		&i.Transcription,
+		&i.Example,
+		&i.ExampleTranslation,
+		&i.Notes,
+		&i.Tags,
+		&i.Alternatives,
+		&i.Fields,
+		&i.ExternalID,
+		&i.ImportBatchID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletionBatch,
 	)
 	return i, err
 }
@@ -378,7 +561,7 @@ func (q *Queries) GetImportBatch(ctx context.Context, arg GetImportBatchParams) 
 }
 
 const getNote = `-- name: GetNote :one
-SELECT notes.id, notes.deck_id, notes.term, notes.term_key, notes.translation, notes.transcription, notes.example, notes.example_translation, notes.notes, notes.tags, notes.alternatives, notes.fields, notes.external_id, notes.import_batch_id, notes.created_at, notes.updated_at, notes.deleted_at FROM notes
+SELECT notes.id, notes.deck_id, notes.term, notes.term_key, notes.translation, notes.transcription, notes.example, notes.example_translation, notes.notes, notes.tags, notes.alternatives, notes.fields, notes.external_id, notes.import_batch_id, notes.created_at, notes.updated_at, notes.deleted_at, notes.deletion_batch FROM notes
 JOIN decks ON decks.id = notes.deck_id
 WHERE notes.id = ?
   AND decks.owner_id = ?
@@ -412,16 +595,102 @@ func (q *Queries) GetNote(ctx context.Context, arg GetNoteParams) (Note, error) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.DeletionBatch,
+	)
+	return i, err
+}
+
+const getNoteByExternalID = `-- name: GetNoteByExternalID :one
+SELECT notes.id, notes.deck_id, notes.term, notes.term_key, notes.translation, notes.transcription, notes.example, notes.example_translation, notes.notes, notes.tags, notes.alternatives, notes.fields, notes.external_id, notes.import_batch_id, notes.created_at, notes.updated_at, notes.deleted_at, notes.deletion_batch FROM notes
+JOIN decks ON decks.id = notes.deck_id
+WHERE notes.deck_id = ?
+  AND decks.owner_id = ?
+  AND notes.external_id = ?
+  AND notes.deleted_at IS NULL
+  AND decks.deleted_at IS NULL
+`
+
+type GetNoteByExternalIDParams struct {
+	DeckID     int64
+	OwnerID    int64
+	ExternalID sql.NullString
+}
+
+func (q *Queries) GetNoteByExternalID(ctx context.Context, arg GetNoteByExternalIDParams) (Note, error) {
+	row := q.db.QueryRowContext(ctx, getNoteByExternalID, arg.DeckID, arg.OwnerID, arg.ExternalID)
+	var i Note
+	err := row.Scan(
+		&i.ID,
+		&i.DeckID,
+		&i.Term,
+		&i.TermKey,
+		&i.Translation,
+		&i.Transcription,
+		&i.Example,
+		&i.ExampleTranslation,
+		&i.Notes,
+		&i.Tags,
+		&i.Alternatives,
+		&i.Fields,
+		&i.ExternalID,
+		&i.ImportBatchID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletionBatch,
+	)
+	return i, err
+}
+
+const getNoteByTermKey = `-- name: GetNoteByTermKey :one
+SELECT notes.id, notes.deck_id, notes.term, notes.term_key, notes.translation, notes.transcription, notes.example, notes.example_translation, notes.notes, notes.tags, notes.alternatives, notes.fields, notes.external_id, notes.import_batch_id, notes.created_at, notes.updated_at, notes.deleted_at, notes.deletion_batch FROM notes
+JOIN decks ON decks.id = notes.deck_id
+WHERE notes.deck_id = ?
+  AND decks.owner_id = ?
+  AND notes.term_key = ?
+  AND notes.deleted_at IS NULL
+  AND decks.deleted_at IS NULL
+`
+
+type GetNoteByTermKeyParams struct {
+	DeckID  int64
+	OwnerID int64
+	TermKey string
+}
+
+func (q *Queries) GetNoteByTermKey(ctx context.Context, arg GetNoteByTermKeyParams) (Note, error) {
+	row := q.db.QueryRowContext(ctx, getNoteByTermKey, arg.DeckID, arg.OwnerID, arg.TermKey)
+	var i Note
+	err := row.Scan(
+		&i.ID,
+		&i.DeckID,
+		&i.Term,
+		&i.TermKey,
+		&i.Translation,
+		&i.Transcription,
+		&i.Example,
+		&i.ExampleTranslation,
+		&i.Notes,
+		&i.Tags,
+		&i.Alternatives,
+		&i.Fields,
+		&i.ExternalID,
+		&i.ImportBatchID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletionBatch,
 	)
 	return i, err
 }
 
 const listCardsByNote = `-- name: ListCardsByNote :many
-SELECT cards.id, cards.note_id, cards.user_id, cards.direction, cards.state, cards.due, cards.stability, cards.difficulty, cards.elapsed_days, cards.scheduled_days, cards.step, cards.reps, cards.lapses, cards.last_review, cards.suspended, cards.is_leech, cards.updated_at FROM cards
+SELECT cards.id, cards.note_id, cards.user_id, cards.direction, cards.state, cards.due, cards.stability, cards.difficulty, cards.elapsed_days, cards.scheduled_days, cards.step, cards.reps, cards.lapses, cards.last_review, cards.suspended, cards.is_leech, cards.updated_at, cards.deleted_at, cards.deletion_batch FROM cards
 JOIN notes ON notes.id = cards.note_id
 JOIN decks ON decks.id = notes.deck_id
 WHERE cards.note_id = ?
   AND cards.user_id = ?
+  AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
 ORDER BY cards.id
@@ -459,6 +728,8 @@ func (q *Queries) ListCardsByNote(ctx context.Context, arg ListCardsByNoteParams
 			&i.Suspended,
 			&i.IsLeech,
 			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.DeletionBatch,
 		); err != nil {
 			return nil, err
 		}
@@ -474,10 +745,11 @@ func (q *Queries) ListCardsByNote(ctx context.Context, arg ListCardsByNoteParams
 }
 
 const listCardsByUser = `-- name: ListCardsByUser :many
-SELECT cards.id, cards.note_id, cards.user_id, cards.direction, cards.state, cards.due, cards.stability, cards.difficulty, cards.elapsed_days, cards.scheduled_days, cards.step, cards.reps, cards.lapses, cards.last_review, cards.suspended, cards.is_leech, cards.updated_at FROM cards
+SELECT cards.id, cards.note_id, cards.user_id, cards.direction, cards.state, cards.due, cards.stability, cards.difficulty, cards.elapsed_days, cards.scheduled_days, cards.step, cards.reps, cards.lapses, cards.last_review, cards.suspended, cards.is_leech, cards.updated_at, cards.deleted_at, cards.deletion_batch FROM cards
 JOIN notes ON notes.id = cards.note_id
 JOIN decks ON decks.id = notes.deck_id
 WHERE cards.user_id = ?
+  AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
 ORDER BY cards.due, cards.id
@@ -510,6 +782,8 @@ func (q *Queries) ListCardsByUser(ctx context.Context, userID int64) ([]Card, er
 			&i.Suspended,
 			&i.IsLeech,
 			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.DeletionBatch,
 		); err != nil {
 			return nil, err
 		}
@@ -525,7 +799,7 @@ func (q *Queries) ListCardsByUser(ctx context.Context, userID int64) ([]Card, er
 }
 
 const listChildDecks = `-- name: ListChildDecks :many
-SELECT child.id, child.owner_id, child.parent_id, child.name, child.description, child.position, child.lang_target, child.lang_native, child.reverse_cards, child.wrong_article_rating, child.color_seed, child.source, child.external_id, child.expected_count, child.source_deck_id, child.created_at, child.updated_at, child.deleted_at FROM decks AS child
+SELECT child.id, child.owner_id, child.parent_id, child.name, child.description, child.position, child.lang_target, child.lang_native, child.reverse_cards, child.wrong_article_rating, child.color_seed, child.source, child.external_id, child.expected_count, child.source_deck_id, child.created_at, child.updated_at, child.deleted_at, child.deletion_batch FROM decks AS child
 WHERE child.owner_id = ?
   AND child.parent_id = ?
   AND child.deleted_at IS NULL
@@ -571,6 +845,7 @@ func (q *Queries) ListChildDecks(ctx context.Context, arg ListChildDecksParams) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.DeletionBatch,
 		); err != nil {
 			return nil, err
 		}
@@ -586,7 +861,7 @@ func (q *Queries) ListChildDecks(ctx context.Context, arg ListChildDecksParams) 
 }
 
 const listDecksByOwner = `-- name: ListDecksByOwner :many
-SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at FROM decks
+SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch FROM decks
 WHERE owner_id = ? AND deleted_at IS NULL
 ORDER BY parent_id, position, id
 `
@@ -619,6 +894,7 @@ func (q *Queries) ListDecksByOwner(ctx context.Context, ownerID int64) ([]Deck, 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.DeletionBatch,
 		); err != nil {
 			return nil, err
 		}
@@ -686,7 +962,7 @@ func (q *Queries) ListImportBatches(ctx context.Context, userID int64) ([]ListIm
 }
 
 const listNotesByDeck = `-- name: ListNotesByDeck :many
-SELECT notes.id, notes.deck_id, notes.term, notes.term_key, notes.translation, notes.transcription, notes.example, notes.example_translation, notes.notes, notes.tags, notes.alternatives, notes.fields, notes.external_id, notes.import_batch_id, notes.created_at, notes.updated_at, notes.deleted_at FROM notes
+SELECT notes.id, notes.deck_id, notes.term, notes.term_key, notes.translation, notes.transcription, notes.example, notes.example_translation, notes.notes, notes.tags, notes.alternatives, notes.fields, notes.external_id, notes.import_batch_id, notes.created_at, notes.updated_at, notes.deleted_at, notes.deletion_batch FROM notes
 JOIN decks ON decks.id = notes.deck_id
 WHERE notes.deck_id = ?
   AND decks.owner_id = ?
@@ -727,6 +1003,7 @@ func (q *Queries) ListNotesByDeck(ctx context.Context, arg ListNotesByDeckParams
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.DeletionBatch,
 		); err != nil {
 			return nil, err
 		}
@@ -741,11 +1018,229 @@ func (q *Queries) ListNotesByDeck(ctx context.Context, arg ListNotesByDeckParams
 	return items, nil
 }
 
+const restoreDeckBySourceExternalID = `-- name: RestoreDeckBySourceExternalID :one
+UPDATE decks
+SET deleted_at = NULL,
+    deletion_batch = NULL,
+    updated_at = ?1
+WHERE id = (
+    SELECT candidate.id
+    FROM decks AS candidate
+    WHERE candidate.owner_id = ?2
+      AND candidate.source = ?3
+      AND candidate.external_id = ?4
+      AND candidate.deleted_at IS NOT NULL
+      AND candidate.deletion_batch IS NOT NULL
+      AND (
+          candidate.parent_id IS NULL OR EXISTS (
+              SELECT 1 FROM decks AS parent
+              WHERE parent.id = candidate.parent_id
+                AND parent.owner_id = candidate.owner_id
+                AND parent.deleted_at IS NULL
+          )
+      )
+    ORDER BY candidate.updated_at DESC, candidate.id DESC
+    LIMIT 1
+)
+  AND NOT EXISTS (
+      SELECT 1 FROM decks AS active
+      WHERE active.owner_id = decks.owner_id
+        AND active.source = decks.source
+        AND active.external_id = decks.external_id
+        AND active.deleted_at IS NULL
+  )
+RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch
+`
+
+type RestoreDeckBySourceExternalIDParams struct {
+	UpdatedAt  time.Time
+	OwnerID    int64
+	Source     sql.NullString
+	ExternalID sql.NullString
+}
+
+func (q *Queries) RestoreDeckBySourceExternalID(ctx context.Context, arg RestoreDeckBySourceExternalIDParams) (Deck, error) {
+	row := q.db.QueryRowContext(ctx, restoreDeckBySourceExternalID,
+		arg.UpdatedAt,
+		arg.OwnerID,
+		arg.Source,
+		arg.ExternalID,
+	)
+	var i Deck
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerID,
+		&i.ParentID,
+		&i.Name,
+		&i.Description,
+		&i.Position,
+		&i.LangTarget,
+		&i.LangNative,
+		&i.ReverseCards,
+		&i.WrongArticleRating,
+		&i.ColorSeed,
+		&i.Source,
+		&i.ExternalID,
+		&i.ExpectedCount,
+		&i.SourceDeckID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletionBatch,
+	)
+	return i, err
+}
+
+const restoreNoteByExternalID = `-- name: RestoreNoteByExternalID :one
+UPDATE notes
+SET deleted_at = NULL,
+    deletion_batch = NULL,
+    updated_at = ?1
+WHERE id = (
+    SELECT candidate.id
+    FROM notes AS candidate
+    JOIN decks ON decks.id = candidate.deck_id
+    WHERE candidate.deck_id = ?2
+      AND decks.owner_id = ?3
+      AND decks.deleted_at IS NULL
+      AND candidate.external_id = ?4
+      AND candidate.deleted_at IS NOT NULL
+      AND candidate.deletion_batch IS NOT NULL
+    ORDER BY candidate.updated_at DESC, candidate.id DESC
+    LIMIT 1
+)
+  AND NOT EXISTS (
+      SELECT 1 FROM notes AS active
+      WHERE active.deck_id = notes.deck_id
+        AND active.deleted_at IS NULL
+        AND active.external_id = notes.external_id
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM notes AS active
+      WHERE active.deck_id = notes.deck_id
+        AND active.deleted_at IS NULL
+        AND active.term_key = notes.term_key
+  )
+RETURNING id, deck_id, term, term_key, translation, transcription, example, example_translation, notes, tags, alternatives, fields, external_id, import_batch_id, created_at, updated_at, deleted_at, deletion_batch
+`
+
+type RestoreNoteByExternalIDParams struct {
+	UpdatedAt  time.Time
+	DeckID     int64
+	OwnerID    int64
+	ExternalID sql.NullString
+}
+
+func (q *Queries) RestoreNoteByExternalID(ctx context.Context, arg RestoreNoteByExternalIDParams) (Note, error) {
+	row := q.db.QueryRowContext(ctx, restoreNoteByExternalID,
+		arg.UpdatedAt,
+		arg.DeckID,
+		arg.OwnerID,
+		arg.ExternalID,
+	)
+	var i Note
+	err := row.Scan(
+		&i.ID,
+		&i.DeckID,
+		&i.Term,
+		&i.TermKey,
+		&i.Translation,
+		&i.Transcription,
+		&i.Example,
+		&i.ExampleTranslation,
+		&i.Notes,
+		&i.Tags,
+		&i.Alternatives,
+		&i.Fields,
+		&i.ExternalID,
+		&i.ImportBatchID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletionBatch,
+	)
+	return i, err
+}
+
+const restoreNoteByTermKey = `-- name: RestoreNoteByTermKey :one
+UPDATE notes
+SET deleted_at = NULL,
+    deletion_batch = NULL,
+    updated_at = ?1
+WHERE id = (
+    SELECT candidate.id
+    FROM notes AS candidate
+    JOIN decks ON decks.id = candidate.deck_id
+    WHERE candidate.deck_id = ?2
+      AND decks.owner_id = ?3
+      AND decks.deleted_at IS NULL
+      AND candidate.term_key = ?4
+      AND candidate.deleted_at IS NOT NULL
+      AND candidate.deletion_batch IS NOT NULL
+    ORDER BY candidate.updated_at DESC, candidate.id DESC
+    LIMIT 1
+)
+  AND NOT EXISTS (
+      SELECT 1 FROM notes AS active
+      WHERE active.deck_id = notes.deck_id
+        AND active.deleted_at IS NULL
+        AND active.term_key = notes.term_key
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM notes AS active
+      WHERE active.deck_id = notes.deck_id
+        AND active.deleted_at IS NULL
+        AND active.external_id = notes.external_id
+        AND notes.external_id IS NOT NULL
+  )
+RETURNING id, deck_id, term, term_key, translation, transcription, example, example_translation, notes, tags, alternatives, fields, external_id, import_batch_id, created_at, updated_at, deleted_at, deletion_batch
+`
+
+type RestoreNoteByTermKeyParams struct {
+	UpdatedAt time.Time
+	DeckID    int64
+	OwnerID   int64
+	TermKey   string
+}
+
+func (q *Queries) RestoreNoteByTermKey(ctx context.Context, arg RestoreNoteByTermKeyParams) (Note, error) {
+	row := q.db.QueryRowContext(ctx, restoreNoteByTermKey,
+		arg.UpdatedAt,
+		arg.DeckID,
+		arg.OwnerID,
+		arg.TermKey,
+	)
+	var i Note
+	err := row.Scan(
+		&i.ID,
+		&i.DeckID,
+		&i.Term,
+		&i.TermKey,
+		&i.Translation,
+		&i.Transcription,
+		&i.Example,
+		&i.ExampleTranslation,
+		&i.Notes,
+		&i.Tags,
+		&i.Alternatives,
+		&i.Fields,
+		&i.ExternalID,
+		&i.ImportBatchID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletionBatch,
+	)
+	return i, err
+}
+
 const softDeleteDeck = `-- name: SoftDeleteDeck :one
 UPDATE decks
-SET deleted_at = ?, updated_at = ?
+SET deleted_at = ?,
+    deletion_batch = lower(hex(randomblob(16))),
+    updated_at = ?
 WHERE id = ? AND owner_id = ? AND deleted_at IS NULL
-RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at
+RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch
 `
 
 type SoftDeleteDeckParams struct {
@@ -782,13 +1277,16 @@ func (q *Queries) SoftDeleteDeck(ctx context.Context, arg SoftDeleteDeckParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.DeletionBatch,
 	)
 	return i, err
 }
 
 const softDeleteNote = `-- name: SoftDeleteNote :one
 UPDATE notes
-SET deleted_at = ?, updated_at = ?
+SET deleted_at = ?,
+    deletion_batch = lower(hex(randomblob(16))),
+    updated_at = ?
 WHERE notes.id = ?
   AND notes.deleted_at IS NULL
   AND EXISTS (
@@ -797,7 +1295,7 @@ WHERE notes.id = ?
         AND decks.owner_id = ?
         AND decks.deleted_at IS NULL
   )
-RETURNING id, deck_id, term, term_key, translation, transcription, example, example_translation, notes, tags, alternatives, fields, external_id, import_batch_id, created_at, updated_at, deleted_at
+RETURNING id, deck_id, term, term_key, translation, transcription, example, example_translation, notes, tags, alternatives, fields, external_id, import_batch_id, created_at, updated_at, deleted_at, deletion_batch
 `
 
 type SoftDeleteNoteParams struct {
@@ -833,6 +1331,7 @@ func (q *Queries) SoftDeleteNote(ctx context.Context, arg SoftDeleteNoteParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.DeletionBatch,
 	)
 	return i, err
 }
@@ -857,14 +1356,29 @@ WHERE decks.id = ?15
   AND decks.owner_id = ?16
   AND decks.deleted_at IS NULL
   AND (
-      ?1 IS NULL OR EXISTS (
-          SELECT 1 FROM decks AS parent
-          WHERE parent.id = ?1
-            AND parent.owner_id = decks.owner_id
-            AND parent.deleted_at IS NULL
+      ?1 IS NULL OR (
+          EXISTS (
+              SELECT 1 FROM decks AS parent
+              WHERE parent.id = ?1
+                AND parent.owner_id = decks.owner_id
+                AND parent.deleted_at IS NULL
+                AND NOT EXISTS (
+                    WITH RECURSIVE descendants(id) AS (
+                        SELECT decks.id
+                        UNION
+                        SELECT child.id
+                        FROM decks AS child
+                        JOIN descendants AS descendant ON child.parent_id = descendant.id
+                        WHERE child.owner_id = decks.owner_id
+                          AND child.deleted_at IS NULL
+                    )
+                    SELECT 1 FROM descendants
+                    WHERE id = parent.id
+                )
+            )
       )
   )
-RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at
+RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch
 `
 
 type UpdateDeckParams struct {
@@ -925,6 +1439,7 @@ func (q *Queries) UpdateDeck(ctx context.Context, arg UpdateDeckParams) (Deck, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.DeletionBatch,
 	)
 	return i, err
 }
@@ -1012,7 +1527,7 @@ WHERE notes.id = ?14
             AND import_batches.user_id = ?15
       )
   )
-RETURNING id, deck_id, term, term_key, translation, transcription, example, example_translation, notes, tags, alternatives, fields, external_id, import_batch_id, created_at, updated_at, deleted_at
+RETURNING id, deck_id, term, term_key, translation, transcription, example, example_translation, notes, tags, alternatives, fields, external_id, import_batch_id, created_at, updated_at, deleted_at, deletion_batch
 `
 
 type UpdateNoteParams struct {
@@ -1070,6 +1585,7 @@ func (q *Queries) UpdateNote(ctx context.Context, arg UpdateNoteParams) (Note, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.DeletionBatch,
 	)
 	return i, err
 }
