@@ -7,11 +7,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/mail"
 	"os"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/pestit/retain/internal/auth"
 	"golang.org/x/term"
 )
+
+const maxAdminEmailBytes = 254
 
 type adminCreator interface {
 	CreateAdmin(context.Context, string, string, string) (int64, error)
@@ -60,7 +65,19 @@ func parseAdminCreateArgs(args []string) (adminCreateArgs, *flag.FlagSet, error)
 	if strings.TrimSpace(parsed.email) == "" {
 		return parsed, fs, errors.New("--email is required")
 	}
+	if !validAdminEmail(parsed.email) {
+		return parsed, fs, auth.ErrInvalidInput
+	}
 	return parsed, fs, nil
+}
+
+func validAdminEmail(email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" || len(email) > maxAdminEmailBytes || !utf8.ValidString(email) {
+		return false
+	}
+	address, err := mail.ParseAddress(email)
+	return err == nil && address.Name == "" && address.Address == email
 }
 
 func runParsedAdminCreate(ctx context.Context, parsed adminCreateArgs, creator adminCreator, readPassword passwordReader, stdout io.Writer) error {

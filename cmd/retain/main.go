@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -65,7 +66,11 @@ func isAdminHelpRequest(args []string) bool {
 	if len(args) == 1 && isAdminHelpFlag(args[0]) {
 		return true
 	}
-	return len(args) > 0 && args[0] == "create" && containsAdminHelpFlag(args[1:])
+	if len(args) == 0 || args[0] != "create" {
+		return false
+	}
+	_, _, err := parseAdminCreateArgs(args[1:])
+	return errors.Is(err, flag.ErrHelp)
 }
 
 func run(logger *slog.Logger) error {

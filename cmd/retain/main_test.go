@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/pestit/retain/internal/auth"
 )
 
 func TestDispatchWithoutArgumentsKeepsServerStartup(t *testing.T) {
@@ -71,14 +73,26 @@ func TestAdminHelpDispatchSkipsServerDatabaseAndTerminal(t *testing.T) {
 	}{
 		{name: "admin help", args: []string{"--help"}, want: "Usage: retain admin <command>"},
 		{name: "create help", args: []string{"create", "--help"}, want: "Usage of retain admin create:"},
+		{name: "create short help", args: []string{"create", "-h"}, want: "Usage of retain admin create:"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			databasePath := filepath.Join(t.TempDir(), "not-created", "retain.db")
-			t.Setenv("DATABASE_PATH", databasePath)
+			t.Setenv("DATABASE_PATH", "")
+			t.Setenv("HTTP_ADDR", "")
 			t.Setenv("PUBLIC_ORIGIN", "invalid origin")
+			stdin, err := os.Open(os.DevNull)
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalStdin := os.Stdin
+			os.Stdin = stdin
+			t.Cleanup(func() {
+				os.Stdin = originalStdin
+				_ = stdin.Close()
+			})
+
 			var output strings.Builder
 			serverCalls := 0
-			err := dispatch(append([]string{"admin"}, test.args...), func() error {
+			err = dispatch(append([]string{"admin"}, test.args...), func() error {
 				serverCalls++
 				return nil
 			}, func(args []string) error {
@@ -93,9 +107,32 @@ func TestAdminHelpDispatchSkipsServerDatabaseAndTerminal(t *testing.T) {
 			if !strings.Contains(output.String(), test.want) {
 				t.Errorf("help output %q does not contain %q", output.String(), test.want)
 			}
-			if _, err := os.Stat(filepath.Dir(databasePath)); !errors.Is(err, os.ErrNotExist) {
-				t.Errorf("database directory stat error = %v, want not exist", err)
+			if strings.Contains(output.String(), "password") {
+				t.Errorf("help unexpectedly requested password input: %q", output.String())
 			}
 		})
+	}
+}
+
+func TestAdminCreateHelpValueIsValidatedBeforeDatabaseOpen(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "not-created", "retain.db")
+	t.Setenv("DATABASE_PATH", databasePath)
+	t.Setenv("HTTP_ADDR", ":8080")
+	t.Setenv("PUBLIC_ORIGIN", "https://retain.example.test")
+	args := []string{"create", "--email", "x", "--name", "--help"}
+	var output strings.Builder
+
+	err := runAdminEntrypoint(args, &output)
+	if !errors.Is(err, auth.ErrInvalidInput) {
+		t.Fatalf("runAdminEntrypoint(conflicting flag value) error = %v, want invalid input", err)
+	}
+	if strings.Contains(err.Error(), "--help") || strings.Contains(err.Error(), "x") {
+		t.Errorf("validation error exposed an argument value: %v", err)
+	}
+	if strings.Contains(output.String(), "Usage of retain admin create:") {
+		t.Errorf("name value was treated as help: %q", output.String())
+	}
+	if _, err := os.Stat(filepath.Dir(databasePath)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("database directory stat error = %v, want not exist", err)
 	}
 }
