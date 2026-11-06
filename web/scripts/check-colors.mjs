@@ -42,21 +42,18 @@ export function violations(text, filename = 'fixture.tsx') {
     return found;
   }
   const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, true, filename.endsWith('.jsx') ? ts.ScriptKind.JSX : ts.ScriptKind.TSX);
-  // Resolve only local const bindings, respecting enclosing blocks and parameters.
+  const options = { noLib: true, noResolve: true };
+  const host = ts.createCompilerHost(options);
+  host.getSourceFile = (name) => name === filename ? source : undefined;
+  const checker = ts.createProgram([filename], options, host).getTypeChecker();
+  // Resolve only local const bindings using lexical symbols, including shadowing.
   function resolve(identifier) {
-    const name = identifier.text;
-    for (let scope = identifier.parent; scope; scope = scope.parent) {
-      if (ts.isFunctionLike(scope) && scope.parameters.some((p) => ts.isIdentifier(p.name) && p.name.text === name)) return;
-      if (!ts.isSourceFile(scope) && !ts.isBlock(scope)) continue;
-      for (const statement of scope.statements) {
-        if (!ts.isVariableStatement(statement)) continue;
-        for (const declaration of statement.declarationList.declarations) {
-          if (ts.isIdentifier(declaration.name) && declaration.name.text === name) {
-            return statement.declarationList.flags & ts.NodeFlags.Const ? declaration.initializer : undefined;
-          }
-        }
-      }
-    }
+    const symbol = ts.isShorthandPropertyAssignment(identifier.parent)
+      ? checker.getShorthandAssignmentValueSymbol(identifier.parent)
+      : checker.getSymbolAtLocation(identifier);
+    const declaration = symbol?.valueDeclaration;
+    if (declaration && ts.isVariableDeclaration(declaration) && ts.isVariableDeclarationList(declaration.parent)
+      && declaration.parent.flags & ts.NodeFlags.Const) return declaration.initializer;
   }
   function inspectExpression(node, callback, seen = new Set()) {
     if (!node) return;
@@ -84,6 +81,9 @@ export function violations(text, filename = 'fixture.tsx') {
         inspectObject(binding, kind, seen);
         seen.delete(binding);
       }
+    } else if (ts.isConditionalExpression(node)) {
+      inspectObject(node.whenTrue, kind, seen);
+      inspectObject(node.whenFalse, kind, seen);
     } else if (ts.isObjectLiteralExpression(node)) {
       for (const property of node.properties) {
         if (ts.isSpreadAssignment(property)) inspectObject(property.expression, kind, seen);

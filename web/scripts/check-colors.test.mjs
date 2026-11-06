@@ -64,3 +64,24 @@ test('resolves local static JSX and style spreads', () => {
     'const props = { ...props }; <div {...props} />;',
   ]) assert.deepEqual(violations(fixture), [], fixture);
 });
+
+test('checks both branches of conditional styles and spreads recursively', () => {
+  for (const [fixture, expected] of [
+    ["<div style={active ? { color: 'red' } : { color: 'blue' }} />", ['color: red', 'color: blue']],
+    ["<path {...(active ? { fill: 'red' } : { fill: 'blue' })} />", ['fill: red', 'fill: blue']],
+    ["<div {...(active ? { style: other ? { color: 'red' } : {} } : { style: { color: 'blue' } })} />", ['color: red', 'color: blue']],
+    ["<div style={active ? {} : { color: 'red' }} />", ['color: red']],
+  ]) assert.deepEqual(violations(fixture), expected, fixture);
+  assert.deepEqual(violations("<path {...(active ? { fill: 'currentColor' } : { style: { color: 'var(--md-sys-color-primary)' } })} />"), []);
+});
+
+test('respects parameter and lexical shadowing when resolving static values', () => {
+  for (const fixture of [
+    "const props = { fill: 'red' }; function Icon({ props }) { return <path {...props} />; }",
+    "const props = { fill: 'red' }; function Icon({ nested: { props } }) { return <path {...props} />; }",
+    "const fill = 'red'; function Icon({ fill }) { return <path {...{ fill }} />; }",
+    "const style = { color: 'red' }; function Icon(style) { return <path style={style} />; }",
+    "const props = { fill: 'red' }; { const props = { fill: 'currentColor' }; <path {...props} />; }",
+  ]) assert.deepEqual(violations(fixture), [], fixture);
+  assert.deepEqual(violations("const props = { fill: 'currentColor' }; function Icon() { const props = { fill: 'red' }; return <path {...props} />; }"), ['fill: red']);
+});
