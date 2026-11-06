@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"time"
@@ -30,11 +31,12 @@ func runAdminCommand(ctx context.Context, args []string, cfg config.Config, read
 		return errors.New("unknown admin command; usage: retain admin <command> (commands: create, --help)")
 	}
 
-	createArgs := args[1:]
-	if containsAdminHelpFlag(createArgs) {
-		// Let the existing helper parse the flag, but don't open the database or
-		// ask for a password for help requests (or malformed help arguments).
-		return runAdminCreate(ctx, createArgs, nil, nil, stdout)
+	parsed, fs, err := parseAdminCreateArgs(args[1:])
+	if errors.Is(err, flag.ErrHelp) {
+		return writeAdminCreateUsage(fs, stdout)
+	}
+	if err != nil {
+		return err
 	}
 
 	dbCtx, cancelDB := context.WithTimeout(ctx, adminDatabaseStartupTimeout)
@@ -50,7 +52,7 @@ func runAdminCommand(ctx context.Context, args []string, cfg config.Config, read
 	}()
 
 	service := auth.NewService(database, clock.Real{})
-	return runAdminCreate(ctx, createArgs, service, readPassword, stdout)
+	return runParsedAdminCreate(ctx, parsed, service, readPassword, stdout)
 }
 
 func writeAdminCommandUsage(stdout io.Writer) error {
@@ -70,13 +72,4 @@ func isAdminHelpFlag(arg string) bool {
 	default:
 		return false
 	}
-}
-
-func containsAdminHelpFlag(args []string) bool {
-	for _, arg := range args {
-		if isAdminHelpFlag(arg) {
-			return true
-		}
-	}
-	return false
 }

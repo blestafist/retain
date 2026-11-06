@@ -19,39 +19,59 @@ type adminCreator interface {
 
 type passwordReader func(prompt string) ([]byte, error)
 
+type adminCreateArgs struct {
+	email string
+	name  string
+}
+
 var errPasswordInputRequiresTerminal = errors.New("password input requires a terminal")
 
 func runAdminCreate(ctx context.Context, args []string, creator adminCreator, readPassword passwordReader, stdout io.Writer) error {
+	parsed, fs, err := parseAdminCreateArgs(args)
+	if errors.Is(err, flag.ErrHelp) {
+		return writeAdminCreateUsage(fs, stdout)
+	}
+	if err != nil {
+		return err
+	}
+	return runParsedAdminCreate(ctx, parsed, creator, readPassword, stdout)
+}
+
+func parseAdminCreateArgs(args []string) (adminCreateArgs, *flag.FlagSet, error) {
 	fs := flag.NewFlagSet("retain admin create", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	// Keep flag.Parse's diagnostics private: malformed values may contain
 	// secrets. Help is rendered separately from the parsed flag definitions.
 	fs.Usage = func() {}
-	var email, name string
-	fs.StringVar(&email, "email", "", "admin email address")
-	fs.StringVar(&name, "name", "", "admin display name")
+	var parsed adminCreateArgs
+	fs.StringVar(&parsed.email, "email", "", "admin email address")
+	fs.StringVar(&parsed.name, "name", "", "admin display name")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return writeAdminCreateUsage(fs, stdout)
+			return parsed, fs, err
 		}
 		// Flag errors may include arbitrary argument values. Do not return them;
 		// in particular, never reflect an attempted --password value.
-		return errors.New("invalid admin create arguments")
+		return parsed, fs, errors.New("invalid admin create arguments")
 	}
 	if fs.NArg() != 0 {
-		return errors.New("unexpected positional arguments")
+		return parsed, fs, errors.New("unexpected positional arguments")
 	}
-	if strings.TrimSpace(email) == "" {
-		return errors.New("--email is required")
+	if strings.TrimSpace(parsed.email) == "" {
+		return parsed, fs, errors.New("--email is required")
 	}
+	return parsed, fs, nil
+}
+
+func runParsedAdminCreate(ctx context.Context, parsed adminCreateArgs, creator adminCreator, readPassword passwordReader, stdout io.Writer) error {
 	if creator == nil {
 		return errors.New("admin creator is required")
 	}
 	if readPassword == nil {
 		return errors.New("password reader is required")
 	}
-	if name == "" {
-		name, _, _ = strings.Cut(email, "@")
+	if parsed.name == "" {
+		parsed.name, _, _ = strings.Cut(parsed.email, "@")
 	}
 
 	password, err := readPassword("Password: ")
@@ -70,7 +90,7 @@ func runAdminCreate(ctx context.Context, args []string, creator adminCreator, re
 		return errors.New("passwords do not match")
 	}
 
-	id, err := creator.CreateAdmin(ctx, email, name, string(password))
+	id, err := creator.CreateAdmin(ctx, parsed.email, parsed.name, string(password))
 	if err != nil {
 		return redactAdminError("create admin", err, password, confirmation)
 	}

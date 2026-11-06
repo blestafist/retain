@@ -73,6 +73,32 @@ func TestRunAdminCommandCreatesAdminAndDefaultSettings(t *testing.T) {
 	}
 }
 
+func TestRunAdminCommandTreatsHelpAsNameValue(t *testing.T) {
+	ctx := context.Background()
+	databasePath := filepath.Join(t.TempDir(), "retain.db")
+	reader, _ := passwordSequence(adminBootstrapTestPassword, adminBootstrapTestPassword)
+	var stdout strings.Builder
+
+	err := runAdminCommand(ctx, []string{"create", "--email", "a@example.test", "--name", "--help"}, config.Config{
+		DatabasePath: databasePath,
+	}, reader, &stdout)
+	if err != nil {
+		t.Fatalf("runAdminCommand() error = %v, want --help parsed as the name value", err)
+	}
+	if strings.Contains(stdout.String(), "Usage of retain admin create:") {
+		t.Fatalf("name value was treated as help: %q", stdout.String())
+	}
+
+	database := openAdminBootstrapTestDB(t, databasePath)
+	user, err := database.Queries().GetUserByEmail(ctx, "a@example.test")
+	if err != nil {
+		t.Fatalf("GetUserByEmail() error = %v", err)
+	}
+	if user.Name != "--help" {
+		t.Errorf("created user name = %q, want %q", user.Name, "--help")
+	}
+}
+
 func TestRunAdminCommandReturnsValidationAndDuplicateEmailErrors(t *testing.T) {
 	ctx := context.Background()
 	databasePath := filepath.Join(t.TempDir(), "retain.db")
@@ -112,6 +138,43 @@ func TestRunAdminCommandReturnsValidationAndDuplicateEmailErrors(t *testing.T) {
 	}
 	if adminCount != 1 {
 		t.Errorf("admin count = %d, want 1", adminCount)
+	}
+}
+
+func TestRunAdminCommandRejectsInvalidArgumentsBeforeOpeningDatabase(t *testing.T) {
+	const secret = "do-not-echo-this"
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "missing email", args: []string{"create", "--name=User"}, want: "--email is required"},
+		{name: "unknown flag", args: []string{"create", "--email=user@example.test", "--password=" + secret}, want: "invalid admin create arguments"},
+		{name: "missing flag value", args: []string{"create", "--email"}, want: "invalid admin create arguments"},
+		{name: "positional argument", args: []string{"create", "--email=user@example.test", "extra"}, want: "unexpected positional arguments"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			databasePath := filepath.Join(t.TempDir(), "retain.db")
+			readerCalls := 0
+			err := runAdminCommand(context.Background(), tt.args, config.Config{DatabasePath: databasePath}, func(string) ([]byte, error) {
+				readerCalls++
+				return []byte(adminBootstrapTestPassword), nil
+			}, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("runAdminCommand(%v) error = %v, want %q", tt.args, err, tt.want)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("invalid argument value leaked in error: %v", err)
+			}
+			if readerCalls != 0 {
+				t.Errorf("password reader calls = %d, want 0", readerCalls)
+			}
+			if _, err := os.Stat(databasePath); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("database file stat error = %v, want os.ErrNotExist", err)
+			}
+		})
 	}
 }
 
