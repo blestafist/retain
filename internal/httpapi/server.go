@@ -24,6 +24,7 @@ func NewHandler(publicOrigin string, database databasePinger, authService *auth.
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler(database))
 	RegisterAccountRoutes(mux, authService)
+	mux.HandleFunc("GET /schema/retain-v1.json", retainV1SchemaHandler)
 	mux.Handle("GET /", frontendHandler(frontend))
 	return RequireSameOrigin(publicOrigin, mux)
 }

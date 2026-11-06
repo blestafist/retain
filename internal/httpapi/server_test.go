@@ -1,15 +1,19 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/pestit/retain/internal/importer"
 )
 
 const testPublicOrigin = "http://localhost:5173"
@@ -92,6 +96,59 @@ func TestStaticHandler(t *testing.T) {
 			}
 			if tt.wantContentTy != "" && response.Header().Get("Content-Type") != tt.wantContentTy {
 				t.Errorf("Content-Type = %q, want %q", response.Header().Get("Content-Type"), tt.wantContentTy)
+			}
+		})
+	}
+}
+
+func TestRetainV1SchemaEndpoint(t *testing.T) {
+	handler := NewHandler(testPublicOrigin, fakePinger{}, nil, frontendFiles())
+	tests := []struct {
+		name          string
+		method        string
+		wantStatus    int
+		wantSchema    bool
+		wantEmptyBody bool
+	}{
+		{name: "anonymous GET", method: http.MethodGet, wantStatus: http.StatusOK, wantSchema: true},
+		{name: "HEAD", method: http.MethodHead, wantStatus: http.StatusOK, wantEmptyBody: true},
+		{name: "unsupported method", method: http.MethodPost, wantStatus: http.StatusMethodNotAllowed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := newServerRequest(tt.method, "/schema/retain-v1.json")
+			if tt.method == http.MethodPost {
+				request.Header.Set("Origin", testPublicOrigin)
+			}
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+
+			if response.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d (body %q)", response.Code, tt.wantStatus, response.Body.String())
+			}
+			if tt.wantSchema && !bytes.Equal(response.Body.Bytes(), importer.RetainV1Schema) {
+				t.Errorf("body does not equal the embedded RetainV1Schema bytes")
+			}
+			if tt.wantEmptyBody && response.Body.Len() != 0 {
+				t.Errorf("body = %q, want empty", response.Body.String())
+			}
+			if tt.wantStatus == http.StatusOK {
+				if got := response.Header().Get("Content-Type"); got != retainV1SchemaContentType {
+					t.Errorf("Content-Type = %q, want %q", got, retainV1SchemaContentType)
+				}
+				if got := response.Header().Get("Cache-Control"); got != retainV1SchemaCacheControl {
+					t.Errorf("Cache-Control = %q, want %q", got, retainV1SchemaCacheControl)
+				}
+				if got := response.Header().Get("Content-Length"); got != strconv.Itoa(len(importer.RetainV1Schema)) {
+					t.Errorf("Content-Length = %q, want %d", got, len(importer.RetainV1Schema))
+				}
+			}
+			if tt.method == http.MethodPost {
+				allow := response.Header().Get("Allow")
+				if !strings.Contains(allow, http.MethodGet) || !strings.Contains(allow, http.MethodHead) {
+					t.Errorf("Allow = %q, want GET and HEAD", allow)
+				}
 			}
 		})
 	}
