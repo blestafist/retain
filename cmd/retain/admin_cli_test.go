@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -82,6 +83,22 @@ func TestRunAdminCreateRequiresEmail(t *testing.T) {
 	}
 }
 
+func TestRunAdminCreateHelpDoesNotReadPassword(t *testing.T) {
+	var output strings.Builder
+	err := runAdminCreate(context.Background(), []string{"--help"}, nil, nil, &output)
+	if err != nil {
+		t.Fatalf("runAdminCreate(--help) error = %v, want success", err)
+	}
+	for _, want := range []string{"Usage of retain admin create:", "-email string", "admin email address", "-name string"} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("help output %q does not contain %q", output.String(), want)
+		}
+	}
+	if strings.Contains(output.String(), "password") {
+		t.Errorf("help unexpectedly contains password input details: %q", output.String())
+	}
+}
+
 func TestRunAdminCreateRejectsPasswordFlagWithoutEchoingValue(t *testing.T) {
 	const secret = "do-not-echo-this"
 	err := runAdminCreate(context.Background(), []string{"--email=user@example.test", "--password=" + secret}, adminCreatorFunc(func(context.Context, string, string, string) (int64, error) {
@@ -96,6 +113,36 @@ func TestRunAdminCreateRejectsPasswordFlagWithoutEchoingValue(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), secret) {
 		t.Fatalf("argument value leaked in error: %v", err)
+	}
+}
+
+func TestRunAdminCreateReportsNonTerminalPasswordErrorSafely(t *testing.T) {
+	const secret = "do-not-print-this-reader-error"
+	readerCalls := 0
+	var output strings.Builder
+	err := runAdminCreate(context.Background(), []string{"--email=user@example.test"}, adminCreatorFunc(func(context.Context, string, string, string) (int64, error) {
+		t.Fatal("creator called after password reader error")
+		return 0, nil
+	}), func(string) ([]byte, error) {
+		readerCalls++
+		return nil, fmt.Errorf("%s: %w", secret, errPasswordInputRequiresTerminal)
+	}, &output)
+
+	var cliErr *adminCLIError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("runAdminCreate() error type = %T, want *adminCLIError", err)
+	}
+	if !errors.Is(err, errPasswordInputRequiresTerminal) {
+		t.Fatalf("runAdminCreate() error = %v, want non-terminal cause preserved", err)
+	}
+	if got, want := err.Error(), "read password: password input requires a terminal"; got != want {
+		t.Errorf("runAdminCreate() error = %q, want %q", got, want)
+	}
+	if strings.Contains(err.Error(), secret) || strings.Contains(output.String(), secret) {
+		t.Errorf("password reader error leaked: error=%q stdout=%q", err, output.String())
+	}
+	if readerCalls != 1 || output.Len() != 0 {
+		t.Errorf("reader calls = %d, stdout = %q; want one reader call and no output", readerCalls, output.String())
 	}
 }
 
@@ -144,19 +191,40 @@ func TestReadAdminPasswordRejectsNonTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	stderr, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
 	originalStdin := os.Stdin
+	originalStderr := os.Stderr
 	os.Stdin = stdin
+	os.Stderr = stderr
 	t.Cleanup(func() {
 		os.Stdin = originalStdin
+		os.Stderr = originalStderr
 		_ = stdin.Close()
+		_ = stderr.Close()
 	})
 
 	password, err := readAdminPassword("Password: ")
 	if err == nil {
 		t.Fatal("readAdminPassword() succeeded with non-terminal stdin")
 	}
+	if !errors.Is(err, errPasswordInputRequiresTerminal) {
+		t.Fatalf("readAdminPassword() error = %v, want password input requires a terminal", err)
+	}
 	if password != nil {
 		t.Fatalf("password = %q, want nil", password)
+	}
+	if _, err := stderr.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	output, err := io.ReadAll(stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(output) != 0 {
+		t.Errorf("non-terminal password reader wrote output: %q", output)
 	}
 }
 
