@@ -1,0 +1,26 @@
+# Go
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# Frontend
+node_modules/
+web/dist/
+*.tsbuildinfo
+
+# Data & secrets
+/data/
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
