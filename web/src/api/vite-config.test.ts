@@ -5,6 +5,12 @@ import { describe, expect, it } from 'vitest';
 import config from '../../vite.config';
 
 describe('Vite development API proxy', () => {
+  it('targets the configured local backend', () => {
+    expect(config.server?.proxy).toMatchObject({
+      '/api': { target: 'http://localhost:8080' },
+    });
+  });
+
   it('forwards the path, query, Host, and Origin through the running dev server', async () => {
     let receivedRequest:
       | { url: string | undefined; host: string | undefined; origin: string | undefined }
