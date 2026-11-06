@@ -267,8 +267,8 @@ New ──(первый ответ)──▶ Learning ──(прошла шаг
   ```
   LLM_BASE_URL=https://ai.pestit.pl/v1        # облачный OpenAI-совместимый эндпоинт
   LLM_API_KEY=...                             # Bearer-токен (без него эндпоинт отвечает 401)
-  LLM_MODEL=...                               # модель по умолчанию из GET /v1/models
-  LLM_MODEL_FAST=...                          # опционально: дешёвая модель для массового дополнения колод
+  LLM_MODEL=cx/gpt-6-luna                     # модель по умолчанию
+  LLM_MODEL_FAST=                             # опционально: другая модель для массового дополнения колод (по умолчанию = LLM_MODEL)
   LLM_TIMEOUT=30s
   LLM_DAILY_LIMIT_PER_USER=300                # запросов в день
   ```
@@ -658,4 +658,4 @@ Mobile-first; свайп влево = Again, вправо = Good.
 
 ## 17. Открытые вопросы
 
-- Какая модель на `ai.pestit.pl` будет по умолчанию (`LLM_MODEL`) и поддерживает ли эндпоинт `response_format: json_schema` и стриминг? Это проверяется на этапе 6, fallback уже заложен.
+Открытых вопросов нет. Проверить на этапе 6 (`make llm-smoke`): `cx/gpt-6-luna` на `ai.pestit.pl` отвечает по `json_schema` и стримит через SSE. Fallback на `json_object` остаётся в коде на случай смены модели.
