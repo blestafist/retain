@@ -176,6 +176,24 @@ func TestDecodeJSON(t *testing.T) {
 	}
 }
 
+func TestDecodeJSONMaxBytesReaderLimit(t *testing.T) {
+	body := `{"name":"` + strings.Repeat("a", MaxJSONBodyBytes) + `"}`
+	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Body = http.MaxBytesReader(httptest.NewRecorder(), request.Body, MaxJSONBodyBytes)
+
+	var got struct {
+		Name string `json:"name"`
+	}
+	err := DecodeJSON(request, &got)
+	if !errors.Is(err, ErrJSONBodyTooLarge) {
+		t.Fatalf("DecodeJSON() error = %v, want errors.Is(_, %v)", err, ErrJSONBodyTooLarge)
+	}
+	if status := JSONErrorStatus(err); status != http.StatusRequestEntityTooLarge {
+		t.Errorf("JSONErrorStatus() = %d, want %d", status, http.StatusRequestEntityTooLarge)
+	}
+}
+
 func TestJSONErrorStatusUnknownError(t *testing.T) {
 	if got := JSONErrorStatus(fmt.Errorf("unrelated error")); got != 0 {
 		t.Errorf("JSONErrorStatus() = %d, want 0", got)

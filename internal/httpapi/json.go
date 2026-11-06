@@ -71,6 +71,10 @@ func DecodeJSON(r *http.Request, destination any) error {
 		return ErrJSONBodyTooLarge
 	}
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return ErrJSONBodyTooLarge
+		}
 		return ErrInvalidJSON
 	}
 
