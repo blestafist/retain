@@ -1,5 +1,6 @@
 import {
   THEME_CACHE_KEY,
+  THEME_CACHE_REVISION,
   THEME_CACHE_VERSION,
   DEFAULT_THEME_SETTINGS,
   validateThemeSettings,
@@ -14,6 +15,7 @@ import {
 
 export interface ThemeCache {
   version: typeof THEME_CACHE_VERSION;
+  revision: typeof THEME_CACHE_REVISION;
   settings: ThemeSettings;
   palettes: ThemePalettes;
 }
@@ -24,9 +26,21 @@ export interface ThemeStorage {
 }
 
 const HEX_COLOR = /^#[\da-f]{6}$/i;
+const CACHE_KEYS = ['version', 'revision', 'settings', 'palettes'];
+const SETTINGS_KEYS = ['seed', 'variant', 'contrastLevel', 'mode'];
+const PALETTE_KEYS = ['light', 'dark'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(
+  value: unknown,
+  keys: readonly string[],
+): value is Record<string, unknown> {
+  return isRecord(value) &&
+    Object.keys(value).length === keys.length &&
+    keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
 }
 
 function isRoleMap(value: unknown): value is ThemeRoleMap {
@@ -56,6 +70,7 @@ export function createThemeCache(settings: ThemeSettings): ThemeCache {
 
   return {
     version: THEME_CACHE_VERSION,
+    revision: THEME_CACHE_REVISION,
     settings: validSettings,
     palettes: createThemePalettes(validSettings),
   };
@@ -68,15 +83,21 @@ export function parseThemeCache(serialized: string | null): ThemeCache | null {
 
   try {
     const candidate: unknown = JSON.parse(serialized);
-    if (!isRecord(candidate) || candidate.version !== THEME_CACHE_VERSION) {
+    if (
+      !hasExactKeys(candidate, CACHE_KEYS) ||
+      candidate.version !== THEME_CACHE_VERSION ||
+      candidate.revision !== THEME_CACHE_REVISION
+    ) {
       return null;
     }
 
-    const settings = validateThemeSettings(candidate.settings);
+    const settings = hasExactKeys(candidate.settings, SETTINGS_KEYS)
+      ? validateThemeSettings(candidate.settings)
+      : null;
     const palettes = candidate.palettes;
     if (
       settings === null ||
-      !isRecord(palettes) ||
+      !hasExactKeys(palettes, PALETTE_KEYS) ||
       !isRoleMap(palettes.light) ||
       !isRoleMap(palettes.dark)
     ) {
@@ -85,6 +106,7 @@ export function parseThemeCache(serialized: string | null): ThemeCache | null {
 
     return {
       version: THEME_CACHE_VERSION,
+      revision: THEME_CACHE_REVISION,
       settings,
       palettes: {
         light: palettes.light,

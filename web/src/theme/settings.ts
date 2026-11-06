@@ -1,5 +1,8 @@
 export const THEME_CACHE_KEY = 'retain.theme.cache.v1';
-export const THEME_CACHE_VERSION = 1;
+// Bump the version when the serialized cache envelope changes.
+export const THEME_CACHE_VERSION = 2;
+// Bump the revision when palette roles or generation semantics change.
+export const THEME_CACHE_REVISION = 1;
 
 export const THEME_VARIANTS = [
   'fidelity',

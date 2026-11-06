@@ -22,8 +22,6 @@ const MODES = ['light', 'dark'] as const;
 
 const TEXT_CONTRAST_PAIRS = [
   ['on-background', 'background'],
-  ['on-surface', 'surface'],
-  ['on-surface-variant', 'surface-variant'],
   ['inverse-on-surface', 'inverse-surface'],
   ['on-primary', 'primary'],
   ['on-primary-container', 'primary-container'],
@@ -39,6 +37,37 @@ const TEXT_CONTRAST_PAIRS = [
   ['on-tertiary-fixed-variant', 'tertiary-fixed'],
   ['on-error', 'error'],
   ['on-error-container', 'error-container'],
+] as const satisfies readonly (readonly [ThemeRoleName, ThemeRoleName])[];
+
+const SURFACE_TEXT_FOREGROUNDS = [
+  'on-surface',
+  'on-surface-variant',
+] as const satisfies readonly ThemeRoleName[];
+
+const SURFACE_TEXT_BACKGROUNDS = [
+  'surface',
+  'surface-variant',
+  'surface-dim',
+  'surface-bright',
+  'surface-container-lowest',
+  'surface-container-low',
+  'surface-container',
+  'surface-container-high',
+  'surface-container-highest',
+] as const satisfies readonly ThemeRoleName[];
+
+const SURFACE_TEXT_CONTRAST_PAIRS = SURFACE_TEXT_FOREGROUNDS.flatMap(
+  (foreground) => SURFACE_TEXT_BACKGROUNDS.map(
+    (background) => [foreground, background] as const,
+  ),
+);
+
+// These roles identify the skip-link boundary and keyboard focus ring on
+// surface-container. Decorative outline-variant dividers are not component
+// boundaries and are intentionally not claimed to meet the 3:1 non-text SC.
+const NON_TEXT_CONTRAST_PAIRS = [
+  ['outline', 'surface-container'],
+  ['primary', 'surface-container'],
 ] as const satisfies readonly (readonly [ThemeRoleName, ThemeRoleName])[];
 
 const SEMANTIC_CONTRAST_PAIRS = [
@@ -112,7 +141,10 @@ describe('MD3 palette generation', () => {
               mode,
             );
 
-            for (const [foreground, background] of TEXT_CONTRAST_PAIRS) {
+            for (const [foreground, background] of [
+              ...TEXT_CONTRAST_PAIRS,
+              ...SURFACE_TEXT_CONTRAST_PAIRS,
+            ]) {
               expect(
                 meetsWcagAA(palette[foreground], palette[background]),
                 `${preset.id}/${variant}/${contrastLevel}/${mode}: ${foreground} on ${background} (${contrastRatio(palette[foreground], palette[background]).toFixed(2)}:1)`,
@@ -124,6 +156,13 @@ describe('MD3 palette generation', () => {
                 meetsWcagAA(palette[foreground], palette[background]),
                 `${preset.id}/${mode}: ${foreground} on ${background}`,
               ).toBe(true);
+            }
+
+            for (const [foreground, background] of NON_TEXT_CONTRAST_PAIRS) {
+              expect(
+                contrastRatio(palette[foreground], palette[background]),
+                `${preset.id}/${variant}/${contrastLevel}/${mode}: ${foreground} on ${background}`,
+              ).toBeGreaterThanOrEqual(3);
             }
           }
         }

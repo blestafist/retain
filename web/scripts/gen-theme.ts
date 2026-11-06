@@ -2,7 +2,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createThemePalettes, THEME_ROLE_NAMES } from '../src/theme/palette.ts';
-import { DEFAULT_THEME_SETTINGS } from '../src/theme/settings.ts';
+import {
+  DEFAULT_THEME_SETTINGS,
+  THEME_CACHE_REVISION,
+  THEME_CACHE_VERSION,
+} from '../src/theme/settings.ts';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const generatedStylesheet = resolve(
@@ -53,6 +57,38 @@ const generatedHtml = html.replace(
   defaultPaletteScript,
   `$1${JSON.stringify(palettes)}$2`,
 );
-if (generatedHtml !== html) {
-  await writeFile(htmlEntrypoint, generatedHtml, 'utf8');
+const rolesDeclaration = /const roles = [^\n]+;/;
+if (!rolesDeclaration.test(generatedHtml)) {
+  throw new Error('Theme role list declaration was not found in index.html.');
+}
+const generatedRolesHtml = generatedHtml.replace(
+  rolesDeclaration,
+  `const roles = ${JSON.stringify(THEME_ROLE_NAMES)};`,
+);
+
+function replaceCacheMeta(
+  source: string,
+  name: string,
+  value: number,
+): string {
+  const meta = new RegExp(`(<meta name="${name}" content=")[^"]*(" />)`);
+  if (!meta.test(source)) {
+    throw new Error(`Theme cache metadata tag ${name} was not found in index.html.`);
+  }
+
+  return source.replace(meta, `$1${value}$2`);
+}
+
+const synchronizedHtml = replaceCacheMeta(
+  replaceCacheMeta(
+    generatedRolesHtml,
+    'retain-theme-cache-version',
+    THEME_CACHE_VERSION,
+  ),
+  'retain-theme-cache-revision',
+  THEME_CACHE_REVISION,
+);
+
+if (synchronizedHtml !== html) {
+  await writeFile(htmlEntrypoint, synchronizedHtml, 'utf8');
 }

@@ -51,7 +51,7 @@ body {
 .main-content h1 {
   max-width: 16ch;
   margin: 0;
-  font: var(--md-sys-typescale-display-small-emphasized);
+  font: var(--md-sys-typescale-display-small);
   letter-spacing: var(--md-sys-typescale-display-small-letter-spacing);
   text-wrap: balance;
 }

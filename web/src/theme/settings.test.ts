@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   createThemeCache,
@@ -10,11 +11,13 @@ import {
 import {
   DEFAULT_THEME_SETTINGS,
   THEME_CACHE_KEY,
+  THEME_CACHE_REVISION,
   THEME_CACHE_VERSION,
   normalizeSeedColor,
   resolveThemeMode,
   validateThemeSettings,
 } from './settings';
+import { THEME_ROLE_NAMES } from './palette';
 
 describe('theme settings validation', () => {
   it.each([
@@ -72,6 +75,7 @@ describe('theme cache and fallback', () => {
     };
 
     expect(cache.version).toBe(THEME_CACHE_VERSION);
+    expect(cache.revision).toBe(THEME_CACHE_REVISION);
     expect(persistThemeCache(cache, storage)).toBe(true);
     expect(values.has(THEME_CACHE_KEY)).toBe(true);
     expect(readThemeCache(storage)).toEqual(cache);
@@ -87,6 +91,8 @@ describe('theme cache and fallback', () => {
     expect(parseThemeCache('{broken')).toBeNull();
     expect(parseThemeCache(null)).toBeNull();
     expect(parseThemeCache(JSON.stringify({ ...parsed, version: 0 }))).toBeNull();
+    expect(parseThemeCache(JSON.stringify({ ...parsed, version: 1 }))).toBeNull();
+    expect(parseThemeCache(JSON.stringify({ ...parsed, revision: 0 }))).toBeNull();
 
     const incomplete = structuredClone(parsed);
     delete (incomplete.palettes as Record<string, Record<string, string>>).light.primary;
@@ -100,7 +106,33 @@ describe('theme cache and fallback', () => {
     const invalidSettings = structuredClone(parsed);
     (invalidSettings.settings as Record<string, unknown>).seed = 'not-a-color';
     expect(parseThemeCache(JSON.stringify(invalidSettings))).toBeNull();
+
+    const unknownSetting = structuredClone(parsed);
+    (unknownSetting.settings as Record<string, unknown>).future = true;
+    expect(parseThemeCache(JSON.stringify(unknownSetting))).toBeNull();
+
+    const unknownEnvelopeField = { ...parsed, future: true };
+    expect(parseThemeCache(JSON.stringify(unknownEnvelopeField))).toBeNull();
     expect(palettes.light.primary).toMatch(/^#[\da-f]{6}$/i);
+  });
+
+  it('keeps inline bootstrap cache validation synchronized with the React loader', () => {
+    const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
+    const version = html.match(
+      /<meta name="retain-theme-cache-version" content="(\d+)" \/>/,
+    )?.[1];
+    const revision = html.match(
+      /<meta name="retain-theme-cache-revision" content="(\d+)" \/>/,
+    )?.[1];
+    const roles = html.match(/const roles = (\[[^\n]*\]);/)?.[1];
+
+    expect(version).toBe(String(THEME_CACHE_VERSION));
+    expect(revision).toBe(String(THEME_CACHE_REVISION));
+    expect(roles).toBeDefined();
+    expect(JSON.parse(roles ?? 'null')).toEqual(THEME_ROLE_NAMES);
+    expect(html).toContain(`const cacheKey = '${THEME_CACHE_KEY}'`);
+    expect(html).toContain('value.version === cacheVersion');
+    expect(html).toContain('value.revision === cacheRevision');
   });
 
   it('falls back to the generated default settings if storage is missing or broken', () => {
