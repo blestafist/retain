@@ -131,7 +131,26 @@ export function readThemeCache(
 export function loadThemeCache(
   storage: ThemeStorage | null = safeLocalStorage(),
 ): ThemeCache {
-  return readThemeCache(storage) ?? createThemeCache(DEFAULT_THEME_SETTINGS);
+  try {
+    const serialized = storage?.getItem(THEME_CACHE_KEY) ?? null;
+    const cache = parseThemeCache(serialized);
+    if (cache !== null) return cache;
+
+    // Revision 1 has compatible settings, but its rating palettes are stale.
+    const candidate: unknown = JSON.parse(serialized ?? 'null');
+    if (
+      hasExactKeys(candidate, CACHE_KEYS) &&
+      candidate.version === THEME_CACHE_VERSION &&
+      candidate.revision === 1 &&
+      hasExactKeys(candidate.settings, SETTINGS_KEYS)
+    ) {
+      const settings = validateThemeSettings(candidate.settings);
+      if (settings !== null) return createThemeCache(settings);
+    }
+  } catch {
+    // Invalid or unavailable storage uses the default theme.
+  }
+  return createThemeCache(DEFAULT_THEME_SETTINGS);
 }
 
 export function persistThemeCache(

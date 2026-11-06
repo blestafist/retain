@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import {
   createThemeCache,
@@ -133,6 +134,51 @@ describe('theme cache and fallback', () => {
     expect(html).toContain(`const cacheKey = '${THEME_CACHE_KEY}'`);
     expect(html).toContain('value.version === cacheVersion');
     expect(html).toContain('value.revision === cacheRevision');
+  });
+
+  it('rejects revision 1 palettes in bootstrap and rebuilds them with saved settings', () => {
+    const settings = {
+      seed: '#006874', variant: 'expressive', contrastLevel: 0.5, mode: 'dark',
+    } as const;
+    const expected = createThemeCache(settings);
+    const stale = structuredClone(expected);
+    stale.palettes.dark['rating-again'] = '#123456';
+    const serialized = JSON.stringify({ ...stale, revision: 1 });
+    let stored = serialized;
+    const storage: ThemeStorage = {
+      getItem: () => stored,
+      setItem: (_key, value) => { stored = value; },
+    };
+    expect(parseThemeCache(serialized)).toBeNull();
+
+    const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
+    const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)?.[1];
+    const defaults = html.match(/<script id="theme-default-palette" type="application\/json">(.*?)<\/script>/)?.[1];
+    expect(script).toBeDefined();
+    expect(defaults).toBeDefined();
+    const properties: Record<string, string> = {};
+    const root = { dataset: {}, style: { colorScheme: '', setProperty: (key: string, value: string) => { properties[key] = value; } } };
+    runInNewContext(script ?? '', {
+      window: { localStorage: storage, matchMedia: () => ({ matches: false }) },
+      document: {
+        documentElement: root,
+        querySelector: (selector: string) => selector.includes('cache-version')
+          ? { content: String(THEME_CACHE_VERSION) }
+          : selector.includes('cache-revision')
+            ? { content: String(THEME_CACHE_REVISION) }
+            : { setAttribute: () => undefined },
+        getElementById: () => ({ textContent: defaults }),
+      },
+    });
+    expect(properties['--md-sys-color-rating-again']).toBe(
+      createThemeCache(DEFAULT_THEME_SETTINGS).palettes.light['rating-again'],
+    );
+    expect(properties['--md-sys-color-rating-again']).not.toBe('#123456');
+
+    const migrated = loadThemeCache(storage);
+    expect(migrated).toEqual(expected);
+    expect(persistThemeCache(migrated, storage)).toBe(true);
+    expect(parseThemeCache(stored)).toEqual(expected);
   });
 
   it('falls back to the generated default settings if storage is missing or broken', () => {
