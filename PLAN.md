@@ -1,128 +1,128 @@
-# Retain — технический план
+# Retain — Technical Plan
 
-Приложение для изучения иностранных слов с интервальными повторениями (FSRS), аналитикой обучения и LLM-помощником.
+A web app for learning foreign vocabulary with spaced repetition (FSRS), learning analytics, and an LLM assistant.
 
-- **Формат:** веб-приложение + PWA (устанавливается на телефон, работает офлайн).
-- **Аудитория:** я и друзья (до ~50 пользователей).
-- **Языковые пары:** польский → немецкий (учим немецкий на базе польского), русский → английский (учим английский на базе русского).
-- **Хостинг:** домашний сервер, наружу через Cloudflare Tunnel на своём домене.
-- **Язык интерфейса:** английский (контент — слова и переводы — на изучаемых и родных языках).
-- **Дизайн:** Material Design 3 Expressive, адаптивная тема: акцентный цвет выбирает пользователь, по умолчанию болотный зелёный `#3A4527`.
-
----
-
-## 1. Цели и не-цели
-
-**Цели**
-- Быстро добавлять слова (с автозаполнением через LLM) и учить их карточками с умным расписанием повторений.
-- Видеть кривую забывания, прогресс и прогноз нагрузки.
-- Работать с телефона как с приложением, в том числе без интернета.
-- Делиться колодами с друзьями, видеть общий прогресс.
-
-**Не-цели (пока)**
-- Платежи, публичная регистрация, масштабирование на тысячи пользователей.
-- Нативные мобильные приложения.
-- Готовые встроенные колоды (свои колоды импортируются из выгрузок, раздел 3.5).
+- **Format:** web app + PWA (installable on a phone, works offline).
+- **Audience:** me and friends (up to ~50 users).
+- **Language pairs:** Polish → German (learning German from Polish), Russian → English (learning English from Russian).
+- **Hosting:** home server, exposed through Cloudflare Tunnel on our own domain.
+- **UI language:** English (content — terms and translations — is in the target and native languages).
+- **Design:** Material Design 3 Expressive, adaptive theme: the user picks the accent color; default is swamp green `#3A4527`.
 
 ---
 
-## 2. Стек
+## 1. Goals and non-goals
 
-| Слой | Технология | Почему |
+**Goals**
+- Quickly add words (with LLM auto-fill) and learn them with flashcards on a smart review schedule.
+- See the forgetting curve, progress, and workload forecast.
+- Use it on a phone like a native app, including offline.
+- Share decks with friends and see each other's progress.
+
+**Non-goals (for now)**
+- Payments, public sign-up, scaling to thousands of users.
+- Native mobile apps.
+- Bundled starter decks (our own decks are imported from exports, section 3.5).
+
+---
+
+## 2. Stack
+
+| Layer | Technology | Why |
 |---|---|---|
-| Язык бэкенда | **Go 1.23+** | Один бинарник, простой деплой |
-| HTTP | `net/http` (роутинг из 1.22+) | Минимум зависимостей |
-| БД | **SQLite** через `modernc.org/sqlite` (без CGO), WAL-режим | Для десятков пользователей хватает с запасом, ноль администрирования |
-| Доступ к БД | **sqlc** | Типобезопасный код из явного SQL |
-| Миграции | **goose** (встроены через `embed`) | Применяются при старте |
-| Алгоритм повторений | **`github.com/open-spaced-repetition/go-fsrs/v3`** | Официальная Go-реализация FSRS |
-| LLM | **`github.com/openai/openai-go`** с `option.WithBaseURL` | OpenAI-совместимый API; по умолчанию свой облачный эндпоинт `https://ai.pestit.pl/v1` |
-| Аутентификация | Сессии в cookie (HttpOnly, Secure, SameSite=Lax) + пароли на **argon2id** | Просто и безопасно, без JWT |
-| Push-уведомления | Web Push (VAPID), `github.com/SherClockHolmes/webpush-go` | Напоминания о повторениях |
-| Логи | `log/slog` (JSON) | Стандартная библиотека |
-| Конфиг | env-переменные + `caarlos0/env` | 12-factor |
-| Фронтенд | **TypeScript + React + Vite** | Быстрая разработка |
-| Данные на клиенте | TanStack Query + **Dexie** (IndexedDB) | Кэш и офлайн-очередь |
-| Расписание на клиенте (офлайн) | **`ts-fsrs`** | Та же модель FSRS, что и на сервере |
-| Дизайн-система | **MD3 Expressive**: токены из `@material/material-color-utilities` + свои компоненты на **Radix Primitives** + Tailwind | См. раздел 8 |
-| Анимации | **Motion** (`motion`), пружинные анимации | Motion scheme MD3 Expressive |
-| Шрифт | **Roboto Flex** (variable) | Emphasized-типографика MD3 Expressive |
-| Графики | Recharts (или uPlot для тяжёлых) | Кривые, heatmap, прогноз |
-| PWA | `vite-plugin-pwa` (Workbox) | Service worker, manifest, кэш |
-| Озвучка | Web Speech API (`speechSynthesis`) | Бесплатно, без сервера |
-| Деплой | Docker Compose: приложение + **cloudflared** + **Litestream** | Домашний сервер без открытых портов |
-| Бэкапы | Litestream → **Cloudflare R2** | Копия вне дома |
-| CI | GitHub Actions: `go test`, `golangci-lint`, `vitest`, сборка образа | |
+| Backend language | **Go 1.23+** | Single binary, simple deployment |
+| HTTP | `net/http` (routing from 1.22+) | Minimal dependencies |
+| Database | **SQLite** via `modernc.org/sqlite` (no CGO), WAL mode | Plenty for dozens of users, zero administration |
+| DB access | **sqlc** | Type-safe code from explicit SQL |
+| Migrations | **goose** (embedded via `embed`) | Applied on startup |
+| Scheduling algorithm | **`github.com/open-spaced-repetition/go-fsrs/v3`** | Official Go implementation of FSRS |
+| LLM | **`github.com/openai/openai-go`** with `option.WithBaseURL` | OpenAI-compatible API; default is our own cloud endpoint `https://ai.pestit.pl/v1` |
+| Authentication | Cookie sessions (HttpOnly, Secure, SameSite=Lax) + **argon2id** passwords | Simple and secure, no JWT |
+| Push notifications | Web Push (VAPID), `github.com/SherClockHolmes/webpush-go` | Review reminders |
+| Logging | `log/slog` (JSON) | Standard library |
+| Config | Environment variables + `caarlos0/env` | 12-factor |
+| Frontend | **TypeScript + React + Vite** | Fast development |
+| Client data | TanStack Query + **Dexie** (IndexedDB) | Cache and offline queue |
+| Client scheduling (offline) | **`ts-fsrs`** | Same FSRS model as the server |
+| Design system | **MD3 Expressive**: tokens from `@material/material-color-utilities` + custom components on **Radix Primitives** + Tailwind | See section 8 |
+| Animation | **Motion** (`motion`), spring animations | MD3 Expressive motion scheme |
+| Font | **Roboto Flex** (variable) | MD3 Expressive emphasized typography |
+| Charts | Recharts (or uPlot for heavy charts) | Curves, heatmap, forecast |
+| PWA | `vite-plugin-pwa` (Workbox) | Service worker, manifest, caching |
+| Text-to-speech | Web Speech API (`speechSynthesis`) | Free, no server needed |
+| Deployment | Docker Compose: app + **cloudflared** + **Litestream** | Home server with no open ports |
+| Backups | Litestream → **Cloudflare R2** | Off-site copy |
+| CI | GitHub Actions: `go test`, `golangci-lint`, `vitest`, image build | |
 
-Фронтенд собирается в `web/dist` и встраивается в Go-бинарник через `embed.FS`, поэтому деплоится **один бинарник**.
+The frontend is built into `web/dist` and embedded into the Go binary via `embed.FS`, so we deploy **a single binary**.
 
 ---
 
-## 3. Функционал
+## 3. Features
 
 ### 3.1 MVP
-1. **Аккаунты по инвайтам**: админ создаёт инвайт-код, друг регистрируется по ссылке.
-2. **Колоды**: создание, переименование, удаление, языковая пара (`de`/`pl`, `en`/`ru`). Колоды **вложенные**: группа → колоды (например, класс → главы учебника), учить можно одну главу или всю группу сразу.
-3. **Слова (notes)**: термин (слово или фраза) и перевод — обязательные; транскрипция, пример, заметка, теги и языковые поля (артикль, мн. число, управление падежом и т.п.) — опциональные. Модель универсальная, см. раздел 3.5.
-   - Из одного слова генерируются карточки: `прямая` (термин → перевод) и, по желанию, `обратная` (перевод → термин).
-4. **Сессия повторения**:
-   - Очередь: просроченные повторения → карточки на изучении → новые (с учётом дневных лимитов). Для родительской колоды — по всем дочерним.
-   - Показ карточки → «Показать ответ» → оценки **Again / Hard / Good / Easy**. На каждой кнопке — интервал до следующего показа («10м», «3д», «2мес»).
-   - Горячие клавиши (Space, 1–4), свайпы на мобилке, Undo последнего ответа.
-5. **Режимы упражнений**:
-   - Переворот карточки (классика).
-   - Ввод ответа с клавиатуры: нормализация по языку (раздел 3.4) + расстояние Левенштейна → предлагаемая оценка (точно → Good, опечатка → Hard, неверно → Again).
-   - Выбор из 4 вариантов (дистракторы из той же колоды) — для новых карточек.
-6. **Озвучка** слова через TTS по кнопке и автоматически (настраивается).
-7. **Импорт** в универсальном формате `retain/v1` и через адаптеры (школьная выгрузка `classes/wordsets`, CSV): предпросмотр перед применением, повторный импорт без потери прогресса (раздел 3.5). **Экспорт** в `retain/v1` и CSV.
-8. **Настройки**: новых в день, максимум повторений в день, желаемое удержание (по умолчанию 0.90), шаги изучения (`1m 10m`), часовой пояс, начало «нового дня» (по умолчанию 04:00), оформление: акцентный цвет, стиль схемы, контраст, светлая/тёмная/системная тема (раздел 8.1).
-9. **Базовая статистика**: сегодня повторено/выучено, серия дней (streak), сколько карточек к повторению.
+1. **Invite-only accounts**: an admin creates an invite code, a friend signs up via the link.
+2. **Decks**: create, rename, delete, language pair (`de`/`pl`, `en`/`ru`). Decks are **nested**: group → decks (e.g. class → textbook chapters); you can study a single chapter or the whole group at once.
+3. **Words (notes)**: term (word or phrase) and translation are required; transcription, example, note, tags, and language-specific fields (article, plural, case government, etc.) are optional. The model is universal, see section 3.5.
+   - Each note generates cards: `forward` (term → translation) and, optionally, `reverse` (translation → term).
+4. **Review session**:
+   - Queue: overdue reviews → learning cards → new cards (respecting daily limits). For a parent deck — across all children.
+   - Show card → "Show answer" → ratings **Again / Hard / Good / Easy**. Each button shows the interval until the next review ("10m", "3d", "2mo").
+   - Hotkeys (Space, 1–4), swipes on mobile, undo of the last answer.
+5. **Exercise modes**:
+   - Card flip (classic).
+   - Typed answer: language-aware normalization (section 3.4) + Levenshtein distance → suggested rating (exact → Good, typo → Hard, wrong → Again).
+   - Multiple choice of 4 (distractors from the same deck) — for new cards.
+6. **Text-to-speech** for the term, on demand and automatically (configurable).
+7. **Import** in the universal `retain/v1` format and via adapters (school `classes/wordsets` export, CSV): preview before applying, re-import without losing progress (section 3.5). **Export** to `retain/v1` and CSV.
+8. **Settings**: new cards per day, max reviews per day, desired retention (default 0.90), learning steps (`1m 10m`), time zone, start of a "new day" (default 04:00), appearance: accent color, scheme style, contrast, light/dark/system theme (section 8.1).
+9. **Basic stats**: reviewed/learned today, streak, cards due.
 
-### 3.2 Версия 1.0
-- **LLM-помощник** (раздел 6): автозаполнение слова, массовое дополнение колоды, вопросы о слове, мнемоники, проверка синонимов.
-- **Полная аналитика** (раздел 5).
-- **PWA офлайн**: повторения без сети, синхронизация при появлении сети.
-- **Push-напоминания**: «У тебя 34 карточки к повторению» в выбранное время.
-- **Общие колоды**: поделиться колодой с другом (копия или подписка на обновления).
-- **Друзья**: лента активности и таблица лидеров за неделю (повторения, выученные слова, серия).
-- **Пиявки (leeches)**: карточки с 8+ провалами помечаются, LLM предлагает мнемонику и дополнительный пример.
-- **Поиск и фильтры** по словам, тегам, состоянию карточки.
+### 3.2 Version 1.0
+- **LLM assistant** (section 6): word auto-fill, bulk deck enrichment, questions about a word, mnemonics, synonym checking.
+- **Full analytics** (section 5).
+- **Offline PWA**: review without a connection, sync when back online.
+- **Push reminders**: "You have 34 cards to review" at a chosen time.
+- **Shared decks**: share a deck with a friend (copy or subscribe to updates).
+- **Friends**: activity feed and weekly leaderboard (reviews, words learned, streak).
+- **Leeches**: cards with 8+ lapses are flagged; the LLM suggests a mnemonic and an extra example.
+- **Search and filters** by term, tag, card state.
 
-### 3.3 Позже
-- Адаптер импорта Anki `.apkg` (zip с SQLite внутри).
-- Оптимизация параметров FSRS под конкретного пользователя (раздел 4.4).
-- Озвучка через OpenAI-совместимый `/audio/speech`, если системных голосов мало.
-- Картинки к словам.
+### 3.3 Later
+- Anki `.apkg` import adapter (a zip with SQLite inside).
+- Per-user FSRS parameter optimization (section 4.4).
+- Text-to-speech via OpenAI-compatible `/audio/speech` if system voices are lacking.
+- Images on words.
 
-### 3.4 Языковые особенности
+### 3.4 Language specifics
 
-Карточка: лицевая сторона — слово на изучаемом языке (`de`, `en`), оборот — перевод на родной (`pl`, `ru`). Обратная карточка включается в настройках колоды.
+Card: front — term in the target language (`de`, `en`), back — translation in the native language (`pl`, `ru`). Reverse cards are enabled in deck settings.
 
-**Нормализация ответа в режиме ввода** (пакет `internal/lang`, интерфейс `Normalizer` на каждый язык):
+**Answer normalization in typing mode** (package `internal/lang`, one `Normalizer` per language):
 
-| Язык | Правила |
+| Language | Rules |
 |---|---|
-| Общие | Unicode NFC, trim, нижний регистр, схлопывание пробелов, удаление пунктуации. Перевод может содержать несколько вариантов через `;` — засчитывается любой. Плюс список `alternatives` (принятые синонимы). |
-| `de` | Артикль `der/die/das` у существительных проверяется отдельно: неверный артикль → Hard (настройка колоды: Hard или Again). `ß` = `ss`, `ä/ö/ü` = `ae/oe/ue` (нет немецкой раскладки). Регистр существительных не учитывается. |
-| `en` | Игнорируются `to` перед глаголами и артикли `a/an/the`. Британское и американское написание — через `alternatives` (их заполняет LLM). |
-| `pl` | Ответ без диакритики (`ą ć ę ł ń ó ś ź ż`) → Hard (почти верно), а не Again. |
-| `ru` | `ё` = `е`, знаки ударения (U+0301) удаляются. |
+| Common | Unicode NFC, trim, lowercase, collapse whitespace, strip punctuation. A translation may contain several variants separated by `;` — any of them is accepted. Plus an `alternatives` list (accepted synonyms). |
+| `de` | The `der/die/das` article of nouns is checked separately: wrong article → Hard (deck setting: Hard or Again). `ß` = `ss`, `ä/ö/ü` = `ae/oe/ue` (for users without a German layout). Noun capitalization is ignored. |
+| `en` | `to` before verbs and articles `a/an/the` are ignored. British and American spellings are handled via `alternatives` (filled in by the LLM). |
+| `pl` | An answer without diacritics (`ą ć ę ł ń ó ś ź ż`) → Hard (almost right), not Again. |
+| `ru` | `ё` = `е`, stress marks (U+0301) are removed. |
 
-- **Экранная панель символов** в режиме ввода: `ä ö ü ß` для немецкого, `ą ć ę ł ń ó ś ź ż` для польского.
-- **TTS-голоса**: `de-DE`, `en-GB`/`en-US`, `pl-PL`, `ru-RU`. Наличие голоса проверяется через `speechSynthesis.getVoices()`; если голоса нет, кнопка скрывается.
+- **On-screen character bar** in typing mode: `ä ö ü ß` for German, `ą ć ę ł ń ó ś ź ż` for Polish.
+- **TTS voices**: `de-DE`, `en-GB`/`en-US`, `pl-PL`, `ru-RU`. Voice availability is checked via `speechSynthesis.getVoices()`; if there is no voice, the button is hidden.
 
-### 3.5 Универсальное хранилище и импорт
+### 3.5 Universal storage and import
 
-Внутри всё хранится в одной модели: **коллекция → колоды (вложенные) → заметки → карточки**. Внешние выгрузки в неё приводятся адаптерами или твоим конвертером. Ядро приложения про исходные форматы ничего не знает.
+Internally everything lives in a single model: **collection → decks (nested) → notes → cards**. External exports are converted into it by adapters or by your own converter. The app core knows nothing about source formats.
 
-**Модель заметки**
-- `term` — термин (слово или фраза), `translation` — перевод. Только эти поля обязательные.
-- Опциональные поля: `transcription`, `example`, `example_translation`, `notes`, `tags`, `alternatives` (дополнительные принятые ответы).
-- `fields` — произвольный JSON для языковых данных: `kind` (word/phrase), `pos`, `article`, `plural`, `governs` (падеж: A/D/G), `reflexive`, `verb_forms`, `cefr`, `mnemonic` и всё, что понадобится позже. Схема БД при этом не меняется.
-- `external_id` — ID в исходной системе (если есть), чтобы повторный импорт обновлял, а не дублировал.
-- `term_key` — нормализованный термин (нижний регистр, NFC, без лишних пробелов), используется для поиска дублей.
+**Note model**
+- `term` — the term (word or phrase), `translation` — the translation. These are the only required fields.
+- Optional fields: `transcription`, `example`, `example_translation`, `notes`, `tags`, `alternatives` (additional accepted answers).
+- `fields` — free-form JSON for language data: `kind` (word/phrase), `pos`, `article`, `plural`, `governs` (case: A/D/G), `reflexive`, `verb_forms`, `cefr`, `mnemonic`, and anything needed later. The DB schema does not change for this.
+- `external_id` — ID in the source system (if any), so a re-import updates instead of duplicating.
+- `term_key` — normalized term (lowercase, NFC, collapsed whitespace), used for duplicate detection.
 
-**Формат обмена `retain/v1`** — целевой формат для конвертеров, он же формат экспорта. JSON Schema отдаётся по `/schema/retain-v1.json`.
+**Exchange format `retain/v1`** — the target format for converters and also the export format. The JSON Schema is served at `/schema/retain-v1.json`.
 
 ```json
 {
@@ -155,149 +155,149 @@
 }
 ```
 
-- Колоды вкладываются друг в друга на любую глубину. `lang_*` наследуется от родителя.
-- Обязательны только `format`, `decks[].name`, `notes[].term` и `notes[].translation`. Всё остальное можно не указывать: LLM дополнит пустые поля.
+- Decks can be nested to any depth. `lang_*` is inherited from the parent.
+- Only `format`, `decks[].name`, `notes[].term`, and `notes[].translation` are required. Everything else may be omitted: the LLM can fill empty fields.
 
-**Адаптеры** (`internal/importer/adapters/`)
+**Adapters** (`internal/importer/adapters/`)
 ```go
 type Adapter interface {
     Name() string
-    Detect(raw []byte) bool            // автоопределение формата
-    Parse(raw []byte) (*Bundle, error) // → retain/v1 в памяти
+    Detect(raw []byte) bool            // format auto-detection
+    Parse(raw []byte) (*Bundle, error) // → in-memory retain/v1
 }
 ```
-- `retain` — родной формат.
-- `school-wordsets` — выгрузка вида `classes[].class / wordsets[].info / entries[]`: `class` → родительская колода (`external_id = class:<group_id>`), `wordset` → дочерняя (`wordset:<info.id>`, `expected_count`), `entries` → заметки. Если число слов не совпадает с `expected_count`, выдаётся предупреждение. Языков в файле нет, поэтому пара выбирается на предпросмотре (по умолчанию de/pl).
+- `retain` — the native format.
+- `school-wordsets` — an export shaped like `classes[].class / wordsets[].info / entries[]`: `class` → parent deck (`external_id = class:<group_id>`), `wordset` → child deck (`wordset:<info.id>`, `expected_count`), `entries` → notes. If the word count does not match `expected_count`, a warning is shown. The file has no languages, so the pair is chosen in the preview (default de/pl).
 - `csv` — `term;translation;example;tags`.
-- Позже: Anki `.apkg`.
+- Later: Anki `.apkg`.
 
-Если конвертировать файлы самому, достаточно выдавать `retain/v1`, адаптер не нужен. `school-wordsets` встроен для удобства, чтобы не гонять конвертер руками.
+If you convert files yourself, emitting `retain/v1` is enough — no adapter needed. `school-wordsets` is built in for convenience, so you don't have to run a converter by hand.
 
-**Обогащение при импорте** (`internal/lang`, без LLM, детерминированно; результат пишется в `fields`)
-- `de`: `der/die/das` + слово с заглавной → `pos=noun`, `article`. Окончание ` A` / ` D` / ` G` → `governs` (`berichten über A`). `sich …` → `reflexive`. 3+ слов без артикля → `kind=phrase`.
-- Перевод: части через `,` или `;` → `alternatives`. Пояснения в скобках (`powstanie (np. zbrojne)`) уходят в `notes` и не требуются при вводе. Точка в конце (`Mam propozycję.`) убирается.
-- Ввод ответа: маркеры `A/D/G` вводить не нужно, предлог нужен. Артикль проверяется по правилам из раздела 3.4.
-- Опечатки в источнике (`donisić`) не исправляются молча. LLM может их подсветить, решение за пользователем.
+**Enrichment on import** (`internal/lang`, no LLM, deterministic; results go into `fields`)
+- `de`: `der/die/das` + capitalized word → `pos=noun`, `article`. Trailing ` A` / ` D` / ` G` → `governs` (`berichten über A`). `sich …` → `reflexive`. 3+ words without an article → `kind=phrase`.
+- Translation: parts separated by `,` or `;` → `alternatives`. Parenthetical notes (`powstanie (np. zbrojne)`) go into `notes` and are not required when typing. A trailing period (`Mam propozycję.`) is stripped.
+- Typed answers: the `A/D/G` markers need not be typed, the preposition is required. The article is checked by the rules in section 3.4.
+- Typos in the source (`donisić`) are not silently fixed. The LLM can flag them; the user decides.
 
-**Процесс импорта**
-1. `POST /import/preview`: файл сохраняется в `import_batches` вместе с исходником (gzip), адаптер определяется автоматически. В ответе дерево колод и по каждой счётчики: новые / изменённые / без изменений / предупреждения.
-2. Пользователь выбирает языковую пару и куда положить колоды, потом `POST /import/{batch_id}/apply`. Всё применяется в одной транзакции.
-3. **Повторный импорт** (учитель добавил слова в главу): колода ищется по `(owner, source, external_id)`, заметка — по `external_id`, если его нет, то по `term_key`.
-   - Новые слова добавляются.
-   - У изменённых обновляется перевод, **прогресс FSRS сохраняется**.
-   - Исчезнувшие из источника слова по умолчанию остаются. Опция: приостановить их.
-4. Исходники остаются в `import_batches`, так что можно переразобрать их улучшенным адаптером без повторной загрузки.
-5. После импорта можно запустить «Дополнить через LLM» для пустых полей.
+**Import flow**
+1. `POST /import/preview`: the file is stored in `import_batches` along with the raw source (gzip), the adapter is auto-detected. The response contains the deck tree and per-deck counts: new / changed / unchanged / warnings.
+2. The user picks the language pair and where to put the decks, then `POST /import/{batch_id}/apply`. Everything is applied in a single transaction.
+3. **Re-import** (the teacher added words to a chapter): a deck is matched by `(owner, source, external_id)`, a note by `external_id`, falling back to `term_key`.
+   - New words are added.
+   - Changed words get their translation updated; **FSRS progress is preserved**.
+   - Words that disappeared from the source are kept by default. Option: suspend them.
+4. Sources stay in `import_batches`, so they can be re-parsed with an improved adapter without re-uploading.
+5. After import you can run "Enrich with LLM" for empty fields.
 
 ---
 
-## 4. Алгоритм обучения (FSRS)
+## 4. Learning algorithm (FSRS)
 
-### 4.1 Модель
-FSRS (Free Spaced Repetition Scheduler) — модель памяти DSR. Для каждой карточки хранятся:
-- **S (stability)** — стабильность: через сколько дней вероятность вспомнить упадёт до 90%.
-- **D (difficulty)** — сложность карточки, 1..10.
-- **R (retrievability)** — вероятность вспомнить прямо сейчас; вычисляется, не хранится.
+### 4.1 Model
+FSRS (Free Spaced Repetition Scheduler) is a DSR memory model. Each card stores:
+- **S (stability)** — the number of days until recall probability drops to 90%.
+- **D (difficulty)** — card difficulty, 1..10.
+- **R (retrievability)** — the probability of recall right now; computed, not stored.
 
-Кривая забывания (FSRS-4.5/5):
+Forgetting curve (FSRS-4.5/5):
 
 ```
 R(t, S) = (1 + FACTOR * t / S) ^ DECAY,   DECAY = -0.5,  FACTOR = 19/81
 ```
-где `t` — дни с последнего повторения. При `t = S` получается `R = 0.9`.
+where `t` is days since the last review. At `t = S`, `R = 0.9`.
 
-Следующий интервал вычисляется из желаемого удержания `r_d` (по умолчанию 0.9):
+The next interval is derived from the desired retention `r_d` (default 0.9):
 ```
 I(r_d, S) = S / FACTOR * (r_d ^ (1/DECAY) - 1)
 ```
 
-### 4.2 Состояния карточки
+### 4.2 Card states
 ```
-New ──(первый ответ)──▶ Learning ──(прошла шаги)──▶ Review
-                             ▲                        │
-                             └──── Relearning ◀───(Again)
+New ──(first answer)──▶ Learning ──(steps done)──▶ Review
+                            ▲                        │
+                            └──── Relearning ◀───(Again)
 ```
-- **Learning/Relearning** — короткие шаги внутри дня (`1m, 10m`).
-- **Review** — длинные интервалы по FSRS.
-- **Fuzz** интервала (встроен в go-fsrs), чтобы карточки не сбивались в кучу в один день.
+- **Learning/Relearning** — short intra-day steps (`1m, 10m`).
+- **Review** — long FSRS intervals.
+- Interval **fuzz** (built into go-fsrs) so cards don't pile up on the same day.
 
-### 4.3 Реализация
-- Пакет `internal/srs` — тонкая обёртка над `go-fsrs`:
+### 4.3 Implementation
+- Package `internal/srs` — a thin wrapper over `go-fsrs`:
   ```go
   type Scheduler interface {
-      Preview(card Card, now time.Time) map[Rating]Card // интервалы для 4 кнопок
+      Preview(card Card, now time.Time) map[Rating]Card // intervals for the 4 buttons
       Review(card Card, rating Rating, now time.Time) (Card, ReviewLog)
       Retrievability(card Card, now time.Time) float64
   }
   ```
-- Параметры (веса `w[]`, `request_retention`, `maximum_interval`, `enable_fuzz`) хранятся в `user_settings`; по умолчанию стандартные веса FSRS.
-- **Сервер — источник истины.** Каждый ответ пишется в `review_logs` (append-only). Состояние карточки можно пересчитать, проиграв логи по порядку — это основа офлайн-синхронизации и undo.
-- На клиенте `ts-fsrs` с теми же параметрами — для офлайн-режима и мгновенного показа интервалов.
-- **Кросс-тест**: golden-файл с последовательностями ответов; Go- и TS-реализации обязаны выдавать одинаковые S/D/due (допуск 1e-6).
+- Parameters (weights `w[]`, `request_retention`, `maximum_interval`, `enable_fuzz`) are stored in `user_settings`; default FSRS weights out of the box.
+- **The server is the source of truth.** Every answer is written to `review_logs` (append-only). A card's state can be recomputed by replaying its logs in order — this underpins offline sync and undo.
+- The client runs `ts-fsrs` with the same parameters — for offline mode and instant interval previews.
+- **Cross-test**: a golden file of answer sequences; the Go and TS implementations must produce identical S/D/due (tolerance 1e-6).
 
-### 4.4 Персональная оптимизация (позже)
-- Когда у пользователя 1000+ повторений, по кнопке «Оптимизировать» экспортируем `review_logs` и прогоняем официальный оптимизатор (`fsrs-rs` CLI или Python `fsrs-optimizer`) отдельным процессом/контейнером.
-- Новые веса сохраняем с версией, показываем метрики до/после (log loss, RMSE).
+### 4.4 Personal optimization (later)
+- Once a user has 1000+ reviews, an "Optimize" button exports `review_logs` and runs the official optimizer (`fsrs-rs` CLI or Python `fsrs-optimizer`) as a separate process/container.
+- New weights are stored with a version; before/after metrics are shown (log loss, RMSE).
 
 ---
 
-## 5. Аналитика («кривая обучения»)
+## 5. Analytics ("learning curve")
 
-Все метрики считаются из `review_logs` и `cards` SQL-запросами; тяжёлые агрегаты кэшируются на 5 минут.
+All metrics are computed from `review_logs` and `cards` with SQL; heavy aggregates are cached for 5 minutes.
 
-| График / метрика | Что показывает | Источник |
+| Chart / metric | What it shows | Source |
 |---|---|---|
-| **Кривая забывания карточки** | R(t) от последнего повторения до следующего, точки прошлых ответов | S карточки + её логи |
-| **Средняя кривая по колоде** | Как в среднем держатся слова колоды | медиана S по колоде |
-| **Реальное vs желаемое удержание** | % правильных ответов на Review-карточках по неделям против 90% | `review_logs` |
-| **Прогноз нагрузки** | Сколько карточек будет к повторению каждый день ближайшие 30 дней | `cards.due` |
-| **Heatmap активности** | Повторения по дням за год | `review_logs` |
-| **Распределение состояний** | New / Learning / Review / Relearning; «молодые» (S < 21д) и «зрелые» (S ≥ 21д) | `cards` |
-| **Рост словаря** | Сколько слов «выучено» (S ≥ 21д) во времени, отдельно по языкам | `review_logs` |
-| **Распределение S и D** | Гистограммы стабильности и сложности | `cards` |
-| **Время ответа** | Среднее время на карточку, общее время в день | `review_logs.duration_ms` |
-| **Пиявки** | Топ проблемных слов по числу провалов | `cards.lapses` |
-| **«Сколько слов знаю сейчас»** | Σ R(now) по всем Review-карточкам | вычисление в Go |
+| **Card forgetting curve** | R(t) from the last review to the next, with points for past answers | card S + its logs |
+| **Average deck curve** | How well a deck's words hold up on average | median S per deck |
+| **Actual vs desired retention** | % correct on Review cards per week vs 90% | `review_logs` |
+| **Workload forecast** | Cards due per day for the next 30 days | `cards.due` |
+| **Activity heatmap** | Reviews per day over a year | `review_logs` |
+| **State distribution** | New / Learning / Review / Relearning; "young" (S < 21d) and "mature" (S ≥ 21d) | `cards` |
+| **Vocabulary growth** | Words "learned" (S ≥ 21d) over time, per language | `review_logs` |
+| **S and D distribution** | Stability and difficulty histograms | `cards` |
+| **Answer time** | Average time per card, total time per day | `review_logs.duration_ms` |
+| **Leeches** | Top problem words by lapse count | `cards.lapses` |
+| **"Words I know right now"** | Σ R(now) over all Review cards | computed in Go |
 
 ---
 
-## 6. LLM-помощник (OpenAI-совместимый API)
+## 6. LLM assistant (OpenAI-compatible API)
 
-### 6.1 Подключение
-- Пакет `internal/llm`, клиент `openai-go` с настраиваемым `base_url`:
+### 6.1 Connection
+- Package `internal/llm`, `openai-go` client with a configurable `base_url`:
   ```
-  LLM_BASE_URL=https://ai.pestit.pl/v1        # облачный OpenAI-совместимый эндпоинт
-  LLM_API_KEY=...                             # Bearer-токен (без него эндпоинт отвечает 401)
-  LLM_MODEL=cx/gpt-6-luna                     # модель по умолчанию
-  LLM_MODEL_FAST=                             # опционально: другая модель для массового дополнения колод (по умолчанию = LLM_MODEL)
+  LLM_BASE_URL=https://ai.pestit.pl/v1        # cloud OpenAI-compatible endpoint
+  LLM_API_KEY=...                             # Bearer token (the endpoint returns 401 without it)
+  LLM_MODEL=cx/gpt-6-luna                     # default model
+  LLM_MODEL_FAST=                             # optional: a different model for bulk deck enrichment (defaults to LLM_MODEL)
   LLM_TIMEOUT=30s
-  LLM_DAILY_LIMIT_PER_USER=300                # запросов в день
+  LLM_DAILY_LIMIT_PER_USER=300                # requests per day
   ```
-- Ключ хранится **только на сервере**; клиент ходит в LLM через наш API.
-- Если `LLM_BASE_URL` не задан, все LLM-функции скрыты в UI, приложение работает без них.
-- При старте сервер запрашивает `GET /v1/models` и проверяет, что `LLM_MODEL` есть в списке; если нет — предупреждение в логах и в админке. В админке модель можно сменить без рестарта (список берётся из `/v1/models`, выбор хранится в `app_settings`).
-- Запросы к эндпоинту исходящие, Cloudflare Tunnel им не мешает. Ретраи с backoff на 429/5xx, circuit breaker: при недоступности LLM-кнопки временно неактивны, остальное приложение работает.
+- The key lives **only on the server**; the client reaches the LLM through our API.
+- If `LLM_BASE_URL` is not set, all LLM features are hidden in the UI and the app works without them.
+- On startup the server calls `GET /v1/models` and checks that `LLM_MODEL` is listed; if not — a warning in the logs and in the admin panel. The model can be switched in the admin panel without a restart (the list comes from `/v1/models`, the choice is stored in `app_settings`).
+- Requests to the endpoint are outbound, so Cloudflare Tunnel doesn't interfere. Retries with backoff on 429/5xx, plus a circuit breaker: if the LLM is unavailable, LLM buttons are temporarily disabled and the rest of the app keeps working.
 
-### 6.2 Функции
-| Функция | Когда | Что возвращает |
+### 6.2 Features
+| Feature | When | Returns |
 |---|---|---|
-| **Автозаполнение слова** | При добавлении слова — кнопка «Заполнить» или автоматически после ввода | Варианты перевода, транскрипция (IPA), часть речи, для `de`-существительных артикль и мн. число, для глаголов основные формы, 1–2 примера с переводом, уровень CEFR, `alternatives` |
-| **Дополнение колоды** | После импорта или по кнопке | Фоновая задача: пустые поля заполняются пачками по 20 слов, прогресс в UI |
-| **Спросить про слово** | Кнопка на карточке/в слове | Ответ в чате со стримингом (SSE): разница синонимов, употребление, грамматика |
-| **Мнемоника** | Для пиявок | 2–3 варианта ассоциаций на родном языке пользователя |
-| **Проверка синонима** | В режиме ввода, когда ответ не совпал — кнопка «Мой ответ тоже верный?» | Вердикт + объяснение; при «да» ответ добавляется в `alternatives`, оценку можно исправить |
+| **Word auto-fill** | When adding a word — a "Fill" button or automatically after typing | Translation variants, transcription (IPA), part of speech, article and plural for `de` nouns, principal parts for verbs, 1–2 examples with translation, CEFR level, `alternatives` |
+| **Deck enrichment** | After import or on demand | Background job: empty fields are filled in batches of 20 words, progress shown in the UI |
+| **Ask about a word** | Button on a card / word page | Streaming chat answer (SSE): synonym differences, usage, grammar |
+| **Mnemonic** | For leeches | 2–3 association ideas in the user's native language |
+| **Synonym check** | In typing mode when the answer didn't match — a "Is my answer also correct?" button | Verdict + explanation; on "yes" the answer is added to `alternatives` and the rating can be corrected |
 
-### 6.3 Правила
-- **LLM ничего не меняет без подтверждения**: результат показывается как предложение, пользователь принимает его целиком или по полям.
-- **Структурированный вывод**: `response_format: json_schema`. Если провайдер его не поддерживает — fallback на `json_object`, валидация в Go и один повтор при невалидном JSON.
-- **Промпты** лежат в `internal/llm/prompts/*.tmpl` (embed), учитывают языковую пару; для слов с несколькими значениями возвращается список.
-- **Кэш**: ответы автозаполнения кэшируются в `llm_cache` по `sha256(model + prompt_version + lang_pair + word)` — одно и то же слово у разных друзей не оплачивается дважды.
-- **Лимиты**: дневной лимит на пользователя (`llm_usage`), учёт токенов для статистики расходов в админке.
-- **SSE через Cloudflare**: `Content-Type: text/event-stream`, heartbeat-комментарий каждые 15 с, чтобы не упереться в таймаут 100 с.
+### 6.3 Rules
+- **The LLM never changes anything without confirmation**: results are shown as a suggestion that the user accepts in full or per field.
+- **Structured output**: `response_format: json_schema`. If the provider doesn't support it — fall back to `json_object`, validate in Go, and retry once on invalid JSON.
+- **Prompts** live in `internal/llm/prompts/*.tmpl` (embedded) and account for the language pair; words with multiple meanings return a list.
+- **Cache**: auto-fill responses are cached in `llm_cache` keyed by `sha256(model + prompt_version + lang_pair + word)` — the same word from different friends isn't paid for twice.
+- **Limits**: daily per-user limit (`llm_usage`), token accounting for cost stats in the admin panel.
+- **SSE through Cloudflare**: `Content-Type: text/event-stream`, a heartbeat comment every 15 s to avoid hitting the 100 s timeout.
 
 ---
 
-## 7. Модель данных (SQLite)
+## 7. Data model (SQLite)
 
 ```sql
 users(
@@ -318,26 +318,26 @@ user_settings(
   theme_mode TEXT DEFAULT 'system', theme_seed TEXT DEFAULT '#3A4527',
   theme_variant TEXT DEFAULT 'fidelity', theme_contrast REAL DEFAULT 0)
 
-app_settings(key TEXT PK, value TEXT /* JSON */, updated_at)   -- например, llm_model
+app_settings(key TEXT PK, value TEXT /* JSON */, updated_at)   -- e.g. llm_model
 
 decks(
-  id INTEGER PK, owner_id → users, parent_id → decks NULL, -- вложенность
+  id INTEGER PK, owner_id → users, parent_id → decks NULL, -- nesting
   name, description, position INT,
-  lang_target TEXT,                  -- 'de' | 'en' (NULL → от родителя)
+  lang_target TEXT,                  -- 'de' | 'en' (NULL → inherited from parent)
   lang_native TEXT,                  -- 'pl' | 'ru'
   reverse_cards BOOL DEFAULT 0,
   wrong_article_rating INT DEFAULT 2, -- Hard
-  color_seed TEXT NULL,              -- свой акцент колоды
+  color_seed TEXT NULL,              -- per-deck accent color
   source TEXT NULL, external_id TEXT NULL, expected_count INT NULL,
-  source_deck_id NULL,               -- если скопирована у друга
+  source_deck_id NULL,               -- if copied from a friend
   created_at, updated_at, deleted_at NULL)
   UNIQUE(owner_id, source, external_id), INDEX(parent_id)
 
 deck_shares(deck_id → decks, user_id → users, mode TEXT /* copy|subscribe */)
 
-notes(                               -- «слово или фраза»
+notes(                               -- a word or phrase
   id INTEGER PK, deck_id → decks,
-  term TEXT NOT NULL, term_key TEXT NOT NULL, -- term_key: нормализованный, для дублей
+  term TEXT NOT NULL, term_key TEXT NOT NULL, -- term_key: normalized, for duplicates
   translation TEXT NOT NULL, transcription, example, example_translation, notes,
   tags TEXT /* JSON */, alternatives TEXT /* JSON */,
   fields TEXT /* JSON: kind, pos, article, plural, governs, reflexive, verb_forms, cefr, mnemonic, ... */,
@@ -347,8 +347,8 @@ notes(                               -- «слово или фраза»
 
 import_batches(
   id TEXT PK, user_id → users, adapter TEXT, filename TEXT,
-  raw BLOB /* gzip исходника */, raw_sha256 BLOB,
-  status TEXT /* previewed|applied|failed */, summary TEXT /* JSON: счётчики, предупреждения */,
+  raw BLOB /* gzipped source */, raw_sha256 BLOB,
+  status TEXT /* previewed|applied|failed */, summary TEXT /* JSON: counts, warnings */,
   created_at, applied_at NULL)
 
 cards(
@@ -362,12 +362,12 @@ cards(
   INDEX(user_id, due), INDEX(note_id)
 
 review_logs(                         -- append-only
-  id TEXT PK /* UUIDv7 от клиента — идемпотентность */,
+  id TEXT PK /* UUIDv7 from the client — idempotency */,
   card_id → cards, user_id → users,
   rating INT /* 1..4 */, mode TEXT /* flip|typing|choice */,
   state_before INT, stability_before REAL, difficulty_before REAL,
   stability_after REAL, difficulty_after REAL, scheduled_days INT,
-  reviewed_at DATETIME /* время клиента */, received_at DATETIME,
+  reviewed_at DATETIME /* client time */, received_at DATETIME,
   duration_ms INT, undone BOOL DEFAULT 0)
   INDEX(user_id, reviewed_at), INDEX(card_id, reviewed_at)
 
@@ -384,70 +384,73 @@ jobs(id TEXT PK, user_id → users, kind TEXT /* deck_enrich */, payload TEXT,
 push_subscriptions(id PK, user_id → users, endpoint UNIQUE, p256dh, auth, created_at)
 ```
 
-Карточки привязаны к `user_id`: при подписке на колоду друга заметки общие, а прогресс у каждого свой.
+Cards are tied to `user_id`: when subscribed to a friend's deck, notes are shared but progress is per user.
 
-Фоновые задачи (`jobs`) выполняет простой воркер-пул внутри процесса; при рестарте задачи в статусе `running` возвращаются в очередь.
+Background jobs (`jobs`) are run by a simple in-process worker pool; on restart, jobs in `running` status go back to the queue.
 
 ---
 
-## 8. Дизайн: Material Design 3 Expressive
+## 8. Design: Material Design 3 Expressive
 
-### 8.1 Цвет: адаптивная тема
-Вся палитра строится в рантайме из одного **seed-цвета** (MD3 dynamic color). Пользователь меняет акцент — меняется всё приложение.
+### 8.1 Color: adaptive theme
+The entire palette is built at runtime from a single **seed color** (MD3 dynamic color). Change the accent and the whole app changes.
 
-- **По умолчанию**: болотный зелёный **`#3A4527`**.
-- **Настройки → Оформление**:
-  - Пресеты-«пятна» (MD3 color swatches): болотный `#3A4527` (по умолчанию), плюс 6–8 заранее подобранных оттенков.
-  - Свой цвет: color picker + поле HEX.
-  - **Стиль схемы**: `Fidelity` (по умолчанию — точнее всего держит заданный оттенок), `TonalSpot` (спокойнее), `Vibrant`, `Expressive` (сильнее вращает тон, ярче), `Monochrome`.
-  - **Контраст**: стандартный / средний / высокий (`contrastLevel` 0 / 0.5 / 1).
-  - Тема: светлая / тёмная / системная.
-  - Предпросмотр вживую (карточка, кнопки оценок, график) до сохранения.
-- **Цвет колоды** (опционально): у колоды свой seed; во время сессии по этой колоде тема перекрашивается в её цвет. Помогает различать немецкий и английский с одного взгляда.
-- **Генерация**: `@material/material-color-utilities` (`Hct`, `SchemeFidelity`/`SchemeTonalSpot`/..., `DynamicScheme`, `MaterialDynamicColors`) прямо в браузере → CSS-переменные `--md-sys-color-*` (primary, on-primary, primary-container, secondary, tertiary, surface, surface-container-lowest…highest, outline, error и т.д.) на `:root`. Пересчёт занимает < 5 мс.
-- **Без мигания при загрузке**: последняя рассчитанная палитра кэшируется в `localStorage`; inline-скрипт в `index.html` применяет её до отрисовки React. Без кэша — встроенная палитра по умолчанию, сгенерированная на этапе сборки (`web/scripts/gen-theme.ts`).
-- **Синхронизация**: `theme_seed`, `theme_variant`, `theme_contrast`, `theme_mode` хранятся в `user_settings` и подтягиваются на всех устройствах.
-- Tailwind-тема ссылается только на переменные (`bg-primary-container`, `text-on-surface` и т.д.); **жёстко заданных цветов в компонентах нет** (правило линтера).
-- **Семантические цвета не зависят от seed**: кнопки оценок берут гармонизированные (`Blend.harmonize`) фиксированные оттенки, чтобы Again всегда оставался «красным», а Good — «зелёным» при любом акценте: Again → error, Hard → оранжевый, Good → зелёный, Easy → синий, каждый в своём `container`-варианте.
-- **Графики**: серии берут цвета из `primary` / `tertiary` / `secondary` и семантических ролей.
-- `theme-color` в `<meta>` обновляется вместе с палитрой (цвет статус-бара на Android).
-- **Доступность**: при выборе своего цвета контраст пар `on-*`/`*` проверяется по WCAG AA; если не проходит — предупреждение и предложение поднять контраст. Тесты прогоняют все пресеты × стили × светлая/тёмная.
+- **Default**: swamp green **`#3A4527`**.
+- **Settings → Appearance**:
+  - Preset swatches (MD3 color swatches): swamp `#3A4527` (default), plus 6–8 curated hues.
+  - Custom color: color picker + HEX field.
+  - **Scheme style**: `Fidelity` (default — stays closest to the chosen hue), `TonalSpot` (calmer), `Vibrant`, `Expressive` (rotates hue more, brighter), `Monochrome`.
+  - **Contrast**: standard / medium / high (`contrastLevel` 0 / 0.5 / 1).
+  - Theme: light / dark / system.
+  - Live preview (card, rating buttons, chart) before saving.
+- **Deck color** (optional): a deck can have its own seed; during a session for that deck the theme recolors to it. Helps tell German and English apart at a glance.
+- **Generation**: `@material/material-color-utilities` (`Hct`, `SchemeFidelity`/`SchemeTonalSpot`/..., `DynamicScheme`, `MaterialDynamicColors`) right in the browser → CSS variables `--md-sys-color-*` (primary, on-primary, primary-container, secondary, tertiary, surface, surface-container-lowest…highest, outline, error, etc.) on `:root`. Recalculation takes < 5 ms.
+- **No flash on load**: the last computed palette is cached in `localStorage`; an inline script in `index.html` applies it before React renders. Without a cache — a built-in default palette generated at build time (`web/scripts/gen-theme.ts`).
+- **Sync**: `theme_seed`, `theme_variant`, `theme_contrast`, `theme_mode` are stored in `user_settings` and follow the user across devices.
+- The Tailwind theme references variables only (`bg-primary-container`, `text-on-surface`, etc.); **no hard-coded colors in components** (enforced by a lint rule).
+- **Semantic colors don't depend on the seed**: rating buttons use fixed hues, harmonized (`Blend.harmonize`), so Again always stays "red" and Good "green" with any accent: Again → error, Hard → orange, Good → green, Easy → blue, each in its own `container` variant.
+- **Charts**: series use `primary` / `tertiary` / `secondary` and semantic roles.
+- `theme-color` in `<meta>` updates along with the palette (status bar color on Android).
+- **Accessibility**: when a custom color is chosen, contrast of `on-*`/`*` pairs is checked against WCAG AA; if it fails — a warning and an offer to raise contrast. Tests run all presets × styles × light/dark.
 
-### 8.2 Типографика
-- **Roboto Flex** (variable, self-hosted через `@fontsource-variable`) с поддержкой латиницы с диакритикой и кириллицы.
-- Шкала MD3 (display / headline / title / body / label) + **emphasized**-стили Expressive для ключевых мест: слово на карточке — `display-large-emphasized`, итог сессии и серия — `headline-emphasized`.
+### 8.2 Typography
+- **Roboto Flex** (variable, self-hosted via `@fontsource-variable`) covering Latin with diacritics and Cyrillic.
+- MD3 type scale (display / headline / title / body / label) + Expressive **emphasized** styles for key spots: the term on a card — `display-large-emphasized`, session summary and streak — `headline-emphasized`.
 
-### 8.3 Форма
-- Шкала скруглений MD3 с расширенными значениями Expressive (`extra-large-increased`, `extra-extra-large` и т.п.) в виде CSS-токенов `--md-sys-shape-corner-*`.
-- **Shape morphing**: кнопки при нажатии меняют скругление (round → square), выбранные элементы — форму.
-- Абстрактные формы Expressive (cookie, clover, sunny, ...) — SVG для аватаров друзей, бейджа серии и индикатора загрузки.
+### 8.3 Shape
+- MD3 corner scale with Expressive's extended values (`extra-large-increased`, `extra-extra-large`, etc.) as CSS tokens `--md-sys-shape-corner-*`.
+- **Shape morphing**: buttons change corner radius on press (round → square), selected items change shape.
+- Expressive abstract shapes (cookie, clover, sunny, ...) — SVG for friend avatars, the streak badge, and the loading indicator.
 
-### 8.4 Движение
-- Пружинный **motion scheme** Expressive: spatial-пружины (положение, размер, форма) и effects-пружины (цвет, прозрачность), каждая в вариантах fast / default / slow. Параметры — токены в `web/src/theme/motion.ts`, реализация через Motion.
-- Переворот карточки, вылет карточки после ответа, появление следующей — пружинные анимации.
-- `prefers-reduced-motion` → анимации заменяются на кроссфейд.
-- Тактильный отклик `navigator.vibrate` на Android при оценке.
+### 8.4 Motion
+- Expressive spring-based **motion scheme**: spatial springs (position, size, shape) and effects springs (color, opacity), each in fast / default / slow variants. Parameters are tokens in `web/src/theme/motion.ts`, implemented with Motion.
+- Card flip, card fly-out after answering, next card entrance — spring animations.
+- `prefers-reduced-motion` → animations are replaced by a crossfade.
+- Haptic feedback via `navigator.vibrate` on Android when rating.
 
-### 8.5 Компоненты и раскладка
-| Место | Компонент MD3 Expressive |
+### 8.5 Components and layout
+| Place | MD3 Expressive component |
 |---|---|
-| 4 кнопки оценки | **Connected button group** |
-| Добавить слово / импорт / колода | **FAB menu** |
-| Прогресс сессии | **Wavy linear progress indicator** |
-| Загрузка, ожидание LLM | **Loading indicator** (морфинг форм) |
-| Действия в сессии (undo, TTS, редактировать, спросить LLM) | **Floating toolbar** |
-| «Учить» + выбор режима на колоде | **Split button** |
-| Навигация | **Navigation bar** (compact) / **navigation rail** (≥ 840px) |
-| Undo, ошибки | Snackbar |
-| Предложения LLM | Bottom sheet (mobile) / side sheet (desktop) с принятием по полям |
+| 4 rating buttons | **Connected button group** |
+| Add word / import / deck | **FAB menu** |
+| Session progress | **Wavy linear progress indicator** |
+| Loading, waiting for the LLM | **Loading indicator** (shape morphing) |
+| Session actions (undo, TTS, edit, ask LLM) | **Floating toolbar** |
+| "Study" + mode picker on a deck | **Split button** |
+| Navigation | **Navigation bar** (compact) / **navigation rail** (≥ 840px) |
+| Undo, errors | Snackbar |
+| LLM suggestions | Bottom sheet (mobile) / side sheet (desktop) with per-field acceptance |
 
 - Window size classes: compact < 600, medium 600–839, expanded ≥ 840.
-- Touch targets не меньше 48dp, видимый focus ring, контраст по WCAG AA (проверка сгенерированной палитры в тестах).
+- Touch targets at least 48dp, visible focus ring, WCAG AA contrast (generated palette checked in tests).
 
-### 8.6 Реализация
-- Готовой официальной веб-библиотеки компонентов MD3 Expressive на момент планирования нет (`@material/web` в режиме поддержки и без Expressive). Поэтому свой небольшой UI-кит в `web/src/ui/`:
-  поведение и доступность — **Radix Primitives**, внешний вид — Tailwind + MD3-токены, анимации — Motion.
-- Страница `/dev/ui` (только в dev) — витрина всех компонентов в обеих темах.
+### 8.6 Implementation
+- There is no official web component library for MD3 Expressive at planning time (`@material/web` is in maintenance mode and lacks Expressive). So we build a small UI kit in `web/src/ui/`:
+  behavior and accessibility — **Radix Primitives**, appearance — Tailwind + MD3 tokens, animation — Motion.
+- A `/dev/ui` page (dev only) — a showcase of all components in both themes.
+
+### 8.7 UI language
+**English.** All UI strings live in `web/src/i18n/en.ts` (a typed object, key → string) and are accessed through a `t()` helper; no string literals in components. Dates and numbers are formatted via `Intl` with the `en` locale. Other locales can be added later without touching components.
 
 ---
 
@@ -460,43 +463,43 @@ POST   /auth/logout
 GET    /me
 PATCH  /me/settings
 
-POST   /admin/invites            → {code, url}           (только админ)
-GET    /admin/llm-usage          расход токенов по пользователям
-GET    /admin/llm/models         список моделей с эндпоинта (/v1/models)
-PUT    /admin/llm/model          {model} — сменить модель без рестарта
+POST   /admin/invites            → {code, url}           (admin only)
+GET    /admin/llm-usage          token usage per user
+GET    /admin/llm/models         model list from the endpoint (/v1/models)
+PUT    /admin/llm/model          {model} — switch model without restart
 
-GET    /decks                    дерево колод + счётчики (new/learning/due, с учётом дочерних)
+GET    /decks                    deck tree + counts (new/learning/due, including children)
 POST   /decks
 PATCH  /decks/{id}
 DELETE /decks/{id}
-POST   /import/preview           multipart: файл (+ adapter, если не определился) → {batch_id, tree, counts, warnings}
+POST   /import/preview           multipart: file (+ adapter if not detected) → {batch_id, tree, counts, warnings}
 POST   /import/{batch_id}/apply  {lang_target, lang_native, parent_deck_id?, on_missing: keep|suspend}
-GET    /import/batches           история импортов
-GET    /schema/retain-v1.json    JSON Schema формата обмена
-GET    /decks/{id}/export?format=retain|csv   (с дочерними колодами)
+GET    /import/batches           import history
+GET    /schema/retain-v1.json    JSON Schema of the exchange format
+GET    /decks/{id}/export?format=retain|csv   (including child decks)
 POST   /decks/{id}/share         {user_id, mode}
-POST   /decks/{id}/enrich        → {job_id}  дополнить пустые поля через LLM
+POST   /decks/{id}/enrich        → {job_id}  fill empty fields via LLM
 
 GET    /decks/{id}/notes?q=&tag=&state=&cursor=
-POST   /decks/{id}/notes         создаёт note + карточки
+POST   /decks/{id}/notes         creates a note + cards
 PATCH  /notes/{id}
 DELETE /notes/{id}
 
-POST   /llm/enrich               {deck_id, word}         → предложения полей
-POST   /llm/ask                  {note_id, question}     → SSE-поток
+POST   /llm/enrich               {deck_id, word}         → field suggestions
+POST   /llm/ask                  {note_id, question}     → SSE stream
 POST   /llm/mnemonic             {note_id}
 POST   /llm/check-answer         {card_id, answer}       → {accepted, explanation}
 
-GET    /jobs/{id}                статус и прогресс фоновой задачи
+GET    /jobs/{id}                background job status and progress
 
-GET    /study/queue?deck_id=&limit=50   карточки + preview интервалов
+GET    /study/queue?deck_id=&limit=50   cards + interval previews
 POST   /study/review             {id(uuid), card_id, rating, mode, reviewed_at, duration_ms}
 POST   /study/undo               {review_id}
 POST   /cards/{id}/suspend | /unsuspend | /reset
 
 POST   /sync                     {reviews:[...], since} → {applied, changed_cards, changed_notes}
 
-GET    /stats/overview           streak, сегодня, всего
+GET    /stats/overview           streak, today, totals
 GET    /stats/forecast?days=30
 GET    /stats/retention?period=week
 GET    /stats/heatmap?year=
@@ -510,155 +513,155 @@ GET    /push/vapid-key
 POST   /push/subscribe | DELETE /push/subscribe
 ```
 
-Ошибки: `{"error": {"code": "not_found", "message": "..."}}`. Защита от CSRF: SameSite cookie + проверка заголовка `Origin`.
+Errors: `{"error": {"code": "not_found", "message": "..."}}` (messages in English). CSRF protection: SameSite cookie + `Origin` header check.
 
 ---
 
-## 10. Офлайн и синхронизация
+## 10. Offline and sync
 
-1. Service worker кэширует оболочку приложения (precache) и GET-запросы API (stale-while-revalidate).
-2. При старте сессии клиент забирает очередь (`/study/queue`) с запасом на день и кладёт её в IndexedDB.
-3. Офлайн-ответ: `ts-fsrs` считает новое состояние локально → карточка обновляется в IndexedDB → лог с UUIDv7 и `reviewed_at` кладётся в очередь `outbox`.
-4. При появлении сети: `POST /sync` с пачкой логов.
-   - Сервер вставляет логи идемпотентно (`ON CONFLICT(id) DO NOTHING`).
-   - Если для карточки пришли логи «из прошлого» (с другого устройства), сервер **пересчитывает карточку, проигрывая все её логи по `reviewed_at`**.
-   - В ответе — актуальные карточки; клиент перезаписывает свой кэш.
-5. Конфликты редактирования слов: last-write-wins по `updated_at`.
-6. LLM-функции офлайн недоступны — кнопки неактивны с подсказкой.
-
----
-
-## 11. Напоминания
-
-- Фоновая горутина (`time.Ticker` раз в минуту) находит пользователей, у которых в их часовом поясе наступило `reminder_time` и есть карточки к повторению → Web Push.
-- Не больше одного пуша в день; подписки, на которые push-сервис отвечает 410 Gone, удаляем.
-- Push — исходящие запросы, Cloudflare Tunnel им не мешает.
-- На iOS Web Push работает только для PWA, установленного на главный экран (iOS 16.4+) — пишем об этом в UI.
+1. The service worker caches the app shell (precache) and API GET requests (stale-while-revalidate).
+2. At session start the client fetches the queue (`/study/queue`) with a day's buffer and stores it in IndexedDB.
+3. Offline answer: `ts-fsrs` computes the new state locally → the card is updated in IndexedDB → a log entry with a UUIDv7 and `reviewed_at` goes into the `outbox` queue.
+4. When back online: `POST /sync` with a batch of logs.
+   - The server inserts logs idempotently (`ON CONFLICT(id) DO NOTHING`).
+   - If logs "from the past" arrive for a card (from another device), the server **recomputes the card by replaying all its logs ordered by `reviewed_at`**.
+   - The response contains up-to-date cards; the client overwrites its cache.
+5. Word edit conflicts: last-write-wins by `updated_at`.
+6. LLM features are unavailable offline — buttons are disabled with a hint.
 
 ---
 
-## 12. Структура проекта
+## 11. Reminders
+
+- A background goroutine (`time.Ticker` once a minute) finds users whose `reminder_time` has arrived in their time zone and who have cards due → Web Push.
+- At most one push per day; subscriptions for which the push service returns 410 Gone are deleted.
+- Push requests are outbound, so Cloudflare Tunnel doesn't interfere.
+- On iOS, Web Push works only for a PWA added to the home screen (iOS 16.4+) — the UI says so.
+
+---
+
+## 12. Project structure
 
 ```
 retain/
-├── cmd/retain/main.go            # старт: конфиг, БД, миграции, HTTP, воркеры
+├── cmd/retain/main.go            # startup: config, DB, migrations, HTTP, workers
 ├── internal/
 │   ├── config/
 │   ├── db/
 │   │   ├── migrations/*.sql      # goose
 │   │   ├── queries/*.sql         # sqlc
-│   │   └── gen/                  # сгенерированный код
-│   ├── auth/                     # argon2id, сессии, middleware
-│   ├── srs/                      # обёртка go-fsrs, пересчёт карточки по логам
-│   ├── lang/                     # нормализаторы de/en/pl/ru, сравнение ответов, разбор терминов
-│   ├── study/                    # очередь, лимиты, review, undo
-│   ├── decks/  notes/            # CRUD, дерево колод, экспорт
-│   ├── importer/                 # preview/apply, upsert по external_id/term_key
+│   │   └── gen/                  # generated code
+│   ├── auth/                     # argon2id, sessions, middleware
+│   ├── srs/                      # go-fsrs wrapper, card recomputation from logs
+│   ├── lang/                     # de/en/pl/ru normalizers, answer matching, term parsing
+│   ├── study/                    # queue, limits, review, undo
+│   ├── decks/  notes/            # CRUD, deck tree, export
+│   ├── importer/                 # preview/apply, upsert by external_id/term_key
 │   │   └── adapters/             # retain, school-wordsets, csv, (apkg)
-│   ├── llm/                      # клиент, промпты (embed), кэш, лимиты, SSE
-│   ├── jobs/                     # фоновые задачи (дополнение колоды)
-│   ├── stats/                    # аналитика
-│   ├── sync/                     # офлайн-синхронизация
-│   ├── social/                   # шаринг, лидерборд, активность
-│   ├── push/                     # VAPID, воркер напоминаний
-│   └── httpapi/                  # роуты, хендлеры, ошибки, middleware
+│   ├── llm/                      # client, prompts (embedded), cache, limits, SSE
+│   ├── jobs/                     # background jobs (deck enrichment)
+│   ├── stats/                    # analytics
+│   ├── sync/                     # offline sync
+│   ├── social/                   # sharing, leaderboard, activity
+│   ├── push/                     # VAPID, reminder worker
+│   └── httpapi/                  # routes, handlers, errors, middleware
 ├── web/                          # React + Vite + TS
-│   ├── scripts/gen-theme.ts      # палитра по умолчанию на этапе сборки
+│   ├── scripts/gen-theme.ts      # default palette at build time
 │   ├── src/
-│   │   ├── theme/                # dynamic color из seed, токены: типографика, форма, motion
-│   │   ├── ui/                   # UI-кит MD3 Expressive (Radix + Tailwind + Motion)
+│   │   ├── theme/                # dynamic color from seed; tokens: typography, shape, motion
+│   │   ├── ui/                   # MD3 Expressive UI kit (Radix + Tailwind + Motion)
+│   │   ├── i18n/                 # en.ts — all UI strings, t()
 │   │   ├── pages/  components/
 │   │   ├── api/  db/  srs/  sw/
-│   └── dist/                     # встраивается через embed
+│   └── dist/                     # embedded via embed
 ├── testdata/
-│   ├── fsrs_golden.json          # общие тест-векторы для Go и TS
-│   ├── lang_cases.json           # кейсы нормализации ответов
-│   └── import/                   # примеры выгрузок для тестов адаптеров
+│   ├── fsrs_golden.json          # shared test vectors for Go and TS
+│   ├── lang_cases.json           # answer normalization cases
+│   └── import/                   # sample exports for adapter tests
 ├── sqlc.yaml
 ├── Dockerfile
 ├── docker-compose.yml            # retain + cloudflared + litestream
 ├── Makefile                      # dev, gen, test, lint, build
+├── AGENTS.md
 └── PLAN.md
 ```
 
-Хендлеры тонкие → сервисы (`study`, `stats`, `llm`, ...) → репозитории на sqlc. Сервисы принимают `clock.Clock` (подмена времени в тестах), `llm.Client` — интерфейс (фейк в тестах).
+Thin handlers → services (`study`, `stats`, `llm`, ...) → sqlc repositories. Services take a `clock.Clock` (time substitution in tests); `llm.Client` is an interface (faked in tests).
 
 ---
 
-## 13. Экраны фронтенда
+## 13. Frontend screens
 
-1. **Вход / регистрация по инвайту**.
-2. **Главная**: колоды со счётчиками (новые / на изучении / к повторению), split button «Учить», серия дней, FAB menu.
-3. **Сессия**: карточка, wavy-прогресс, connected button group с интервалами, floating toolbar (undo, TTS, редактировать, спросить LLM), итог сессии в конце.
-4. **Колода**: список слов, поиск, фильтры, быстрое добавление (Enter → автозаполнение LLM → подтверждение → следующее слово), импорт/экспорт, «Дополнить через LLM».
-5. **Слово**: поля, история ответов, кривая забывания, S/D/R, чат «Спросить про слово».
-6. **Статистика**: графики из раздела 5.
-7. **Друзья**: активность, лидерборд, общие колоды.
-8. **Настройки**: лимиты, удержание, шаги, напоминания, часовой пояс; **Оформление** — пресеты цвета, color picker, стиль схемы, контраст, тема, живой предпросмотр.
+1. **Sign in / sign up via invite**.
+2. **Home**: decks with counts (new / learning / due), a "Study" split button, streak, FAB menu.
+3. **Session**: card, wavy progress, connected button group with intervals, floating toolbar (undo, TTS, edit, ask LLM), session summary at the end.
+4. **Deck**: word list, search, filters, quick add (Enter → LLM auto-fill → confirm → next word), import/export, "Enrich with LLM".
+5. **Word**: fields, answer history, forgetting curve, S/D/R, "Ask about this word" chat.
+6. **Stats**: charts from section 5.
+7. **Friends**: activity, leaderboard, shared decks.
+8. **Settings**: limits, retention, steps, reminders, time zone; **Appearance** — color presets, color picker, scheme style, contrast, theme, live preview.
 
-Mobile-first; свайп влево = Again, вправо = Good.
-
-**Язык интерфейса — английский.** Все строки UI лежат в `web/src/i18n/en.ts` (типизированный объект, ключ → строка) и берутся через хелпер `t()`; в компонентах нет литералов. Даты и числа форматируются через `Intl` с локалью `en`. Позже можно добавить другие локали, не трогая компоненты.
+Mobile-first; swipe left = Again, right = Good.
 
 ---
 
-## 14. Тестирование
+## 14. Testing
 
-- **Unit (Go)**: `srs` — golden-векторы и граничные случаи (первый ответ, Again на Review, максимальный интервал); `study` — очередь и дневные лимиты с учётом часового пояса и `day_start_hour`; `lang` — таблица кейсов из `lang_cases.json` (артикли, умлауты, диакритика, ё).
-- **LLM**: фейковый клиент с записанными ответами; тесты парсинга/валидации JSON, fallback при невалидном ответе, кэш и лимиты. Ручной smoke-тест на реальной модели — `make llm-smoke`.
-- **Импорт**: адаптеры на реальных выгрузках из `testdata/import/` (golden-результат в `retain/v1`); повторный импорт с добавленными, изменёнными и удалёнными словами — прогресс FSRS сохраняется, дублей нет; правила разбора терминов (`der …`, `… über A`, `sich …`, скобки, точки).
-- **Детерминизм**: в тестах fuzz FSRS отключён или задан seed.
-- **Интеграционные**: `httptest` + временная SQLite, сценарий «регистрация → импорт выгрузки → повторения → статистика».
-- **Sync**: перемешанные по времени логи с двух «устройств» → итоговое состояние совпадает с последовательным проигрыванием.
-- **Фронтенд**: vitest (ts-fsrs на тех же golden-векторах, контраст палитры), Playwright e2e на основной сценарий, включая офлайн (`context.setOffline`).
+- **Unit (Go)**: `srs` — golden vectors and edge cases (first answer, Again on Review, maximum interval); `study` — queue and daily limits with time zones and `day_start_hour`; `lang` — the case table from `lang_cases.json` (articles, umlauts, diacritics, ё).
+- **LLM**: a fake client with recorded responses; tests for JSON parsing/validation, fallback on invalid responses, cache and limits. Manual smoke test against the real model — `make llm-smoke`.
+- **Import**: adapters on real exports from `testdata/import/` (golden output in `retain/v1`); re-import with added, changed, and removed words — FSRS progress preserved, no duplicates; term parsing rules (`der …`, `… über A`, `sich …`, parentheses, periods).
+- **Determinism**: FSRS fuzz disabled or seeded in tests.
+- **Integration**: `httptest` + temporary SQLite, scenario "sign up → import export file → reviews → stats".
+- **Sync**: time-shuffled logs from two "devices" → final state matches sequential replay.
+- **Frontend**: vitest (ts-fsrs on the same golden vectors, palette contrast), Playwright e2e for the main flow, including offline (`context.setOffline`).
 - **Lint**: `golangci-lint`, `eslint`, `tsc --noEmit`.
 
 ---
 
-## 15. Деплой (домашний сервер + Cloudflare Tunnel)
+## 15. Deployment (home server + Cloudflare Tunnel)
 
-- **Сборка**: multi-stage Dockerfile — `node` собирает `web/dist` → `golang` собирает бинарник с `CGO_ENABLED=0` → `distroless/static`.
+- **Build**: multi-stage Dockerfile — `node` builds `web/dist` → `golang` builds the binary with `CGO_ENABLED=0` → `distroless/static`.
 - **docker-compose**:
-  - `retain` — слушает только внутреннюю docker-сеть (`:8080`), **порты наружу не открываются**; том `/data/retain.db`.
-  - `cloudflared` — `tunnel run` с `TUNNEL_TOKEN`, ingress `https://retain.<домен>` → `http://retain:8080`.
-  - `litestream` — непрерывная репликация БД в **Cloudflare R2** (обязательно вне дома: диск может умереть).
+  - `retain` — listens only on the internal Docker network (`:8080`), **no ports exposed**; volume `/data/retain.db`.
+  - `cloudflared` — `tunnel run` with `TUNNEL_TOKEN`, ingress `https://retain.<domain>` → `http://retain:8080`.
+  - `litestream` — continuous DB replication to **Cloudflare R2** (must be off-site: disks die).
 - **Cloudflare**:
-  - TLS терминируется на Cloudflare; cookie `Secure` работает, т.к. клиент видит HTTPS.
-  - Реальный IP клиента берём из `CF-Connecting-IP` (доверяем, т.к. туннель — единственный вход).
-  - Cache Rules: **bypass для `/api/*`**; `sw.js` и `manifest.webmanifest` отдаём с `Cache-Control: no-cache`; хэшированные ассеты — `immutable`.
-  - Rocket Loader и прочие оптимизации JS выключить (ломают SPA/SW).
-  - Лимиты: тело запроса до 100 МБ (импорт влезает), таймаут ответа 100 с (для SSE — heartbeat).
-  - Cloudflare Access на само приложение **не включаем** — мешает PWA и push; своя авторизация по инвайтам.
-- **SQLite**: `journal_mode=WAL`, `busy_timeout=5000`, `foreign_keys=ON`, одно соединение на запись.
-- **Эксплуатация**: `/healthz`, логи в stdout, опционально `/metrics` (Prometheus). Восстановление: `litestream restore` — проверить один раз руками.
-- **Секреты** (`TUNNEL_TOKEN`, `LLM_API_KEY`, VAPID-ключи, ключи R2) — в `.env`, не в репозитории.
-- Первый админ: `retain admin create --email ...`.
+  - TLS terminates at Cloudflare; `Secure` cookies work because the client sees HTTPS.
+  - The real client IP comes from `CF-Connecting-IP` (trusted, since the tunnel is the only entry point).
+  - Cache Rules: **bypass for `/api/*`**; `sw.js` and `manifest.webmanifest` served with `Cache-Control: no-cache`; hashed assets — `immutable`.
+  - Disable Rocket Loader and other JS optimizations (they break SPA/SW).
+  - Limits: request body up to 100 MB (imports fit), 100 s response timeout (SSE uses heartbeats).
+  - Do **not** enable Cloudflare Access on the app itself — it breaks PWA and push; we have our own invite-based auth.
+- **SQLite**: `journal_mode=WAL`, `busy_timeout=5000`, `foreign_keys=ON`, a single write connection.
+- **Operations**: `/healthz`, logs to stdout, optional `/metrics` (Prometheus). Restore: `litestream restore` — test it manually once.
+- **Secrets** (`TUNNEL_TOKEN`, `LLM_API_KEY`, VAPID keys, R2 keys) — in `.env`, never in the repo.
+- First admin: `retain admin create --email ...`.
 
 ---
 
-## 16. Этапы
+## 16. Stages
 
-Каждый этап — законченный, проверяемый кусок; следующий начинается, когда тесты предыдущего зелёные.
+Each stage is a complete, verifiable chunk; the next one starts once the previous stage's tests are green.
 
-| Этап | Содержимое |
+| Stage | Contents |
 |---|---|
-| **0. Каркас** | Репозиторий, Makefile, конфиг, SQLite + goose + sqlc, embed фронта, CI |
-| **1. Дизайн-система** | Dynamic color из seed в рантайме (стили схем, контраст, кэш без мигания), токены (типографика, форма, motion), базовые компоненты UI-кита, `/dev/ui` с переключателем seed |
-| **2. Аккаунты** | Инвайты, регистрация, логин, сессии, middleware |
-| **3. Колоды и слова** | CRUD, дерево колод, генерация карточек, импорт (preview/apply, адаптеры retain + school-wordsets + csv), экспорт, UI колод |
-| **4. Повторения (ядро)** | `srs` + golden-тесты, очередь, лимиты, review, undo, экран сессии, TTS |
-| **5. Режимы и языки** | `internal/lang`, ввод с клавиатуры, панель символов, выбор из вариантов |
-| **6. LLM** | Клиент, промпты, автозаполнение, дополнение колоды (jobs), «спросить», мнемоники, проверка синонимов, кэш и лимиты |
-| **7. Аналитика** | Эндпоинты статистики + графики |
-| **8. PWA и офлайн** | Service worker, IndexedDB, ts-fsrs, `/sync`, тесты синхронизации |
-| **9. Социальное** | Шаринг колод, активность, лидерборд |
-| **10. Напоминания** | Web Push, воркер |
-| **11. Деплой** | Docker, cloudflared, Litestream → R2, проверка восстановления из бэкапа |
+| **0. Skeleton** | Repo, Makefile, config, SQLite + goose + sqlc, frontend embedding, CI |
+| **1. Design system** | Runtime dynamic color from seed (scheme styles, contrast, no-flash cache), tokens (typography, shape, motion), base UI kit components, i18n module, `/dev/ui` with a seed switcher |
+| **2. Accounts** | Invites, sign-up, sign-in, sessions, middleware |
+| **3. Decks and words** | CRUD, deck tree, card generation, import (preview/apply, retain + school-wordsets + csv adapters), export, deck UI |
+| **4. Reviews (core)** | `srs` + golden tests, queue, limits, review, undo, session screen, TTS |
+| **5. Modes and languages** | `internal/lang`, typed answers, character bar, multiple choice |
+| **6. LLM** | Client, prompts, auto-fill, deck enrichment (jobs), "ask", mnemonics, synonym check, cache and limits |
+| **7. Analytics** | Stats endpoints + charts |
+| **8. PWA and offline** | Service worker, IndexedDB, ts-fsrs, `/sync`, sync tests |
+| **9. Social** | Deck sharing, activity, leaderboard |
+| **10. Reminders** | Web Push, worker |
+| **11. Deployment** | Docker, cloudflared, Litestream → R2, backup restore check |
 
-**MVP = этапы 0–4 + 11.** **v1.0 = все этапы.**
+**MVP = stages 0–4 + 11.** **v1.0 = all stages.**
 
 ---
 
-## 17. Открытые вопросы
+## 17. Open questions
 
-Открытых вопросов нет. Проверить на этапе 6 (`make llm-smoke`): `cx/gpt-6-luna` на `ai.pestit.pl` отвечает по `json_schema` и стримит через SSE. Fallback на `json_object` остаётся в коде на случай смены модели.
+None. To verify in stage 6 (`make llm-smoke`): `cx/gpt-6-luna` on `ai.pestit.pl` responds with `json_schema` output and streams over SSE. The `json_object` fallback stays in the code in case the model changes.

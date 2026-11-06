@@ -1,110 +1,110 @@
 # AGENTS.md
 
-Инструкции для AI-агентов, работающих с репозиторием **Retain**.
+Instructions for AI agents working in the **Retain** repository.
 
-Retain — веб-приложение + PWA для изучения слов с интервальными повторениями (FSRS), аналитикой и LLM-помощником. Для себя и друзей (до ~50 пользователей), self-hosted на домашнем сервере за Cloudflare Tunnel.
+Retain is a web app + PWA for learning vocabulary with spaced repetition (FSRS), analytics, and an LLM assistant. Built for me and friends (up to ~50 users), self-hosted on a home server behind Cloudflare Tunnel.
 
-**Источник истины — [`PLAN.md`](PLAN.md).** Перед работой прочитай раздел, относящийся к задаче. Если решение меняется, сначала обнови `PLAN.md`, потом код.
+**The source of truth is [`PLAN.md`](PLAN.md).** Before starting, read the section relevant to your task. If a decision changes, update `PLAN.md` first, then the code.
 
-## Статус
+## Status
 
-Есть только план. Следующий шаг — этап 0 «Каркас» (`PLAN.md`, раздел 16). Команды и пути ниже описывают целевую структуру: если чего-то ещё нет, создай это по плану, а не придумывай своё.
+Only the plan exists so far. Next step: stage 0 "Skeleton" (`PLAN.md`, section 16). The commands and paths below describe the target structure: if something doesn't exist yet, create it according to the plan instead of inventing your own.
 
-## Общение
+## Communication
 
-- С пользователем общайся **по-русски**, кратко.
-- Неоднозначное в требованиях спрашивай, а не угадывай. Особенно это касается схемы БД, публичного API, формата `retain/v1` и UX.
-- Не добавляй функционал сверх плана без согласования. Идеи записывай в `PLAN.md` → «Позже».
+- Talk to the user **in Russian**, briefly. Code, comments, commit messages, docs, and UI strings are in **English**.
+- Ask about anything ambiguous instead of guessing — especially the DB schema, public API, the `retain/v1` format, and UX.
+- Don't add features beyond the plan without agreement. Put ideas into `PLAN.md` → "Later".
 
-## Стек (кратко)
+## Stack (summary)
 
-- **Backend**: Go 1.23+, `net/http`, SQLite (`modernc.org/sqlite`, без CGO, WAL), sqlc, goose, `go-fsrs/v3`, `openai-go`, `log/slog`.
+- **Backend**: Go 1.23+, `net/http`, SQLite (`modernc.org/sqlite`, no CGO, WAL), sqlc, goose, `go-fsrs/v3`, `openai-go`, `log/slog`.
 - **Frontend**: TypeScript, React, Vite, TanStack Query, Dexie, `ts-fsrs`, Tailwind, Radix Primitives, Motion, `@material/material-color-utilities`, `vite-plugin-pwa`.
-- **Деплой**: один бинарник со встроенным фронтом (`embed.FS`), Docker Compose: `retain` + `cloudflared` + `litestream` → Cloudflare R2.
+- **Deployment**: a single binary with the embedded frontend (`embed.FS`); Docker Compose: `retain` + `cloudflared` + `litestream` → Cloudflare R2.
 
-## Структура
+## Structure
 
 ```
-cmd/retain/            точка входа (сервер + CLI: `retain admin create ...`)
+cmd/retain/            entry point (server + CLI: `retain admin create ...`)
 internal/
   config/ db/ auth/ srs/ lang/ study/ decks/ notes/ importer/ llm/
   jobs/ stats/ sync/ social/ push/ httpapi/
-web/                   фронтенд; web/src/ui — UI-кит MD3 Expressive, web/src/theme — токены
-testdata/              golden-файлы: fsrs_golden.json, lang_cases.json, import/
+web/                   frontend; web/src/ui — MD3 Expressive UI kit, web/src/theme — tokens, web/src/i18n — strings
+testdata/              golden files: fsrs_golden.json, lang_cases.json, import/
 ```
 
-Подробно — `PLAN.md`, раздел 12.
+Details: `PLAN.md`, section 12.
 
-## Команды
+## Commands
 
 ```
-make dev         # бэкенд + Vite dev server
-make gen         # sqlc generate (+ прочая кодогенерация)
+make dev         # backend + Vite dev server
+make gen         # sqlc generate (+ other codegen)
 make test        # go test ./... + vitest
 make lint        # golangci-lint, eslint, tsc --noEmit
-make build       # сборка фронта и бинарника (CGO_ENABLED=0)
-make llm-smoke   # ручная проверка реального LLM-эндпоинта (нужен LLM_API_KEY)
+make build       # build frontend and binary (CGO_ENABLED=0)
+make llm-smoke   # manual check against the real LLM endpoint (requires LLM_API_KEY)
 ```
 
-Перед тем как сказать «готово», запусти `make lint test`. Если что-то не проходит, так и напиши, не скрывай.
+Run `make lint test` before saying "done". If something fails, say so — don't hide it.
 
-## Правила backend
+## Backend rules
 
-- **Слои**: хендлер (`httpapi`) → сервис (`study`, `stats`, ...) → sqlc-запросы. В хендлерах нет бизнес-логики и SQL.
-- **SQL**: только через sqlc (`internal/db/queries/*.sql`). Сгенерированный код в `internal/db/gen/` руками не правится. ORM не использовать.
-- **Миграции**: goose, встроены через `embed`, применяются при старте. Применённые миграции не редактируются, только новые.
-- **Время**: сервисы получают `clock.Clock`, `time.Now()` напрямую в бизнес-логике не вызывать. Всё хранится в UTC, «день» считается по `timezone` и `day_start_hour` пользователя.
-- **Внешние зависимости** (LLM, push) — за интерфейсами, в тестах фейки.
-- **Ошибки API**: `{"error": {"code": "...", "message": "..."}}`. Ошибки оборачивать через `fmt.Errorf("...: %w", err)`.
-- **Логи**: `slog`, структурированные. Пароли, токены, ключи и содержимое сессий в лог не попадают.
-- Новые зависимости добавляй только при реальной необходимости. Предпочтительна стандартная библиотека.
+- **Layers**: handler (`httpapi`) → service (`study`, `stats`, ...) → sqlc queries. No business logic or SQL in handlers.
+- **SQL**: only via sqlc (`internal/db/queries/*.sql`). Never hand-edit generated code in `internal/db/gen/`. No ORM.
+- **Migrations**: goose, embedded via `embed`, applied on startup. Never edit an applied migration — add a new one.
+- **Time**: services receive a `clock.Clock`; don't call `time.Now()` directly in business logic. Everything is stored in UTC; a "day" is computed from the user's `timezone` and `day_start_hour`.
+- **External dependencies** (LLM, push) sit behind interfaces, with fakes in tests.
+- **API errors**: `{"error": {"code": "...", "message": "..."}}`, messages in English. Wrap errors with `fmt.Errorf("...: %w", err)`.
+- **Logging**: `slog`, structured. Passwords, tokens, keys, and session contents never go into logs.
+- Add new dependencies only when genuinely needed. Prefer the standard library.
 
-## Инварианты домена (не нарушать)
+## Domain invariants (do not break)
 
-- **`review_logs` — append-only.** Undo ставит флаг `undone`, а не удаляет запись. Состояние карточки должно воспроизводиться проигрыванием её логов по `reviewed_at`.
-- **Сервер — источник истины** для FSRS. Клиентский `ts-fsrs` нужен только для офлайна и предпросмотра интервалов.
-- **Паритет Go ↔ TS**: любое изменение параметров или логики FSRS проверяется общим `testdata/fsrs_golden.json` в обоих тестах.
-- **Идемпотентность**: ID ответа — UUIDv7 от клиента, вставка через `ON CONFLICT(id) DO NOTHING`.
-- **Прогресс у каждого свой**: `cards` привязаны к `user_id`, заметки в общих колодах общие.
-- **Импорт**: адаптеры только превращают внешний формат в `Bundle` (`retain/v1`). Ядро про исходные форматы не знает. Повторный импорт не создаёт дублей и **не сбрасывает прогресс FSRS**.
-- **Сравнение ответов** — только через `internal/lang` (нормализаторы `de/en/pl/ru`). Новый кейс сначала добавляется в `testdata/lang_cases.json`.
+- **`review_logs` is append-only.** Undo sets the `undone` flag instead of deleting the row. A card's state must be reproducible by replaying its logs ordered by `reviewed_at`.
+- **The server is the source of truth** for FSRS. Client-side `ts-fsrs` exists only for offline mode and interval previews.
+- **Go ↔ TS parity**: any change to FSRS parameters or logic is verified against the shared `testdata/fsrs_golden.json` in both test suites.
+- **Idempotency**: an answer's ID is a client-generated UUIDv7, inserted with `ON CONFLICT(id) DO NOTHING`.
+- **Progress is per user**: `cards` belong to a `user_id`; notes in shared decks are shared.
+- **Import**: adapters only convert an external format into a `Bundle` (`retain/v1`). The core knows nothing about source formats. Re-import never creates duplicates and **never resets FSRS progress**.
+- **Answer matching** goes only through `internal/lang` (`de/en/pl/ru` normalizers). A new case is added to `testdata/lang_cases.json` first.
 
-## Правила LLM
+## LLM rules
 
-- Эндпоинт OpenAI-совместимый: `LLM_BASE_URL=https://ai.pestit.pl/v1`, модель по умолчанию `cx/gpt-6-luna`.
-- **Ключ только на сервере.** Фронт ходит в LLM исключительно через наш API.
-- **LLM ничего не меняет без подтверждения пользователя**: результат всегда приходит как предложение.
-- Структурированный вывод: `json_schema`, при неудаче fallback на `json_object` + валидация в Go + один повтор.
-- Промпты лежат в `internal/llm/prompts/*.tmpl`. Любое изменение промпта поднимает `prompt_version`, иначе кэш отдаст старые ответы.
-- Если LLM недоступна, приложение должно работать. Тесты никогда не ходят в реальный эндпоинт (кроме `make llm-smoke`).
+- OpenAI-compatible endpoint: `LLM_BASE_URL=https://ai.pestit.pl/v1`, default model `cx/gpt-6-luna`.
+- **The key lives on the server only.** The frontend reaches the LLM exclusively through our API.
+- **The LLM never changes anything without user confirmation**: results always come back as a suggestion.
+- Structured output: `json_schema`; on failure fall back to `json_object` + validation in Go + one retry.
+- Prompts live in `internal/llm/prompts/*.tmpl`. Any prompt change bumps `prompt_version`, otherwise the cache returns stale answers.
+- The app must work when the LLM is unavailable. Tests never call the real endpoint (except `make llm-smoke`).
 
-## Правила frontend и дизайна
+## Frontend and design rules
 
-- **MD3 Expressive** (`PLAN.md`, раздел 8). Компоненты — свои, в `web/src/ui/`: Radix для поведения, Tailwind + токены для внешнего вида, Motion для анимаций.
-- **Никаких захардкоженных цветов** в компонентах, только CSS-переменные `--md-sys-color-*` через Tailwind-классы. Тема адаптивная: seed по умолчанию `#3A4527`, пользователь может его сменить.
-- Цвета оценок (Again/Hard/Good/Easy) семантические и от seed не зависят (только `harmonize`).
-- Анимации — пружины из `web/src/theme/motion.ts`. При `prefers-reduced-motion` вместо них кроссфейд.
-- Mobile-first, touch targets не меньше 48dp, видимый фокус, контраст WCAG AA, вся навигация доступна с клавиатуры.
-- Серверное состояние — через TanStack Query, офлайн-данные — через Dexie. Отдельный глобальный стор не заводить без необходимости.
-- **Язык интерфейса — английский.** Все строки UI хранятся в `web/src/i18n/en.ts` и берутся через `t()`, литералов в компонентах нет. Сообщения об ошибках API (`message`) тоже на английском.
+- **MD3 Expressive** (`PLAN.md`, section 8). Components are our own, in `web/src/ui/`: Radix for behavior, Tailwind + tokens for appearance, Motion for animation.
+- **No hard-coded colors** in components — only `--md-sys-color-*` CSS variables via Tailwind classes. The theme is adaptive: default seed `#3A4527`, user-changeable.
+- Rating colors (Again/Hard/Good/Easy) are semantic and independent of the seed (only `harmonize`).
+- Animations use springs from `web/src/theme/motion.ts`. Under `prefers-reduced-motion`, use a crossfade instead.
+- Mobile-first, touch targets at least 48dp, visible focus, WCAG AA contrast, all navigation keyboard-accessible.
+- Server state via TanStack Query, offline data via Dexie. Don't introduce a separate global store unless necessary.
+- **The UI language is English.** All UI strings live in `web/src/i18n/en.ts` and are accessed via `t()`; no string literals in components.
 
-## Безопасность
+## Security
 
-- Пароли — argon2id. Сессии — cookie `HttpOnly; Secure; SameSite=Lax`, в БД хранится хэш токена.
-- Запросы, меняющие состояние, проверяют заголовок `Origin`.
-- Каждый запрос к данным фильтруется по `user_id` / правам на колоду. Нужен тест на доступ к чужому ресурсу.
-- Секреты (`LLM_API_KEY`, `TUNNEL_TOKEN`, VAPID, R2) — только в `.env`, в репозиторий не попадают. Пример конфигурации — `.env.example` без значений.
-- IP клиента берётся из `CF-Connecting-IP`. Порты сервиса наружу не открываются.
+- Passwords: argon2id. Sessions: cookie `HttpOnly; Secure; SameSite=Lax`; the DB stores a hash of the token.
+- State-changing requests verify the `Origin` header.
+- Every data query is filtered by `user_id` / deck permissions. A test for accessing someone else's resource is required.
+- Secrets (`LLM_API_KEY`, `TUNNEL_TOKEN`, VAPID, R2) live only in `.env` and never enter the repo. The config example is `.env.example`, without values.
+- The client IP comes from `CF-Connecting-IP`. Service ports are never exposed externally.
 
-## Тесты
+## Tests
 
-- Новая логика приходит вместе с тестами. Табличные тесты в Go, golden-файлы в `testdata/`.
-- Обязательно покрываются: FSRS (golden), очередь и дневные лимиты (часовые пояса), нормализация ответов, импорт и повторный импорт, синхронизация офлайн-логов, права доступа.
-- Интеграционные тесты: `httptest` + временная SQLite. Fuzz FSRS в тестах выключен или задан seed.
-- Тесты не зависят от сети и текущего времени.
+- New logic comes with tests. Table-driven tests in Go, golden files in `testdata/`.
+- Must be covered: FSRS (golden), queue and daily limits (time zones), answer normalization, import and re-import, offline log sync, access control.
+- Integration tests: `httptest` + a temporary SQLite. FSRS fuzz is disabled or seeded in tests.
+- Tests don't depend on the network or the current time.
 
 ## Git
 
-- Ветка `main`. Коммиты маленькие, по смыслу, сообщения на английском в стиле Conventional Commits: `feat(study): ...`, `fix(lang): ...`, `docs: ...`, `chore: ...`.
-- Не коммитить: `.env`, `*.db*`, `data/`, `node_modules/`, `web/dist/`, бинарники.
-- Без явной просьбы пользователя не делать `push`, `force`-операции и переписывание истории.
+- Branch `main`. Small, focused commits; messages in English, Conventional Commits style: `feat(study): ...`, `fix(lang): ...`, `docs: ...`, `chore: ...`.
+- Never commit: `.env`, `*.db*`, `data/`, `node_modules/`, `web/dist/`, binaries.
+- No `push`, force operations, or history rewriting without an explicit request from the user.
