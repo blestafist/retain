@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -175,6 +176,67 @@ func TestRetainDetect(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := adapter.Detect([]byte(tt.raw)); got != tt.want {
 				t.Fatalf("Detect() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseRetainRejectsInvalidUTF8(t *testing.T) {
+	input := append([]byte(`{"format":"retain/v1","source":"`), 0xff)
+	input = append(input, []byte(`"}`)...)
+
+	if (RetainAdapter{}).Detect(input) {
+		t.Fatal("Detect() = true for invalid UTF-8")
+	}
+	_, err := ParseRetain(input)
+	if !errors.Is(err, ErrInvalidJSON) {
+		t.Fatalf("ParseRetain() error = %v, want ErrInvalidJSON", err)
+	}
+	if strings.ContainsRune(err.Error(), '\uFFFD') {
+		t.Fatalf("error unexpectedly contains a replacement character: %v", err)
+	}
+}
+
+func TestParseRetainExpectedCountMatchesJSONSchemaIntegerSemantics(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	outOfRange := strconv.FormatUint(uint64(^uint(0)>>1)+1, 10)
+	tests := []struct {
+		name    string
+		number  string
+		want    int
+		wantErr error
+	}{
+		{name: "integer", number: "1", want: 1},
+		{name: "decimal integer", number: "1.0", want: 1},
+		{name: "exponent integer", number: "1e0", want: 1},
+		{name: "decimal exponent integer", number: "10.00e-1", want: 1},
+		{name: "leading decimal zeros", number: "0.001e3", want: 1},
+		{name: "exponent moves decimal point", number: "10.05e2", want: 1005},
+		{name: "zero with exponent", number: "0e999999999999999999999999", want: 0},
+		{name: "negative zero", number: "-0.0", want: 0},
+		{name: "maximum int", number: strconv.FormatUint(uint64(maxInt), 10), want: maxInt},
+		{name: "fractional decimal", number: "1.01", wantErr: ErrInvalidStructure},
+		{name: "fractional exponent", number: "1e-1", wantErr: ErrInvalidStructure},
+		{name: "out of range", number: outOfRange, wantErr: ErrInvalidStructure},
+		{name: "huge exponent", number: "1e999999999999999999999999", wantErr: ErrInvalidStructure},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := []byte(`{"format":"retain/v1","decks":[{"name":"Deck","expected_count":` + tt.number + `}]}`)
+			bundle, err := ParseRetain(input)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("ParseRetain() error = %v, want errors.Is(_, %v)", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseRetain() error = %v", err)
+			}
+			got := bundle.Decks[0].ExpectedCount
+			if got == nil || *got != tt.want {
+				t.Fatalf("expected_count = %v, want %d", got, tt.want)
 			}
 		})
 	}

@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"strings"
+	"strconv"
+	"unicode/utf8"
 )
 
 const retainFormat = "retain/v1"
@@ -74,10 +75,16 @@ func ParseRetain(raw []byte) (*Bundle, error) {
 			return nil, err
 		}
 	}
+	if err := ValidateBundle(bundle); err != nil {
+		return nil, err
+	}
 	return bundle, nil
 }
 
 func decodeRoot(raw []byte) (map[string]json.RawMessage, error) {
+	if !utf8.Valid(raw) {
+		return nil, parseError(ErrInvalidJSON, "")
+	}
 	var value json.RawMessage
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return nil, parseError(ErrInvalidJSON, "")
@@ -127,10 +134,6 @@ func readDeck(raw json.RawMessage, path string) (Deck, error) {
 	if err != nil {
 		return deck, err
 	}
-	if strings.TrimSpace(deck.Name) == "" {
-		return deck, parseError(ErrMissingRequiredField, joinPath(path, "name"))
-	}
-
 	if value, ok := obj["lang_target"]; ok {
 		deck.LangTarget, err = readString(value, joinPath(path, "lang_target"))
 		if err != nil {
@@ -215,9 +218,6 @@ func readNote(raw json.RawMessage, path string) (Note, error) {
 	if err != nil {
 		return note, err
 	}
-	if strings.TrimSpace(note.Term) == "" {
-		return note, parseError(ErrMissingRequiredField, joinPath(path, "term"))
-	}
 	translationRaw, ok := obj["translation"]
 	if !ok {
 		return note, parseError(ErrMissingRequiredField, joinPath(path, "translation"))
@@ -226,10 +226,6 @@ func readNote(raw json.RawMessage, path string) (Note, error) {
 	if err != nil {
 		return note, err
 	}
-	if strings.TrimSpace(note.Translation) == "" {
-		return note, parseError(ErrMissingRequiredField, joinPath(path, "translation"))
-	}
-
 	optionalStrings := []struct {
 		key         string
 		destination *string
@@ -328,11 +324,158 @@ func readInteger(raw json.RawMessage, path string) (int, error) {
 	if len(trimmed) == 0 || trimmed[0] == '"' || trimmed[0] == '{' || trimmed[0] == '[' || bytes.Equal(trimmed, []byte("null")) {
 		return 0, parseError(ErrInvalidStructure, path)
 	}
-	var value int
-	if err := json.Unmarshal(trimmed, &value); err != nil {
+	value, ok := parseJSONInteger(trimmed)
+	if !ok {
 		return 0, parseError(ErrInvalidStructure, path)
 	}
 	return value, nil
+}
+
+// parseJSONInteger accepts JSON numbers whose mathematical value is an integer,
+// including decimal and exponent notation, without rounding through float64.
+func parseJSONInteger(number []byte) (int, bool) {
+	if len(number) == 0 {
+		return 0, false
+	}
+	if number[0] != '-' && (number[0] < '0' || number[0] > '9') {
+		return 0, false
+	}
+
+	exponentIndex := bytes.IndexAny(number, "eE")
+	mantissa := number
+	var exponent int64
+	var exponentRaw []byte
+	if exponentIndex >= 0 {
+		mantissa = number[:exponentIndex]
+		exponentRaw = number[exponentIndex+1:]
+	}
+
+	negative := mantissa[0] == '-'
+	digitStart := 0
+	if negative {
+		digitStart = 1
+	}
+	dotIndex := bytes.IndexByte(mantissa[digitStart:], '.')
+	fractionDigits := int64(0)
+	if dotIndex >= 0 {
+		dotIndex += digitStart
+		fractionDigits = int64(len(mantissa) - dotIndex - 1)
+	}
+
+	digitCount := 0
+	allZero := true
+	for i := digitStart; i < len(mantissa); i++ {
+		if mantissa[i] == '.' {
+			continue
+		}
+		digitCount++
+		if mantissa[i] != '0' {
+			allZero = false
+		}
+	}
+	if digitCount == 0 {
+		return 0, false
+	}
+	if allZero {
+		return 0, true
+	}
+	if exponentRaw != nil {
+		parsed, err := strconv.ParseInt(string(exponentRaw), 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		exponent = parsed
+	}
+	if exponent < (-1<<63)+fractionDigits {
+		return 0, false
+	}
+	shift := exponent - fractionDigits
+
+	keptDigitCount := digitCount
+	appendZeros := int64(0)
+	if shift < 0 {
+		if shift < -int64(digitCount) {
+			return 0, false
+		}
+		removedDigits := int(-shift)
+		trailingZeros := 0
+		for i := len(mantissa) - 1; i >= digitStart; i-- {
+			if mantissa[i] == '.' {
+				continue
+			}
+			if mantissa[i] != '0' {
+				break
+			}
+			trailingZeros++
+		}
+		if trailingZeros < removedDigits {
+			return 0, false
+		}
+		keptDigitCount = digitCount - removedDigits
+	} else {
+		appendZeros = shift
+	}
+
+	maxDigits := 19
+	if strconv.IntSize == 32 {
+		maxDigits = 10
+	}
+	if keptDigitCount == 0 {
+		return 0, false
+	}
+	significantDigits := 0
+	seenNonzero := false
+	digitsSeen := 0
+	for i := digitStart; i < len(mantissa) && digitsSeen < keptDigitCount; i++ {
+		if mantissa[i] == '.' {
+			continue
+		}
+		digitsSeen++
+		if mantissa[i] != '0' {
+			seenNonzero = true
+		}
+		if seenNonzero {
+			significantDigits++
+		}
+	}
+	if appendZeros > int64(maxDigits) || int64(significantDigits)+appendZeros > int64(maxDigits) {
+		return 0, false
+	}
+
+	var digits [20]byte
+	digitLen := 0
+	remaining := keptDigitCount
+	seenNonzero = false
+	for i := digitStart; i < len(mantissa) && remaining > 0; i++ {
+		if mantissa[i] == '.' {
+			continue
+		}
+		if mantissa[i] != '0' {
+			seenNonzero = true
+		}
+		if seenNonzero {
+			digits[digitLen] = mantissa[i]
+			digitLen++
+		}
+		remaining--
+	}
+	for i := int64(0); i < appendZeros; i++ {
+		digits[digitLen] = '0'
+		digitLen++
+	}
+	if digitLen == 0 {
+		return 0, false
+	}
+
+	valueText := string(digits[:digitLen])
+	if negative {
+		valueText = "-" + valueText
+	}
+	value, err := strconv.ParseInt(valueText, 10, strconv.IntSize)
+	if err != nil {
+		return 0, false
+	}
+	return int(value), true
 }
 
 func rejectUnknown(obj map[string]json.RawMessage, path string, allowed ...string) error {
