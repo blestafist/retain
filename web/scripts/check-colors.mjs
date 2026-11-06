@@ -3,12 +3,15 @@ import console from "node:console";
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
 
 // Check application and component sources, excluding theme infrastructure and tests.
 export function violations(text) {
   const patterns = [
     /#[\da-f]{3,8}\b/gi,
-    /\b(?:color|background(?:-color)?|border-color|outline-color|fill|stroke)\s*:\s*(?!var\(--md-sys-color-|none\b|currentColor\b|inherit\b)[a-z]+\b/gi,
+    /\b(?:color|background(?:-color)?|border-color|outline-color|fill|stroke)\s*:\s*(?!var\(|none\b|currentColor\b|inherit\b)[a-z]+\b/gi,
+    /\b(?:color|background(?:Color)?|border(?:Color|TopColor|RightColor|BottomColor|LeftColor)?|outlineColor|fill|stroke)\s*:\s*['"`]\s*(?!var\(|none\b|currentColor\b|inherit\b)[a-z]+\b/gi,
+    /\b(?:color|background|fill|stroke|stopColor|floodColor)\s*=\s*(?:\{\s*)?['"`]\s*(?!var\(|none\b|currentColor\b|inherit\b)[a-z]+\b/gi,
     /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\s*\(/gi,
     /(?:^|[\s"'`:{])(?:[\w-]+:)*(?:bg|text|border|outline|ring|fill|stroke|decoration|shadow|from|via|to|accent|caret|divide|placeholder)-(?:white|black|transparent|current|inherit|slate|gray|grey|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)(?:[-/\d\w]*)/gm,
     /(?:bg|text|border|outline|ring|fill|stroke)-\[(?!var\(--md-sys-color-)[^\]]+\]/g,
@@ -30,4 +33,4 @@ function check(dir) {
     }
   }
 }
-check('src');
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) check('src');

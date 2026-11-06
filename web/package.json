@@ -10,7 +10,7 @@
     "build": "npm run typecheck && vite build",
     "lint": "eslint . && node scripts/check-colors.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "node --test scripts/check-colors.test.mjs && vitest run"
   },
   "dependencies": {
     "@fontsource-variable/roboto-flex": "5.3.0",
@@ -24,6 +24,8 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
     "@types/node": "26.6.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
@@ -31,6 +33,7 @@
     "autoprefixer": "10.4.21",
     "eslint": "10.14.0",
     "globals": "17.14.0",
+    "jsdom": "^31.0.0",
     "postcss": "8.5.32",
     "tailwindcss": "3.4.17",
     "tsx": "4.23.15",
