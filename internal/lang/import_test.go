@@ -128,27 +128,27 @@ func TestEnrichImportNoteGerman(t *testing.T) {
 			},
 		},
 		{
-			name: "removes governing marker before phrase detection",
+			name: "extracts accusative marker and preserves term",
 			input: ImportNote{
 				Term:        "berichten über A",
 				Translation: "to report",
 			},
 			want: ImportNote{
-				Term:        "berichten über",
+				Term:        "berichten über A",
 				Translation: "to report",
 				Fields:      map[string]any{"governs": "A"},
 			},
 		},
 		{
-			name: "recognizes a lowercase standalone marker and normalizes it",
+			name: "does not recognize lowercase marker",
 			input: ImportNote{
 				Term:        "warten auf d",
 				Translation: "to wait",
 			},
 			want: ImportNote{
-				Term:        "warten auf",
+				Term:        "warten auf d",
 				Translation: "to wait",
-				Fields:      map[string]any{"governs": "D"},
+				Fields:      map[string]any{"kind": "phrase"},
 			},
 		},
 		{
@@ -158,9 +158,55 @@ func TestEnrichImportNoteGerman(t *testing.T) {
 				Translation: "to be aware",
 			},
 			want: ImportNote{
-				Term:        "sich bewusst sein",
+				Term:        "sich bewusst sein G",
 				Translation: "to be aware",
 				Fields:      map[string]any{"governs": "G", "reflexive": true, "kind": "phrase"},
+			},
+		},
+		{
+			name: "extracts dative marker and preserves term",
+			input: ImportNote{
+				Term:        "warten auf D",
+				Translation: "to wait",
+			},
+			want: ImportNote{
+				Term:        "warten auf D",
+				Translation: "to wait",
+				Fields:      map[string]any{"governs": "D"},
+			},
+		},
+		{
+			name: "does not treat single uppercase marker as a suffix",
+			input: ImportNote{
+				Term:        "A",
+				Translation: "one",
+			},
+			want: ImportNote{
+				Term:        "A",
+				Translation: "one",
+			},
+		},
+		{
+			name: "does not mistake Vitamin D for a governing marker",
+			input: ImportNote{
+				Term:        "Vitamin D",
+				Translation: "vitamin D",
+			},
+			want: ImportNote{
+				Term:        "Vitamin D",
+				Translation: "vitamin D",
+			},
+		},
+		{
+			name: "requires a standalone suffix token",
+			input: ImportNote{
+				Term:        "warten auf D,",
+				Translation: "to wait",
+			},
+			want: ImportNote{
+				Term:        "warten auf D,",
+				Translation: "to wait",
+				Fields:      map[string]any{"kind": "phrase"},
 			},
 		},
 		{
@@ -234,7 +280,7 @@ func TestEnrichImportNotePreservesFilledFields(t *testing.T) {
 		},
 	}
 	want := ImportNote{
-		Term:        "der Drachenflieger",
+		Term:        "der Drachenflieger A",
 		Translation: "hang glider",
 		Fields: map[string]any{
 			"pos":       "verb",
@@ -248,6 +294,22 @@ func TestEnrichImportNotePreservesFilledFields(t *testing.T) {
 	got := EnrichImportNote("de", input)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("EnrichImportNote() = %#v, want %#v", got, want)
+	}
+}
+
+func TestEnrichImportNotePreservesExistingGovernsAndTerm(t *testing.T) {
+	input := ImportNote{
+		Term:        "helfen A",
+		Translation: "to help",
+		Fields:      map[string]any{"governs": "D"},
+	}
+
+	got := EnrichImportNote("de", input)
+	if got.Term != input.Term {
+		t.Errorf("term = %q, want original term %q", got.Term, input.Term)
+	}
+	if got.Fields["governs"] != "D" {
+		t.Errorf("governs = %#v, want existing value D", got.Fields["governs"])
 	}
 }
 
@@ -271,13 +333,16 @@ func TestEnrichImportNoteFillsEmptyFields(t *testing.T) {
 
 func TestEnrichImportNoteDoesNotMutateInput(t *testing.T) {
 	input := ImportNote{
-		Term:         "der Drachenflieger A",
+		Term:         "der Drachenflieger über A",
 		Translation:  "hang glider, paraglider.",
 		Notes:        "source note",
 		Alternatives: []string{"paraglider", "existing"},
 		Fields: map[string]any{
 			"custom": "preserved",
-			"nested": map[string]any{"items": []string{"unchanged"}},
+			"nested": map[string]any{
+				"items": []any{map[string]any{"value": "unchanged"}},
+			},
+			"typed": []string{"unchanged"},
 		},
 	}
 	before := ImportNote{
@@ -287,7 +352,10 @@ func TestEnrichImportNoteDoesNotMutateInput(t *testing.T) {
 		Alternatives: cloneStrings(input.Alternatives),
 		Fields: map[string]any{
 			"custom": "preserved",
-			"nested": map[string]any{"items": []string{"unchanged"}},
+			"nested": map[string]any{
+				"items": []any{map[string]any{"value": "unchanged"}},
+			},
+			"typed": []string{"unchanged"},
 		},
 	}
 
@@ -302,6 +370,17 @@ func TestEnrichImportNoteDoesNotMutateInput(t *testing.T) {
 	got.Fields["custom"] = "changed"
 	if input.Fields["custom"] != "preserved" {
 		t.Error("changing result fields changed the input map")
+	}
+	gotNested := got.Fields["nested"].(map[string]any)
+	gotItems := gotNested["items"].([]any)
+	gotItems[0].(map[string]any)["value"] = "changed"
+	gotItems[0] = map[string]any{"value": "replaced"}
+	got.Fields["typed"].([]string)[0] = "changed"
+	if !reflect.DeepEqual(input.Fields["nested"], before.Fields["nested"]) {
+		t.Error("changing nested result maps/slices changed the input fields")
+	}
+	if !reflect.DeepEqual(input.Fields["typed"], before.Fields["typed"]) {
+		t.Error("changing a typed result slice changed the input fields")
 	}
 	if got.Fields["article"] != "der" || got.Fields["governs"] != "A" {
 		t.Errorf("result fields were not enriched: %#v", got.Fields)

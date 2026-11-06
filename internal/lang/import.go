@@ -1,6 +1,7 @@
 package lang
 
 import (
+	"reflect"
 	"strings"
 	"unicode"
 )
@@ -39,10 +40,13 @@ func EnrichImportNote(langTarget string, input ImportNote) ImportNote {
 		return result
 	}
 
-	result.Term = removeGoverningMarker(result.Term, &result.Fields)
 	words := strings.Fields(result.Term)
 	if len(words) == 0 {
 		return result
+	}
+	if marker, ok := trailingGoverningMarker(words); ok {
+		setIfEmpty(&result.Fields, "governs", marker)
+		words = words[:len(words)-1]
 	}
 
 	article, hasInitialArticle := initialArticle(words[0])
@@ -76,9 +80,52 @@ func cloneFields(fields map[string]any) map[string]any {
 	}
 	clone := make(map[string]any, len(fields))
 	for key, value := range fields {
-		clone[key] = value
+		if value == nil {
+			clone[key] = nil
+			continue
+		}
+		clone[key] = cloneMutableValue(reflect.ValueOf(value)).Interface()
 	}
 	return clone
+}
+
+func cloneMutableValue(value reflect.Value) reflect.Value {
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := reflect.New(value.Type()).Elem()
+		cloned.Set(cloneMutableValue(value.Elem()))
+		return cloned
+	case reflect.Map:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := reflect.MakeMapWithSize(value.Type(), value.Len())
+		iter := value.MapRange()
+		for iter.Next() {
+			cloned.SetMapIndex(iter.Key(), cloneMutableValue(iter.Value()))
+		}
+		return cloned
+	case reflect.Slice:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for i := 0; i < value.Len(); i++ {
+			cloned.Index(i).Set(cloneMutableValue(value.Index(i)))
+		}
+		return cloned
+	case reflect.Array:
+		cloned := reflect.New(value.Type()).Elem()
+		for i := 0; i < value.Len(); i++ {
+			cloned.Index(i).Set(cloneMutableValue(value.Index(i)))
+		}
+		return cloned
+	default:
+		return value
+	}
 }
 
 func removeParentheticalNotes(translation string) (string, []string) {
@@ -177,21 +224,31 @@ func appendNotes(notes *string, additions []string) {
 	*notes += strings.Join(additions, "\n")
 }
 
-func removeGoverningMarker(term string, fields *map[string]any) string {
-	words := strings.Fields(term)
-	if len(words) == 0 {
-		return term
+func trailingGoverningMarker(words []string) (string, bool) {
+	if len(words) < 2 || !isLowercaseToken(words[len(words)-2]) {
+		return "", false
 	}
 
-	marker := strings.ToUpper(words[len(words)-1])
-	switch marker {
+	switch words[len(words)-1] {
 	case "A", "D", "G":
-		setIfEmpty(fields, "governs", marker)
-		trimmed := strings.TrimRightFunc(term, unicode.IsSpace)
-		return strings.TrimSpace(strings.TrimSuffix(trimmed, words[len(words)-1]))
+		return words[len(words)-1], true
 	default:
-		return term
+		return "", false
 	}
+}
+
+func isLowercaseToken(token string) bool {
+	hasLetter := false
+	for _, r := range token {
+		if !unicode.IsLetter(r) {
+			continue
+		}
+		hasLetter = true
+		if !unicode.IsLower(r) {
+			return false
+		}
+	}
+	return hasLetter
 }
 
 func initialArticle(word string) (string, bool) {
