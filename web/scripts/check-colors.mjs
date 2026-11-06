@@ -1,26 +1,85 @@
-import process from "node:process";
-import console from "node:console";
+import process from 'node:process';
+import console from 'node:console';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
+import ts from 'typescript';
+import postcss from 'postcss';
 
-// Check application and component sources, excluding theme infrastructure and tests.
-export function violations(text) {
-  const patterns = [
-    /#[\da-f]{3,8}\b/gi,
-    /\b(?:color|background(?:-color)?|border-color|outline-color|fill|stroke)\s*:\s*(?!var\(|none\b|currentColor\b|inherit\b)[a-z]+\b/gi,
-    /\b(?:color|background(?:Color)?|border(?:Color|TopColor|RightColor|BottomColor|LeftColor)?|outlineColor|fill|stroke)\s*:\s*['"`]\s*(?!var\(|none\b|currentColor\b|inherit\b)[a-z]+\b/gi,
-    /\b(?:color|background|fill|stroke|stopColor|floodColor)\s*=\s*(?:\{\s*)?['"`]\s*(?!var\(|none\b|currentColor\b|inherit\b)[a-z]+\b/gi,
-    /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\s*\(/gi,
-    /(?:^|[\s"'`:{])(?:[\w-]+:)*(?:bg|text|border|outline|ring|fill|stroke|decoration|shadow|from|via|to|accent|caret|divide|placeholder)-(?:white|black|transparent|current|inherit|slate|gray|grey|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)(?:[-/\d\w]*)/gm,
-    /(?:bg|text|border|outline|ring|fill|stroke)-\[(?!var\(--md-sys-color-)[^\]]+\]/g,
-  ];
-  return patterns.flatMap((pattern) => [...text.matchAll(pattern)].map((match) => match[0].trim()));
+const namedColors = new Set(('aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen').split(' '));
+const colorProperty = /^(?:color|background(?:-color)?|border(?:-(?:top|right|bottom|left|block|inline))?(?:-color)?|outline(?:-color)?|fill|stroke|stop-color|flood-color|lighting-color|text-decoration(?:-color)?|box-shadow|text-shadow|caret-color|accent-color)$/i;
+const paletteClass = /^(?:bg|text|border|outline|ring|fill|stroke|decoration|shadow|from|via|to|accent|caret|divide|placeholder)-(?:white|black|slate|gray|grey|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)(?:$|[-/])/i;
+const colorUtility = /^(?:bg|text|border|outline|ring|fill|stroke|decoration|shadow|from|via|to|accent|caret|divide|placeholder)-\[(.*)\]$/i;
+
+function hasColor(value, property = '') {
+  // Ignore token references themselves, but still inspect any fallback value.
+  const withoutVars = value.replace(/var\(\s*--[\w-]+\s*(?:,\s*([^()]*))?\)/gi, '$1');
+  if (/#[\da-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix)\s*\(/i.test(withoutVars)) return true;
+  if (!colorProperty.test(property)) return false;
+  return (withoutVars.match(/[a-z]+/gi) ?? []).some((word) => namedColors.has(word.toLowerCase()));
 }
 
-assert.ok(violations('bg-white text-red-500 #fff rgb(0,0,0)').length >= 4);
-assert.equal(violations('bg-primary text-on-surface fill-[var(--md-sys-color-primary)]').length, 0);
+function classViolations(value) {
+  return value.split(/\s+/).filter((token) => {
+    // Colons in arbitrary values are not variant separators.
+    const utility = token.split(/:(?![^[]*\])/).at(-1).replace(/^!/, '');
+    if (paletteClass.test(utility)) return true;
+    const arbitrary = utility.match(colorUtility);
+    return arbitrary && hasColor(arbitrary[1].replace(/^color:/i, ''), 'color');
+  });
+}
+
+function propertyName(name) {
+  return name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+}
+
+// Only inspect color-bearing syntax, not arbitrary strings such as translations.
+export function violations(text, filename = 'fixture.tsx') {
+  const found = [];
+  if (filename.endsWith('.css')) {
+    const root = postcss.parse(text, { from: filename });
+    root.walkDecls((decl) => { if (hasColor(decl.value, decl.prop)) found.push(`${decl.prop}: ${decl.value}`); });
+    return found;
+  }
+  const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, true, filename.endsWith('.jsx') ? ts.ScriptKind.JSX : ts.ScriptKind.TSX);
+  const variables = new Map();
+  function collect(node) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) variables.set(node.name.text, node.initializer);
+    ts.forEachChild(node, collect);
+  }
+  collect(source);
+  function inspectExpression(node, callback, seen = new Set()) {
+    if (!node) return;
+    if (ts.isIdentifier(node) && variables.has(node.text) && !seen.has(node.text)) {
+      seen.add(node.text);
+      inspectExpression(variables.get(node.text), callback, seen);
+    } else if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) callback(node.text);
+    else if (ts.isTemplateExpression(node)) {
+      callback(node.head.text);
+      for (const span of node.templateSpans) { inspectExpression(span.expression, callback, seen); callback(span.literal.text); }
+    } else ts.forEachChild(node, (child) => inspectExpression(child, callback, seen));
+  }
+  function inspectStyle(node, seen = new Set()) {
+    if (ts.isIdentifier(node) && variables.has(node.text) && !seen.has(node.text)) {
+      seen.add(node.text);
+      inspectStyle(variables.get(node.text), seen);
+    } else if (ts.isPropertyAssignment(node)) {
+      const name = node.name.getText(source).replace(/^['"]|['"]$/g, '');
+      inspectExpression(node.initializer, (value) => { if (hasColor(value, propertyName(name))) found.push(`${name}: ${value}`); });
+    } else ts.forEachChild(node, (child) => inspectStyle(child, seen));
+  }
+  function visit(node) {
+    if (ts.isJsxAttribute(node) && node.initializer) {
+      const name = node.name.getText(source);
+      if (name === 'className' || name === 'class') inspectExpression(node.initializer, (value) => found.push(...classViolations(value)));
+      else if (name === 'style') inspectStyle(node.initializer);
+      else if (colorProperty.test(propertyName(name))) inspectExpression(node.initializer, (value) => { if (hasColor(value, propertyName(name))) found.push(`${name}: ${value}`); });
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  return found;
+}
 
 function check(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -28,7 +87,7 @@ function check(dir) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) check(path);
     else if (/\.(css|tsx?|jsx?)$/.test(entry.name)) {
-      const found = violations(readFileSync(path, 'utf8'));
+      const found = violations(readFileSync(path, 'utf8'), path);
       if (found.length) { console.error(`${path}: forbidden colors: ${found.join(', ')}`); process.exitCode = 1; }
     }
   }
