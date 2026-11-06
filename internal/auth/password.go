@@ -37,9 +37,13 @@ var (
 	ErrPasswordInvalidUTF8   = errors.New("password must be valid UTF-8")
 	ErrPasswordTooShort      = errors.New("password must contain at least 12 Unicode code points")
 	ErrMalformedPasswordHash = errors.New("malformed password hash")
+	// ErrPasswordHashBusy is returned when both Argon2 operation slots are occupied.
+	ErrPasswordHashBusy = errors.New("password hashing capacity is full")
 
 	argon2Slots = make(chan struct{}, maxConcurrentArgon2Operations)
 )
+
+type passwordKeyDeriver func(password, salt []byte, iterations, memoryKiB uint32, parallelism uint8) ([]byte, error)
 
 // ValidatePassword checks that a password contains at least 12 Unicode code points.
 func ValidatePassword(password string) error {
@@ -54,6 +58,10 @@ func ValidatePassword(password string) error {
 
 // HashPassword returns an Argon2id hash in the PHC string format.
 func HashPassword(password string) (string, error) {
+	return hashPasswordWith(password, deriveKey)
+}
+
+func hashPasswordWith(password string, derive passwordKeyDeriver) (string, error) {
 	if err := ValidatePassword(password); err != nil {
 		return "", err
 	}
@@ -63,7 +71,10 @@ func HashPassword(password string) (string, error) {
 		return "", fmt.Errorf("generate password salt: %w", err)
 	}
 
-	key := deriveKey([]byte(password), salt, argon2Iterations, argon2MemoryKiB, argon2Parallelism)
+	key, err := derive([]byte(password), salt, argon2Iterations, argon2MemoryKiB, argon2Parallelism)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2Version,
 		argon2MemoryKiB,
@@ -77,12 +88,19 @@ func HashPassword(password string) (string, error) {
 // VerifyPassword reports whether password matches an encoded Argon2id hash.
 // Malformed or unsupported encodings return ErrMalformedPasswordHash.
 func VerifyPassword(password, encodedHash string) (bool, error) {
+	return verifyPasswordWith(password, encodedHash, deriveKey)
+}
+
+func verifyPasswordWith(password, encodedHash string, derive passwordKeyDeriver) (bool, error) {
 	parsed, err := parsePasswordHash(encodedHash)
 	if err != nil {
 		return false, ErrMalformedPasswordHash
 	}
 
-	key := deriveKey([]byte(password), parsed.salt, parsed.iterations, parsed.memoryKiB, parsed.parallelism)
+	key, err := derive([]byte(password), parsed.salt, parsed.iterations, parsed.memoryKiB, parsed.parallelism)
+	if err != nil {
+		return false, err
+	}
 	return subtle.ConstantTimeCompare(key, parsed.key) == 1, nil
 }
 
@@ -171,8 +189,22 @@ func decodePHCBase64(value string) ([]byte, error) {
 	return decoded, nil
 }
 
-func deriveKey(password, salt []byte, iterations, memoryKiB uint32, parallelism uint8) []byte {
-	argon2Slots <- struct{}{}
-	defer func() { <-argon2Slots }()
-	return argon2.IDKey(password, salt, iterations, memoryKiB, parallelism, argon2KeySize)
+func deriveKey(password, salt []byte, iterations, memoryKiB uint32, parallelism uint8) ([]byte, error) {
+	return deriveKeyWithSlots(argon2Slots, password, salt, iterations, memoryKiB, parallelism, argon2.IDKey)
+}
+
+func deriveKeyWithSlots(
+	slots chan struct{},
+	password, salt []byte,
+	iterations, memoryKiB uint32,
+	parallelism uint8,
+	derive func(password, salt []byte, iterations, memoryKiB uint32, parallelism uint8, keyLen uint32) []byte,
+) ([]byte, error) {
+	select {
+	case slots <- struct{}{}:
+	default:
+		return nil, ErrPasswordHashBusy
+	}
+	defer func() { <-slots }()
+	return derive(password, salt, iterations, memoryKiB, parallelism, argon2KeySize), nil
 }

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestValidatePassword(t *testing.T) {
@@ -94,6 +96,91 @@ func TestHashPasswordAndVerifyPassword(t *testing.T) {
 				t.Fatalf("error contains a credential: %v", err)
 			}
 		})
+	}
+}
+
+func TestPasswordHashAdmissionRejectsSaturatedOperations(t *testing.T) {
+	slots := make(chan struct{}, maxConcurrentArgon2Operations)
+	started := make(chan struct{}, maxConcurrentArgon2Operations)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseComputations := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseComputations()
+
+	derive := func(password, salt []byte, iterations, memoryKiB uint32, parallelism uint8) ([]byte, error) {
+		return deriveKeyWithSlots(slots, password, salt, iterations, memoryKiB, parallelism,
+			func(password, salt []byte, iterations, memoryKiB uint32, parallelism uint8, keyLen uint32) []byte {
+				started <- struct{}{}
+				<-release
+				return make([]byte, keyLen)
+			})
+	}
+
+	const password = "correct horse battery staple"
+	salt := []byte("0123456789abcdef")
+	validHash := encodeTestHash("argon2id", "19", "m=19456,t=2,p=1", salt, make([]byte, argon2KeySize))
+	type operationResult struct {
+		kind    string
+		hash    string
+		matched bool
+		err     error
+	}
+	results := make(chan operationResult, maxConcurrentArgon2Operations)
+	go func() {
+		hash, err := hashPasswordWith(password, derive)
+		results <- operationResult{kind: "hash", hash: hash, err: err}
+	}()
+	go func() {
+		matched, err := verifyPasswordWith(password, validHash, derive)
+		results <- operationResult{kind: "verify", matched: matched, err: err}
+	}()
+
+	for i := 0; i < maxConcurrentArgon2Operations; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("first two Argon2 operations did not reach the controlled computation")
+		}
+	}
+
+	assertBusyQuickly := func(name string, call func() error) {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() { done <- call() }()
+		select {
+		case err := <-done:
+			if !errors.Is(err, ErrPasswordHashBusy) {
+				t.Errorf("%s error = %v, want ErrPasswordHashBusy", name, err)
+			}
+		case <-time.After(250 * time.Millisecond):
+			t.Errorf("%s did not reject a saturated request promptly", name)
+		}
+	}
+	assertBusyQuickly("third HashPassword", func() error {
+		_, err := hashPasswordWith(password, derive)
+		return err
+	})
+	assertBusyQuickly("third VerifyPassword", func() error {
+		_, err := verifyPasswordWith(password, validHash, derive)
+		return err
+	})
+
+	releaseComputations()
+	for i := 0; i < maxConcurrentArgon2Operations; i++ {
+		select {
+		case result := <-results:
+			if result.err != nil {
+				t.Errorf("first %s operation error = %v", result.kind, result.err)
+			}
+			if result.kind == "hash" && result.hash == "" {
+				t.Error("first HashPassword operation returned an empty hash")
+			}
+			if result.kind == "verify" && !result.matched {
+				t.Error("first VerifyPassword operation did not match")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("first two Argon2 operations did not finish after release")
+		}
 	}
 }
 
