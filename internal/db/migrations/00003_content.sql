@@ -2,7 +2,7 @@
 CREATE TABLE decks (
     id INTEGER PRIMARY KEY,
     owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    parent_id INTEGER REFERENCES decks(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES decks(id) ON DELETE RESTRICT,
     name TEXT NOT NULL CHECK (length(trim(name)) > 0),
     description TEXT,
     position INTEGER NOT NULL DEFAULT 0,
