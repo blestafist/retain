@@ -1,11 +1,12 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, logout } from './api/client';
+import { ApiError, logout, type MeResponse } from './api/client';
 import { AuthForms } from './auth/AuthForms';
 import { loadCurrentUser, meQueryKey } from './auth/session';
 import './app.css';
 import { t } from './i18n/en';
 import { Button } from './ui/Button';
+import { DecksWorkspace } from './content/DecksWorkspace';
 
 const DevShowcase = import.meta.env.DEV ? lazy(() => import('./dev/Showcase')) : null;
 
@@ -41,13 +42,23 @@ function AuthenticatedApp() {
   const queryClient = useQueryClient();
   const meQuery = useQuery({
     queryKey: meQueryKey,
-    queryFn: loadCurrentUser,
+    queryFn: async () => {
+      const previousOwner = queryClient.getQueryData<MeResponse | null>(meQueryKey)?.user.id;
+      const profile = await loadCurrentUser();
+      if (!profile || previousOwner !== profile.user.id) {
+        queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== meQueryKey[0] });
+      }
+      return profile;
+    },
     retry: false,
     staleTime: 5 * 60 * 1000,
   });
   const logoutMutation = useMutation({
     mutationFn: logout,
-    onSuccess: () => queryClient.setQueryData(meQueryKey, null),
+    onSuccess: () => {
+      queryClient.setQueryData(meQueryKey, null);
+      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== meQueryKey[0] });
+    },
   });
 
   if (meQuery.isPending) {
@@ -80,13 +91,24 @@ function AuthenticatedApp() {
 
   return (
     <AppFrame>
-      <main className="main-content auth-content" id="main-content" tabIndex={-1}>
+      <main className={`main-content ${meQuery.data ? 'app-content' : 'auth-content'}`} id="main-content" tabIndex={-1}>
         {meQuery.data ? (
-          <section className="auth-card profile-card" aria-labelledby="profile-heading">
-            <p className="auth-kicker">{t('signedIn')}</p>
-            <h1 id="profile-heading">{t('welcomeBack')}</h1>
-            <p className="profile-name">{meQuery.data.user.name}</p>
-            <p className="profile-email">{meQuery.data.user.email}</p>
+          <>
+            <header className="app-user-bar">
+              <div>
+                <p className="auth-kicker">{t('signedIn')}</p>
+                <p className="app-user-name">{meQuery.data.user.name}</p>
+                <p className="app-user-email">{meQuery.data.user.email}</p>
+              </div>
+              <Button
+                variant="tonal"
+                type="button"
+                disabled={logoutMutation.isPending}
+                onClick={() => logoutMutation.mutate()}
+              >
+                {t(logoutMutation.isPending ? 'signingOut' : 'signOut')}
+              </Button>
+            </header>
             {logoutMutation.isError && (
               <p className="auth-form-error" role="alert">
                 {logoutMutation.error instanceof ApiError && logoutMutation.error.serverMessage
@@ -94,16 +116,8 @@ function AuthenticatedApp() {
                   : t('requestFailed')}
               </p>
             )}
-            <Button
-              className="auth-submit"
-              variant="tonal"
-              type="button"
-              disabled={logoutMutation.isPending}
-              onClick={() => logoutMutation.mutate()}
-            >
-              {t(logoutMutation.isPending ? 'signingOut' : 'signOut')}
-            </Button>
-          </section>
+            <DecksWorkspace />
+          </>
         ) : (
           <AuthForms mode={window.location.pathname === '/signup' ? 'signup' : 'signin'} />
         )}
