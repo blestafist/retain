@@ -13,6 +13,85 @@ WHERE cards.id = sqlc.arg(id)
   AND decks.deleted_at IS NULL
   AND decks.owner_id = cards.user_id;
 
+-- name: GetStudyAnswerCard :one
+WITH RECURSIVE card_deck_path(depth, id, parent_id, lang_target, lang_native, visited) AS (
+    SELECT 0, deck.id, deck.parent_id, deck.lang_target, deck.lang_native, printf(',%d,', deck.id)
+    FROM cards
+    JOIN notes ON notes.id = cards.note_id
+    JOIN decks AS deck ON deck.id = notes.deck_id
+    WHERE cards.id = sqlc.arg(card_id)
+      AND cards.user_id = sqlc.arg(user_id)
+      AND cards.deleted_at IS NULL
+      AND notes.deleted_at IS NULL
+      AND deck.deleted_at IS NULL
+      AND deck.owner_id = cards.user_id
+    UNION ALL
+    SELECT child.depth + 1, parent.id, parent.parent_id, parent.lang_target, parent.lang_native,
+           child.visited || printf('%d,', parent.id)
+    FROM card_deck_path AS child
+    JOIN decks AS parent ON parent.id = child.parent_id
+    WHERE parent.owner_id = sqlc.arg(user_id)
+      AND parent.deleted_at IS NULL
+      AND instr(child.visited, printf(',%d,', parent.id)) = 0
+)
+SELECT cards.id AS card_id,
+       cards.note_id,
+       notes.deck_id,
+       cards.direction,
+       cards.state,
+       cards.suspended,
+       notes.term,
+       notes.translation,
+       notes.alternatives,
+       notes.fields,
+       CAST(COALESCE((
+           SELECT lang_target FROM card_deck_path
+           WHERE lang_target IS NOT NULL
+           ORDER BY depth LIMIT 1
+       ), '') AS TEXT) AS lang_target,
+       CAST(COALESCE((
+           SELECT lang_native FROM card_deck_path
+           WHERE lang_native IS NOT NULL
+           ORDER BY depth LIMIT 1
+       ), '') AS TEXT) AS lang_native,
+       deck.wrong_article_rating
+FROM cards
+JOIN notes ON notes.id = cards.note_id
+JOIN decks AS deck ON deck.id = notes.deck_id
+WHERE cards.id = sqlc.arg(card_id)
+  AND cards.user_id = sqlc.arg(user_id)
+  AND cards.deleted_at IS NULL
+  AND notes.deleted_at IS NULL
+  AND deck.deleted_at IS NULL
+  AND deck.owner_id = cards.user_id;
+
+-- name: ListStudyChoiceDistractors :many
+SELECT notes.id AS note_id,
+CAST(CASE
+    WHEN cards.direction = 'reverse' THEN notes.term
+    ELSE notes.translation
+END AS TEXT) AS answer,
+notes.alternatives
+FROM cards
+JOIN notes ON notes.id = cards.note_id
+JOIN decks ON decks.id = notes.deck_id
+WHERE cards.user_id = sqlc.arg(user_id)
+  AND cards.direction = sqlc.arg(direction)
+  AND notes.deck_id = sqlc.arg(deck_id)
+  AND cards.note_id != sqlc.arg(note_id)
+  AND notes.id > sqlc.arg(after_note_id)
+  AND cards.suspended = 0
+  AND cards.deleted_at IS NULL
+  AND notes.deleted_at IS NULL
+  AND decks.deleted_at IS NULL
+  AND decks.owner_id = cards.user_id
+  AND trim(CASE
+      WHEN cards.direction = 'reverse' THEN notes.term
+      ELSE notes.translation
+  END) != ''
+ORDER BY notes.id
+LIMIT sqlc.arg(page_size);
+
 -- name: ListStudyCards :many
 WITH RECURSIVE selected_decks(id) AS (
     SELECT id FROM decks

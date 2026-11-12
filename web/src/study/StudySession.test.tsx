@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StudySession } from './StudySession';
@@ -282,5 +282,102 @@ describe('study session', () => {
 
     await screen.findByRole('heading', { name: t('studyComplete') });
     expect(reviewBody).toMatchObject({ card_id: queueCard.id, rating: 1 });
+  });
+
+  it('checks typed answers, exposes the character bar and suggestion, and logs the selected mode', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = String(input);
+      if (url === '/api/v1/study/queue?deck_id=&limit=50') return Promise.resolve(jsonResponse([queueCard]));
+      if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([{ id: 2, name: 'German', lang_target: 'de', lang_native: 'pl' }]));
+      if (url === '/api/v1/study/check-answer') return Promise.resolve(jsonResponse({ match: 'exact', suggested_rating: 3 }));
+      if (url === '/api/v1/study/review') return Promise.resolve(jsonResponse({ ...queueCard, state: 1 }));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSession();
+    await screen.findByRole('heading', { name: 'hello' });
+    await user.click(screen.getByRole('button', { name: t('typingMode') }));
+    const input = screen.getByRole('textbox', { name: t('typeYourAnswer') });
+    await user.type(input, 'cze');
+    await user.click(screen.getByRole('button', { name: t('insertCharacter').replace('{character}', 'ą') }));
+    expect(input).toHaveProperty('value', 'czeą');
+    await user.clear(input);
+    await user.type(input, 'hallo');
+    await user.click(screen.getByRole('button', { name: t('checkAnswer') }));
+
+    expect(await screen.findByText(t('answerExact'))).toBeTruthy();
+    expect(screen.getByText(t('suggestedRating').replace('{rating}', t('good')))).toBeTruthy();
+    const ratingButtons = within(screen.getByRole('group', { name: t('ratingGroup') })).getAllByRole('button');
+    expect(ratingButtons.every((button) => !button.hasAttribute('aria-pressed'))).toBe(true);
+    const checkRequest = fetchMock.mock.calls.find(([url]) => url === '/api/v1/study/check-answer');
+    expect(JSON.parse(String(checkRequest?.[1]?.body))).toEqual({ card_id: 5, answer: 'hallo' });
+
+    await user.click(screen.getByRole('button', { name: /Hard/ }));
+    await screen.findByRole('heading', { name: t('studyComplete') });
+    const reviewRequest = fetchMock.mock.calls.find(([url]) => url === '/api/v1/study/review');
+    expect(JSON.parse(String(reviewRequest?.[1]?.body))).toMatchObject({ card_id: 5, rating: 2, mode: 'typing' });
+  });
+
+  it('loads server choices, checks the selection, and records choice mode', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = String(input);
+      if (url === '/api/v1/study/queue?deck_id=&limit=50') return Promise.resolve(jsonResponse([queueCard]));
+      if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([]));
+      if (url === '/api/v1/study/choice-options') return Promise.resolve(jsonResponse({ choices: ['hallo', 'ciao', 'bonjour', 'adios'] }));
+      if (url === '/api/v1/study/check-answer') return Promise.resolve(jsonResponse({ match: 'exact', suggested_rating: 3 }));
+      if (url === '/api/v1/study/review') return Promise.resolve(jsonResponse({ ...queueCard, state: 1 }));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSession();
+    await screen.findByRole('heading', { name: 'hello' });
+    await user.click(screen.getByRole('button', { name: t('choiceMode') }));
+    await user.click(await screen.findByRole('button', { name: 'hallo' }));
+
+    expect(await screen.findByText(t('answerExact'))).toBeTruthy();
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/v1/study/choice-options')?.[1]?.body)))
+      .toEqual({ card_id: 5 });
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/v1/study/check-answer')?.[1]?.body)))
+      .toEqual({ card_id: 5, answer: 'hallo', mode: 'choice' });
+    await user.click(screen.getByRole('button', { name: /Hard/ }));
+    await screen.findByRole('heading', { name: t('studyComplete') });
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/v1/study/review')?.[1]?.body)))
+      .toMatchObject({ card_id: 5, rating: 2, mode: 'choice' });
+  });
+
+  it('ignores a pending typed-answer result after undo changes the current card', async () => {
+    const user = userEvent.setup();
+    let resolveCheck!: (value: Response) => void;
+    const nextCard = { ...queueCard, id: 6, note_id: 9, front: 'world', back: 'Welt' };
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = String(input);
+      if (url === '/api/v1/study/queue?deck_id=&limit=50') return Promise.resolve(jsonResponse([queueCard, nextCard]));
+      if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([]));
+      if (url === '/api/v1/study/check-answer') return new Promise((resolve) => { resolveCheck = resolve; });
+      if (url === '/api/v1/study/review' || url === '/api/v1/study/undo') return Promise.resolve(jsonResponse({ ...queueCard, state: 1 }));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSession();
+    await screen.findByRole('heading', { name: 'hello' });
+    await user.click(screen.getByRole('button', { name: t('showAnswer') }));
+    await user.click(screen.getByRole('button', { name: /Good/ }));
+    await screen.findByRole('heading', { name: 'world' });
+    await user.click(screen.getByRole('button', { name: t('typingMode') }));
+    await user.type(screen.getByRole('textbox', { name: t('typeYourAnswer') }), 'Welt');
+    await user.click(screen.getByRole('button', { name: t('checkAnswer') }));
+    await waitFor(() => expect(resolveCheck).toBeTypeOf('function'));
+    await user.click(screen.getByRole('button', { name: t('undo') }));
+    await screen.findByRole('heading', { name: 'hello' });
+
+    await act(async () => resolveCheck(jsonResponse({ match: 'exact', suggested_rating: 3 })));
+    expect(screen.queryByText(t('answerExact'))).toBeNull();
+    expect(screen.queryByText('hallo')).toBeNull();
+    expect(screen.getByRole('textbox', { name: t('typeYourAnswer') })).toBeTruthy();
   });
 });

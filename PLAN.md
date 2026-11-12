@@ -98,15 +98,17 @@ The frontend is built into `web/dist` and embedded into the Go binary via `embed
 
 Card: front — term in the target language (`de`, `en`), back — translation in the native language (`pl`, `ru`). Reverse cards are enabled in deck settings.
 
-**Answer normalization in typing mode** (package `internal/lang`, one `Normalizer` per language):
+**Answer normalization and rating suggestion in typing mode** (package `internal/lang`, one matcher per language):
 
 | Language | Rules |
 |---|---|
 | Common | Unicode NFC, trim, lowercase, collapse whitespace, strip punctuation. A translation may contain several variants separated by `;` — any of them is accepted. Plus an `alternatives` list (accepted synonyms). |
-| `de` | The `der/die/das` article of nouns is checked separately: wrong article → Hard (deck setting: Hard or Again). `ß` = `ss`, `ä/ö/ü` = `ae/oe/ue` (for users without a German layout). Noun capitalization is ignored. |
+| `de` | The `der/die/das` article of nouns is checked separately: a correct noun without an article or with a wrong article gets the deck's `wrong_article_rating` (default: Hard; configurable to Again). `ß` = `ss`, `ä/ö/ü` = `ae/oe/ue` (for users without a German layout). Noun capitalization is ignored. |
 | `en` | `to` before verbs and articles `a/an/the` are ignored. British and American spellings are handled via `alternatives` (filled in by the LLM). |
 | `pl` | An answer without diacritics (`ą ć ę ł ń ó ś ź ż`) → Hard (almost right), not Again. |
 | `ru` | `ё` = `е`, stress marks (U+0301) are removed. |
+
+The matcher returns a suggestion, not a submitted review: an exact accepted answer suggests **Good**, one Levenshtein edit suggests **Hard**, and other mismatches suggest **Again**. The learner may choose any rating. A German article-only mistake uses the deck setting when the noun stem matches exactly; a stem typo uses the normal **Hard** suggestion. Language, direction, expected answer, alternatives, and article policy come from the authenticated user's server-side card, deck, and note.
 
 - **On-screen character bar** in typing mode: `ä ö ü ß` for German, `ą ć ę ł ń ó ś ź ż` for Polish.
 - **TTS voices**: `de-DE`, `en-GB`/`en-US`, `pl-PL`, `ru-RU`. Voice availability is checked via `speechSynthesis.getVoices()`; if there is no voice, the button is hidden.
@@ -499,6 +501,8 @@ GET    /jobs/{id}                background job status and progress
 
 GET    /study/queue?deck_id=&limit=50   cards + interval previews
 POST   /study/queue/next               {deck_id, limit, exclude_card_ids} next batch, excluding cards already in this session
+POST   /study/choice-options      {card_id} → {choices: [4 strings]} (owned active New card only; one correct answer plus three distinct distractors from the same actual deck and direction, excluding accepted answers; 409 if unavailable)
+POST   /study/check-answer        {card_id, answer, mode?: typing|choice} → {match: exact|typo|article|wrong, suggested_rating} (default mode: typing; choice is exact=Good, otherwise Again)
 POST   /study/review             {id(uuid), card_id, rating, mode, reviewed_at, duration_ms}
 POST   /study/undo               {review_id}
 POST   /cards/{id}/suspend | /unsuspend | /reset

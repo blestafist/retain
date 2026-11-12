@@ -2,7 +2,18 @@ import { ApiError } from './client';
 import type { DeckId } from './content';
 
 export type StudyRating = 1 | 2 | 3 | 4;
-export type StudyMode = 'flip';
+export type StudyMode = 'flip' | 'typing' | 'choice';
+export type AnswerCheckMode = 'typing' | 'choice';
+export type AnswerMatchKind = 'exact' | 'typo' | 'article' | 'wrong';
+
+export interface AnswerMatch {
+  match: AnswerMatchKind;
+  suggested_rating: 1 | 2 | 3;
+}
+
+export interface ChoiceOptions {
+  choices: string[];
+}
 
 export interface StudyCard {
   id: number;
@@ -136,6 +147,29 @@ export function decodeStudyCard(value: unknown, status = 200): StudyCard {
   return decodeCard(value, status);
 }
 
+function decodeAnswerMatch(value: unknown, status = 200): AnswerMatch {
+  if (!isRecord(value)
+    || typeof value.match !== 'string'
+    || !['exact', 'typo', 'article', 'wrong'].includes(value.match)
+    || typeof value.suggested_rating !== 'number'
+    || ![1, 2, 3].includes(value.suggested_rating)) {
+    throw invalidResponseError(status);
+  }
+  return {
+    match: value.match as AnswerMatchKind,
+    suggested_rating: value.suggested_rating as 1 | 2 | 3,
+  };
+}
+
+export function decodeChoiceOptions(value: unknown, status = 200): ChoiceOptions {
+  if (!isRecord(value) || !Array.isArray(value.choices) || value.choices.length !== 4
+    || value.choices.some((choice) => typeof choice !== 'string' || choice.trim() === '')
+    || new Set(value.choices).size !== 4) {
+    throw invalidResponseError(status);
+  }
+  return { choices: value.choices as string[] };
+}
+
 export function createUUIDv7(
   now = Date.now(),
   cryptoSource: Pick<Crypto, 'getRandomValues'> = globalThis.crypto,
@@ -217,6 +251,24 @@ export async function getNextStudyQueue({ deckId = null, limit = 50, excludeCard
       limit,
       exclude_card_ids: excludeCardIds,
     },
+  }));
+}
+
+export async function getStudyChoiceOptions(cardId: number): Promise<ChoiceOptions> {
+  return decodeChoiceOptions(await request('/study/choice-options', {
+    method: 'POST',
+    body: { card_id: cardId },
+  }));
+}
+
+export async function checkStudyAnswer(
+  cardId: number,
+  answer: string,
+  mode: AnswerCheckMode = 'typing',
+): Promise<AnswerMatch> {
+  return decodeAnswerMatch(await request('/study/check-answer', {
+    method: 'POST',
+    body: { card_id: cardId, answer, ...(mode === 'choice' ? { mode } : {}) },
   }));
 }
 
