@@ -168,6 +168,60 @@ func updateNoteHandler(authentication *auth.Service, service *notes.Service) htt
 	}
 }
 
+func addNoteAlternativeHandler(authentication *auth.Service, service *notes.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := authenticatedUser(w, r, authentication)
+		if !ok {
+			return
+		}
+		id, ok := contentID(w, r)
+		if !ok {
+			return
+		}
+		var input struct {
+			Alternative string `json:"alternative"`
+		}
+		if err := DecodeJSON(r, &input); err != nil {
+			writeJSONDecodeError(w, err)
+			return
+		}
+		result, err := service.AddAlternative(r.Context(), user.ID, id, input.Alternative)
+		if err != nil {
+			writeContentError(w, err)
+			return
+		}
+		if err := WriteJSON(w, http.StatusOK, result); err != nil {
+			writeInternalError(w)
+		}
+	}
+}
+
+func applyNoteEnrichmentHandler(authentication *auth.Service, service *notes.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := authenticatedUser(w, r, authentication)
+		if !ok {
+			return
+		}
+		id, ok := contentID(w, r)
+		if !ok {
+			return
+		}
+		input, err := decodeEnrichmentInput(r)
+		if err != nil {
+			writeJSONDecodeError(w, err)
+			return
+		}
+		result, err := service.ApplyEnrichment(r.Context(), user.ID, id, input)
+		if err != nil {
+			writeContentError(w, err)
+			return
+		}
+		if err := WriteJSON(w, http.StatusOK, result); err != nil {
+			writeInternalError(w)
+		}
+	}
+}
+
 func deleteNoteHandler(authentication *auth.Service, service *notes.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := authenticatedUser(w, r, authentication)
@@ -257,6 +311,30 @@ func decodeNotePatch(r *http.Request) (notes.PatchInput, error) {
 	}
 	if result.Fields, err = patchValue[map[string]any](patch, "fields"); err != nil {
 		return notes.PatchInput{}, err
+	}
+	return result, nil
+}
+
+func decodeEnrichmentInput(r *http.Request) (notes.EnrichmentInput, error) {
+	patch, err := decodePatchObject(r, "transcription", "example", "example_translation", "alternatives", "fields")
+	if err != nil {
+		return notes.EnrichmentInput{}, err
+	}
+	var result notes.EnrichmentInput
+	if result.Transcription, err = patchValue[string](patch, "transcription"); err != nil {
+		return notes.EnrichmentInput{}, err
+	}
+	if result.Example, err = patchValue[string](patch, "example"); err != nil {
+		return notes.EnrichmentInput{}, err
+	}
+	if result.ExampleTranslation, err = patchValue[string](patch, "example_translation"); err != nil {
+		return notes.EnrichmentInput{}, err
+	}
+	if result.Alternatives, err = patchValue[[]string](patch, "alternatives"); err != nil {
+		return notes.EnrichmentInput{}, err
+	}
+	if result.Fields, err = patchValue[map[string]any](patch, "fields"); err != nil {
+		return notes.EnrichmentInput{}, err
 	}
 	return result, nil
 }

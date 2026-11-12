@@ -5,6 +5,8 @@ import { getDecks, type DeckId, type DeckNode, type NativeLanguage, type TargetL
 import { checkStudyAnswer, createUUIDv7, getNextStudyQueue, getStudyChoiceOptions, getStudyQueue, submitStudyReview, undoStudyReview, type AnswerMatch, type QueueCard, type ReviewInput, type StudyMode, type StudyRating } from '../api/study';
 import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
+import { useLlmStatus } from '../content/hooks';
+import { StudyLlmTools } from './StudyLlmTools';
 
 const ratingLabels: Record<StudyRating, 'again' | 'hard' | 'good' | 'easy'> = {
   1: 'again',
@@ -92,6 +94,7 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
     retry: false,
   });
   const decksQuery = useQuery({ queryKey: ['decks'], queryFn: getDecks, retry: false });
+  const llmStatusQuery = useLlmStatus();
   const [sessionQueue, setSessionQueue] = useState<{ deckKey: string; cards: QueueCard[]; hasMore: boolean } | null>(null);
   const [reviewed, setReviewed] = useState<ReviewedCard[]>([]);
   const [answerShown, setAnswerShown] = useState(false);
@@ -543,6 +546,15 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
               </div>
             )}
           </article>
+          {llmStatusQuery.data?.enabled === true && (
+            <StudyLlmTools
+              key={currentCard.id}
+              card={currentCard}
+              enabled
+              answer={effectiveMode === 'typing' && answerMatch?.match === 'wrong' ? typedAnswer : undefined}
+              onSynonymAccepted={() => setAnswerMatch({ match: 'exact', suggested_rating: 3 })}
+            />
+          )}
         </>
       )}
 

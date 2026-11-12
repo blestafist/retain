@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -17,7 +18,14 @@ import (
 	"github.com/pestit/retain/internal/clock"
 	"github.com/pestit/retain/internal/config"
 	"github.com/pestit/retain/internal/db"
+	"github.com/pestit/retain/internal/decks"
 	"github.com/pestit/retain/internal/httpapi"
+	"github.com/pestit/retain/internal/jobs"
+	"github.com/pestit/retain/internal/llm"
+	"github.com/pestit/retain/internal/llmservice"
+	"github.com/pestit/retain/internal/llmstore"
+	"github.com/pestit/retain/internal/notes"
+	"github.com/pestit/retain/internal/study"
 	"github.com/pestit/retain/web"
 )
 
@@ -95,13 +103,82 @@ func run(logger *slog.Logger) error {
 	}()
 
 	authService := auth.NewService(database, clock.Real{})
+	appClock := clock.Real{}
+	deckService := decks.NewService(database, appClock)
+	noteService := notes.NewService(database, appClock)
+	studyService := study.NewService(database, appClock)
+	llmStore := llmstore.New(database.Queries())
 
+	var generator interface {
+		GenerateJSON(context.Context, llm.GenerateJSONRequest) (llm.GenerateJSONResult, error)
+	}
+	var streamer interface {
+		StreamText(context.Context, llm.StreamRequest, func(context.Context, string) error) (llm.Usage, error)
+	}
+	var modelProvider llmservice.ModelProvider
+	if cfg.LLMEnabled {
+		client, err := llm.NewClient(llm.Config{
+			BaseURL: cfg.LLMBaseURL,
+			APIKey:  cfg.LLMAPIKey,
+			Model:   cfg.LLMModel,
+			Timeout: cfg.LLMTimeout,
+		})
+		if err != nil {
+			return fmt.Errorf("initialize LLM client: %w", err)
+		}
+		generator, streamer, modelProvider = client, client, client
+	}
+	adminService := llmservice.NewAdminService(llmStore, modelProvider, cfg.LLMModel, appClock)
+	if err := adminService.Initialize(ctx); err != nil {
+		// Serving without model selection persistence is safer than blocking startup.
+		logger.Warn("LLM model selection initialization unavailable", "component", "llm_admin")
+	}
+	if cfg.LLMEnabled {
+		go func() {
+			modelCtx, cancelModels := context.WithTimeout(ctx, cfg.LLMTimeout)
+			defer cancelModels()
+			status, err := adminService.Models(modelCtx)
+			if ctx.Err() == nil && (err != nil || !status.Available || status.Warning != "") {
+				logger.Warn("LLM model discovery or configured model validation is unavailable", "component", "llm_admin")
+			}
+		}()
+	}
+	llmConfig := llmservice.Config{
+		Model: cfg.LLMModel, DailyLimit: int64(cfg.LLMDailyLimitPerUser),
+		ModelResolver: adminService.ResolveModel,
+	}
+	llmService := llmservice.NewService(authService, deckService, generator, llmStore, appClock, llmConfig)
+	askService := llmservice.NewAskService(authService, deckService, noteService, streamer, llmStore, appClock, llmConfig)
+	mnemonicService := llmservice.NewMnemonicService(authService, deckService, noteService, generator, llmStore, appClock, llmConfig)
+	synonymService := llmservice.NewSynonymService(authService, deckService, studyService, noteService, generator, llmStore, appClock, llmConfig)
+	deckEnrichService := llmservice.NewDeckEnrichService(deckService, noteService, llmStore, llmService, appClock, llmservice.DeckEnrichConfig{
+		FastModel: cfg.LLMModelFast,
+	})
+	var worker *jobs.Worker
+	var workerAvailable atomic.Bool
+	if cfg.LLMEnabled {
+		worker, err = jobs.New(llmStore, appClock, map[string]jobs.Handler{
+			llmservice.DeckEnrichJobKind: deckEnrichService.Handler(),
+		}, jobs.Config{Workers: 1})
+		if err != nil {
+			return fmt.Errorf("initialize jobs worker: %w", err)
+		}
+	}
+
+	handlerOptions := httpapi.HandlerOptions{
+		LLMStore: llmStore, LLMService: llmService, AskService: askService,
+		MnemonicService: mnemonicService, SynonymService: synonymService,
+		DeckEnrichService: deckEnrichService, AdminService: adminService,
+	}
+	if worker != nil {
+		handlerOptions.JobWorkerAvailable = workerAvailable.Load
+	}
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewHandlerWithContent(cfg.PublicOrigin, database.SQL, authService, database, web.Files()),
+		Handler:           httpapi.NewHandlerWithOptions(cfg.PublicOrigin, database.SQL, authService, database, web.Files(), handlerOptions),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      writeTimeoutForLLM(cfg.LLMTimeout),
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
@@ -111,13 +188,58 @@ func run(logger *slog.Logger) error {
 		logger.Info("HTTP server listening", "address", cfg.HTTPAddr)
 		serverErrors <- server.ListenAndServe()
 	}()
+	var workerErrors chan error
+	if worker != nil {
+		workerErrors = make(chan error, 1)
+		go func() {
+			workerErrors <- superviseWorker(ctx, worker.Run, sleepWorkerBackoff, workerAvailable.Store, logger, time.Now)
+		}()
+	}
 
 	select {
 	case err := <-serverErrors:
+		stop()
+		if workerErrors != nil {
+			waitCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			workerErr := waitForWorkerResult(waitCtx, workerErrors)
+			cancel()
+			if workerErr != nil {
+				logger.Error("background jobs supervisor did not shut down cleanly", "component", "jobs")
+			}
+		}
 		if !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("serve HTTP: %w", err)
 		}
 		return nil
+	case workerErr := <-workerErrors:
+		if workerErr == nil && ctx.Err() != nil {
+			logger.Info("shutting down HTTP server")
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			defer cancel()
+			if err := server.Shutdown(shutdownCtx); err != nil {
+				_ = server.Close()
+				return fmt.Errorf("shut down HTTP server: %w", err)
+			}
+			if err := <-serverErrors; !errors.Is(err, http.ErrServerClosed) {
+				return fmt.Errorf("serve HTTP: %w", err)
+			}
+			return nil
+		}
+		if workerErr == nil {
+			workerErr = ErrWorkerSupervisor
+		}
+		stop()
+		logger.Error("background jobs supervisor stopped; shutting down HTTP", "component", "jobs")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			_ = server.Close()
+			return fmt.Errorf("shut down HTTP server after worker failure: %w", err)
+		}
+		if err := <-serverErrors; !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("serve HTTP after worker failure: %w", err)
+		}
+		return fmt.Errorf("supervise background jobs: %w", workerErr)
 	case <-ctx.Done():
 		logger.Info("shutting down HTTP server")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
@@ -129,6 +251,18 @@ func run(logger *slog.Logger) error {
 		if err := <-serverErrors; !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("serve HTTP: %w", err)
 		}
+		if workerErrors != nil {
+			if err := waitForWorkerResult(shutdownCtx, workerErrors); err != nil {
+				return fmt.Errorf("run background jobs: %w", err)
+			}
+		}
 		return nil
 	}
+}
+
+func writeTimeoutForLLM(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	return 2*timeout + 15*time.Second
 }

@@ -139,6 +139,7 @@ describe('account screens', () => {
           ? response({ error: { code: 'invalid_credentials', message: 'Email or password is incorrect.' } }, 401)
           : response(undefined, 204);
       }
+      if (url === '/api/v1/llm/status') return response({ enabled: false });
       if (url === '/api/v1/decks') return response([deck]);
       if (url === '/api/v1/decks/42/notes') return response([]);
       if (url === '/api/v1/import/batches') return response([]);
@@ -154,7 +155,7 @@ describe('account screens', () => {
     await user.click(screen.getByRole('button', { name: t('signIn') }));
 
     expect(await screen.findByRole('heading', { name: t('decksWorkspace') })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'German course' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'German course' })).toBeTruthy();
     expect(screen.getByText('Morgan')).toBeTruthy();
     expect(meCalls).toBe(2);
   });
@@ -163,6 +164,7 @@ describe('account screens', () => {
     const user = userEvent.setup();
     setFetchHandler(async (url) => {
       if (url === '/api/v1/me') return response(signedInResponse);
+      if (url === '/api/v1/llm/status') return response({ enabled: false });
       if (url === '/api/v1/decks') return response([]);
       if (url === '/api/v1/auth/logout') return response(undefined, 204);
       throw new Error(`Unexpected request: ${url}`);
@@ -176,7 +178,8 @@ describe('account screens', () => {
     await user.click(screen.getByRole('button', { name: t('signOut') }));
     await screen.findByRole('heading', { name: t('signInHeading') });
 
-    expect(calls.map(({ url }) => url)).toEqual(['/api/v1/me', '/api/v1/decks', '/api/v1/auth/logout']);
+    expect(calls.map(({ url }) => url)).toContain('/api/v1/llm/status');
+    expect(calls.map(({ url }) => url)).toContain('/api/v1/auth/logout');
     await waitFor(() => expect(screen.queryByText('Morgan')).toBeNull());
     expect(queryClient.getQueryData(['decks'])).toBeUndefined();
     expect(queryClient.getQueryData(['deck-notes', '42'])).toBeUndefined();
@@ -191,6 +194,7 @@ describe('account screens', () => {
           ? response(signedInResponse)
           : response({ ...signedInResponse, user: { ...signedInResponse.user, id: 2, name: 'Alex' } });
       }
+      if (url === '/api/v1/llm/status') return response({ enabled: false });
       if (url === '/api/v1/decks') return response(meCalls === 1 ? [deck] : []);
       if (url === '/api/v1/decks/42/notes') return response([]);
       if (url === '/api/v1/import/batches') return response([]);
@@ -207,5 +211,23 @@ describe('account screens', () => {
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'German course' })).toBeNull());
     expect(queryClient.getQueryData(['deck-notes', '42'])).toBeUndefined();
     expect(queryClient.getQueryData(['private-test-query'])).toBeUndefined();
+  });
+
+  it('routes administrators to LLM settings', async () => {
+    setFetchHandler(async (url) => {
+      if (url === '/api/v1/me') return response({
+        ...signedInResponse,
+        user: { ...signedInResponse.user, is_admin: true },
+      });
+      if (url === '/api/v1/llm/status') return response({ enabled: false });
+      if (url === '/api/v1/admin/llm-usage') return response({ users: [] });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    window.history.replaceState(null, '', '/admin');
+    renderApp();
+
+    expect(await screen.findByRole('heading', { name: t('adminLlmHeading') })).toBeTruthy();
+    expect(screen.getByRole('link', { name: t('admin') }).getAttribute('href')).toBe('/admin');
+    expect(screen.queryByRole('heading', { name: t('decksWorkspace') })).toBeNull();
   });
 });

@@ -169,7 +169,8 @@ func TestContentRoutesOwnerScopedCRUDTreeCountsAndCards(t *testing.T) {
 	if err := json.Unmarshal(patchNote.Body.Bytes(), &updatedNote); err != nil {
 		t.Fatalf("decode updated note: %v", err)
 	}
-	if updatedNote.Term != note.Term || updatedNote.Example == nil || *updatedNote.Example != "Ich trinke Kaffee." || updatedNote.Fields["kind"] != "phrase" {
+	if updatedNote.Term != note.Term || updatedNote.Example == nil || *updatedNote.Example != "Ich trinke Kaffee." ||
+		updatedNote.Fields["kind"] != "phrase" || len(updatedNote.Alternatives) != 1 || updatedNote.Alternatives[0] != "kaffe" {
 		t.Errorf("PATCH note did not preserve omitted fields: %+v", updatedNote)
 	}
 	listNotes := contentRouteRequest(handler, http.MethodGet, "/api/v1/decks/"+jsonInt(child.ID)+"/notes", "", cookie)

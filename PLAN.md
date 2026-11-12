@@ -288,10 +288,10 @@ All metrics are computed from `review_logs` and `cards` with SQL; heavy aggregat
 | **Deck enrichment** | After import or on demand | Background job: empty fields are filled in batches of 20 words, progress shown in the UI |
 | **Ask about a word** | Button on a card / word page | Streaming chat answer (SSE): synonym differences, usage, grammar |
 | **Mnemonic** | For leeches | 2–3 association ideas in the user's native language |
-| **Synonym check** | In typing mode when the answer didn't match — a "Is my answer also correct?" button | Verdict + explanation; on "yes" the answer is added to `alternatives` and the rating can be corrected |
+| **Synonym check** | In typing mode when the answer didn't match on a forward card — a "Is my answer also correct?" button | Verdict + explanation; only after explicit confirmation is the answer added to `alternatives`. The learner chooses the rating separately. |
 
 ### 6.3 Rules
-- **The LLM never changes anything without confirmation**: results are shown as a suggestion that the user accepts in full or per field.
+- **The LLM never changes anything without confirmation**: results are shown as a suggestion that the user accepts in full or per field. Synonym checks are read-only; accepting a positive verdict is a separate action that adds the answer to `alternatives`.
 - **Structured output**: `response_format: json_schema`. If the provider doesn't support it — fall back to `json_object`, validate in Go, and retry once on invalid JSON.
 - **Prompts** live in `internal/llm/prompts/*.tmpl` (embedded) and account for the language pair; words with multiple meanings return a list.
 - **Cache**: auto-fill responses are cached in `llm_cache` keyed by `sha256(model + prompt_version + lang_pair + word)` — the same word from different friends isn't paid for twice.
@@ -490,6 +490,7 @@ POST   /decks/{id}/enrich        → {job_id}  fill empty fields via LLM
 GET    /decks/{id}/notes?q=&tag=&state=&cursor=
 POST   /decks/{id}/notes         creates a note + cards
 PATCH  /notes/{id}
+POST   /notes/{id}/alternatives {alternative}  adds one accepted answer idempotently
 DELETE /notes/{id}
 
 POST   /llm/enrich               {deck_id, word}         → field suggestions

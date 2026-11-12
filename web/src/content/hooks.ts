@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { applyImport, exportDeck, getImportHistory, previewImport, type ApplyImportInput } from '../api/import';
+import { getLlmStatus } from '../api/llm';
+import { getJobStatus } from '../api/jobs';
 import {
+  applyNoteEnrichment,
   createDeck,
   createDeckNote,
   deleteDeck,
@@ -9,6 +12,8 @@ import {
   getDecks,
   patchDeck,
   patchNote,
+  startDeckEnrichment,
+  type ApplyEnrichmentRequest,
   type CreateDeckRequest,
   type CreateNoteRequest,
   type DeckId,
@@ -19,6 +24,31 @@ import {
 export const decksQueryKey = ['decks'] as const;
 export const deckNotesQueryKey = ['deck-notes'] as const;
 export const importHistoryQueryKey = ['import-history'] as const;
+export const llmStatusQueryKey = ['llm-status'] as const;
+
+export function jobStatusQueryKey(ownerId: number, jobId: string | null) {
+  return ['job-status', ownerId, jobId] as const;
+}
+
+export function useLlmStatus() {
+  return useQuery({ queryKey: llmStatusQueryKey, queryFn: getLlmStatus });
+}
+
+export function useJobStatus(ownerId: number, jobId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: jobStatusQueryKey(ownerId, jobId),
+    queryFn: () => {
+      if (jobId === null) throw new Error('A job must be selected to load its status.');
+      return getJobStatus(jobId);
+    },
+    enabled: enabled && jobId !== null,
+    retry: false,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'queued' || status === 'running' ? 1000 : false;
+    },
+  });
+}
 
 export function useDecks() {
   return useQuery({ queryKey: decksQueryKey, queryFn: getDecks });
@@ -100,6 +130,20 @@ export function useDeleteNote() {
         queryClient.invalidateQueries({ queryKey: decksQueryKey }),
       ]);
     },
+  });
+}
+
+export function useStartDeckEnrichment() {
+  return useMutation({ mutationFn: (deckId: DeckId) => startDeckEnrichment(deckId) });
+}
+
+export function useApplyNoteEnrichment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { deckId: DeckId; id: DeckId; input: ApplyEnrichmentRequest }) => applyNoteEnrichment(id, input),
+    onSuccess: async (_data, variables) => queryClient.invalidateQueries({
+      queryKey: [...deckNotesQueryKey, String(variables.deckId)],
+    }),
   });
 }
 

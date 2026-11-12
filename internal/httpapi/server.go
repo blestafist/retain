@@ -13,6 +13,8 @@ import (
 	"github.com/pestit/retain/internal/contentimport"
 	"github.com/pestit/retain/internal/db"
 	"github.com/pestit/retain/internal/decks"
+	"github.com/pestit/retain/internal/llmservice"
+	"github.com/pestit/retain/internal/llmstore"
 	"github.com/pestit/retain/internal/notes"
 	"github.com/pestit/retain/internal/study"
 )
@@ -21,6 +23,18 @@ const healthCheckTimeout = 2 * time.Second
 
 type databasePinger interface {
 	PingContext(context.Context) error
+}
+
+// HandlerOptions contains the Stage 6 LLM services registered by the server.
+type HandlerOptions struct {
+	LLMStore           *llmstore.Store
+	LLMService         *llmservice.Service
+	AskService         *llmservice.AskService
+	MnemonicService    *llmservice.MnemonicService
+	SynonymService     *llmservice.SynonymService
+	DeckEnrichService  *llmservice.DeckEnrichService
+	AdminService       *llmservice.AdminService
+	JobWorkerAvailable func() bool
 }
 
 // NewHandler wires the health and account endpoints and the embedded frontend
@@ -35,15 +49,41 @@ func NewHandlerWithContent(publicOrigin string, database databasePinger, authSer
 	return newHandler(publicOrigin, database, authService, contentDB, frontend)
 }
 
-func newHandler(publicOrigin string, database databasePinger, authService *auth.Service, contentDB *db.DB, frontend fs.FS) http.Handler {
+// NewHandlerWithOptions wires the Stage 6 LLM routes alongside the existing
+// account, content, and frontend handlers.
+func NewHandlerWithOptions(publicOrigin string, database databasePinger, authService *auth.Service, contentDB *db.DB, frontend fs.FS, options HandlerOptions) http.Handler {
+	return newHandler(publicOrigin, database, authService, contentDB, frontend, options)
+}
+
+func newHandler(publicOrigin string, database databasePinger, authService *auth.Service, contentDB *db.DB, frontend fs.FS, suppliedOptions ...HandlerOptions) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler(database))
 	RegisterAccountRoutes(mux, authService)
+	var options HandlerOptions
+	registerLLMRoutes := len(suppliedOptions) > 0
+	if registerLLMRoutes {
+		options = suppliedOptions[0]
+	}
 	if contentDB != nil {
 		appClock := clock.Real{}
-		RegisterContentRoutes(mux, authService, decks.NewService(contentDB, appClock), notes.NewService(contentDB, appClock))
+		deckService := decks.NewService(contentDB, appClock)
+		noteService := notes.NewService(contentDB, appClock)
+		RegisterContentRoutes(mux, authService, deckService, noteService)
 		RegisterImportRoutes(mux, authService, contentimport.NewService(contentDB, appClock))
 		RegisterStudyRoutes(mux, authService, study.NewService(contentDB, appClock))
+		if registerLLMRoutes {
+			llmStore := options.LLMStore
+			if llmStore == nil {
+				llmStore = llmstore.New(contentDB.Queries())
+			}
+			RegisterJobRoutes(mux, authService, llmStore)
+			RegisterLLMRoutes(mux, authService, options.LLMService)
+			RegisterLLMAskRoutes(mux, authService, options.AskService)
+			RegisterLLMMnemonicRoutes(mux, authService, options.MnemonicService)
+			RegisterLLMSynonymRoutes(mux, authService, options.SynonymService)
+			RegisterDeckEnrichRoutes(mux, authService, options.DeckEnrichService, options.JobWorkerAvailable)
+			RegisterLLMAdminRoutes(mux, authService, options.AdminService)
+		}
 	}
 	mux.HandleFunc("GET /schema/retain-v1.json", retainV1SchemaHandler)
 	mux.Handle("GET /", frontendHandler(frontend))
@@ -77,7 +117,7 @@ func frontendHandler(frontend fs.FS) http.Handler {
 	files := http.FileServer(http.FS(generated))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/")
-		if r.URL.Path == "/" || r.URL.Path == "/signup" || r.URL.Path == "/study" || r.URL.Path == "/settings" {
+		if r.URL.Path == "/" || r.URL.Path == "/signup" || r.URL.Path == "/study" || r.URL.Path == "/settings" || r.URL.Path == "/admin" {
 			name = "index.html"
 		}
 		if name == ".gitkeep" || !fs.ValidPath(name) {

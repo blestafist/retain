@@ -67,7 +67,7 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 			t.Errorf("close migrated database: %v", err)
 		}
 	})
-	assertMigrationVersion(t, ctx, database.SQL, 5)
+	assertMigrationVersion(t, ctx, database.SQL, 8)
 	assertOriginalContentRowsEqual(t, ctx, database.SQL, wantRows)
 	assertMigrationDeletionBatch(t, ctx, database.SQL, "decks", ids.archivedDeck,
 		fmt.Sprintf("migration-00004-deck-%d", ids.archivedDeck))
@@ -604,8 +604,8 @@ func assertLatestMigrationSchema(t *testing.T, ctx context.Context, database *sq
 func assertStudyMigrationSchema(t *testing.T, ctx context.Context, database *sql.DB) {
 	t.Helper()
 	objects := readMigrationSchemaObjects(t, ctx, database)
-	if len(objects) != 26 {
-		t.Errorf("version-5 schema has %d explicit indexes/triggers, want 26: %#v", len(objects), objects)
+	if len(objects) != 30 {
+		t.Errorf("stage-6 schema has %d explicit indexes/triggers, want 30: %#v", len(objects), objects)
 	}
 	for _, name := range []string{
 		"index.cards_id_user_id_idx",
@@ -616,6 +616,10 @@ func assertStudyMigrationSchema(t *testing.T, ctx context.Context, database *sql
 		"trigger.review_log_projection_undo",
 		"trigger.review_logs_append_only_update",
 		"trigger.review_logs_append_only_delete",
+		"index.llm_usage_user_created_idx",
+		"index.jobs_user_updated_idx",
+		"index.jobs_active_queue_idx",
+		"trigger.jobs_active_queue_capacity",
 	} {
 		if _, ok := objects[name]; !ok {
 			t.Errorf("study migration schema is missing %s", name)
