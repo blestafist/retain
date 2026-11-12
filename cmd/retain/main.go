@@ -25,6 +25,7 @@ import (
 	"github.com/pestit/retain/internal/llmservice"
 	"github.com/pestit/retain/internal/llmstore"
 	"github.com/pestit/retain/internal/notes"
+	"github.com/pestit/retain/internal/stats"
 	"github.com/pestit/retain/internal/study"
 	"github.com/pestit/retain/web"
 )
@@ -107,6 +108,7 @@ func run(logger *slog.Logger) error {
 	deckService := decks.NewService(database, appClock)
 	noteService := notes.NewService(database, appClock)
 	studyService := study.NewService(database, appClock)
+	statsService := stats.NewService(database, appClock)
 	llmStore := llmstore.New(database.Queries())
 
 	var generator interface {
@@ -166,7 +168,8 @@ func run(logger *slog.Logger) error {
 	}
 
 	handlerOptions := httpapi.HandlerOptions{
-		LLMStore: llmStore, LLMService: llmService, AskService: askService,
+		StatsService: statsService,
+		LLMStore:     llmStore, LLMService: llmService, AskService: askService,
 		MnemonicService: mnemonicService, SynonymService: synonymService,
 		DeckEnrichService: deckEnrichService, AdminService: adminService,
 	}

@@ -22,6 +22,7 @@ import (
 	"github.com/pestit/retain/internal/db/gen"
 	"github.com/pestit/retain/internal/lang"
 	"github.com/pestit/retain/internal/srs"
+	"github.com/pestit/retain/internal/studyday"
 )
 
 var (
@@ -805,16 +806,11 @@ func optionsFromSettings(settings gen.UserSetting) (userOptions, error) {
 }
 
 func userDayBounds(now time.Time, location *time.Location, startHour int) (time.Time, time.Time, error) {
-	if location == nil || startHour < 0 || startHour > 23 {
+	start, end, ok := studyday.Bounds(now, location, startHour)
+	if !ok {
 		return time.Time{}, time.Time{}, ErrInvalidInput
 	}
-	localNow := now.In(location)
-	year, month, day := localNow.Date()
-	start := time.Date(year, month, day, startHour, 0, 0, 0, location)
-	if localNow.Before(start) {
-		start = start.AddDate(0, 0, -1)
-	}
-	return start.UTC(), start.AddDate(0, 0, 1).UTC(), nil
+	return start, end, nil
 }
 
 func integerCount(value interface{}) (int64, bool) {
