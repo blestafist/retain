@@ -37,6 +37,17 @@ type AnswerInput struct {
 	WrongArticleRating int
 }
 
+// AnswerMatcherInput contains the answer data needed to compile a matcher,
+// without a candidate answer.
+type AnswerMatcherInput struct {
+	Language           string
+	PartOfSpeech       string
+	Expected           string
+	Alternatives       []string
+	GermanArticle      string
+	WrongArticleRating int
+}
+
 // AnswerResult is a match classification and a suggested (not submitted)
 // review rating.
 type AnswerResult struct {
@@ -65,72 +76,117 @@ func (e *MatchError) Error() string {
 	return fmt.Sprintf("%s: %s: %s", e.Kind, e.Field, e.Why)
 }
 
-// MatchAnswer normalizes and compares a typed answer with the expected answer
-// and caller-supplied alternatives.
-func MatchAnswer(input AnswerInput) (AnswerResult, error) {
-	if !supportedLanguage(input.Language) {
-		return AnswerResult{}, &MatchError{Kind: ErrInvalidLanguage, Field: "language", Why: "unsupported language code"}
-	}
-	if input.WrongArticleRating != RatingAgain && input.WrongArticleRating != RatingHard {
-		return AnswerResult{}, &MatchError{Kind: ErrInvalidConfig, Field: "wrong_article_rating", Why: "must be 1 (Again) or 2 (Hard)"}
-	}
-	if input.Language != "de" && input.GermanArticle != "" {
-		return AnswerResult{}, &MatchError{Kind: ErrInvalidConfig, Field: "german_article", Why: "is only valid for German"}
-	}
-	if input.Language == "de" && input.GermanArticle != "" && !isGermanArticle(input.GermanArticle) {
-		return AnswerResult{}, &MatchError{Kind: ErrInvalidConfig, Field: "german_article", Why: "must be der, die, or das"}
-	}
-	if !utf8.ValidString(input.Expected) || strings.TrimSpace(input.Expected) == "" {
-		return AnswerResult{}, &MatchError{Kind: ErrInvalidInput, Field: "expected", Why: "must be non-empty valid UTF-8"}
-	}
-	if !utf8.ValidString(input.Answer) || strings.TrimSpace(input.Answer) == "" {
-		return AnswerResult{}, &MatchError{Kind: ErrInvalidInput, Field: "answer", Why: "must be non-empty valid UTF-8"}
+// AnswerMatcher compiles the accepted answers once and can classify multiple
+// candidate answers against them. It is immutable after construction.
+type AnswerMatcher struct {
+	language           string
+	partOfSpeech       string
+	germanArticle      string
+	wrongArticleRating int
+	fuzzyCandidates    []string
+	primary            map[string]struct{}
+	alternatives       map[string]struct{}
+}
+
+// NewAnswerMatcher validates and compiles the answer data in input. Callers
+// provide candidate answers to Match or MatchExactOrArticle.
+func NewAnswerMatcher(input AnswerMatcherInput) (*AnswerMatcher, error) {
+	if err := validateAnswerMatcherInput(input); err != nil {
+		return nil, err
 	}
 	for i, alternative := range input.Alternatives {
 		if !utf8.ValidString(alternative) || strings.TrimSpace(alternative) == "" {
-			return AnswerResult{}, &MatchError{Kind: ErrInvalidInput, Field: fmt.Sprintf("alternatives[%d]", i), Why: "must be non-empty valid UTF-8"}
+			return nil, &MatchError{Kind: ErrInvalidInput, Field: fmt.Sprintf("alternatives[%d]", i), Why: "must be non-empty valid UTF-8"}
 		}
 	}
 
 	accepted, err := acceptedAnswers(input)
 	if err != nil {
+		return nil, err
+	}
+	matcher := &AnswerMatcher{
+		language:           input.Language,
+		partOfSpeech:       input.PartOfSpeech,
+		germanArticle:      input.GermanArticle,
+		wrongArticleRating: input.WrongArticleRating,
+		fuzzyCandidates:    accepted.all,
+		primary:            make(map[string]struct{}, len(accepted.primary)),
+		alternatives:       make(map[string]struct{}, len(accepted.alternatives)),
+	}
+	for _, candidate := range accepted.primary {
+		matcher.primary[candidate] = struct{}{}
+	}
+	for _, candidate := range accepted.alternatives {
+		matcher.alternatives[candidate] = struct{}{}
+	}
+	return matcher, nil
+}
+
+func validateAnswerMatcherInput(input AnswerMatcherInput) error {
+	if !supportedLanguage(input.Language) {
+		return &MatchError{Kind: ErrInvalidLanguage, Field: "language", Why: "unsupported language code"}
+	}
+	if input.WrongArticleRating != RatingAgain && input.WrongArticleRating != RatingHard {
+		return &MatchError{Kind: ErrInvalidConfig, Field: "wrong_article_rating", Why: "must be 1 (Again) or 2 (Hard)"}
+	}
+	if input.Language != "de" && input.GermanArticle != "" {
+		return &MatchError{Kind: ErrInvalidConfig, Field: "german_article", Why: "is only valid for German"}
+	}
+	if input.Language == "de" && input.GermanArticle != "" && !isGermanArticle(input.GermanArticle) {
+		return &MatchError{Kind: ErrInvalidConfig, Field: "german_article", Why: "must be der, die, or das"}
+	}
+	if !utf8.ValidString(input.Expected) || strings.TrimSpace(input.Expected) == "" {
+		return &MatchError{Kind: ErrInvalidInput, Field: "expected", Why: "must be non-empty valid UTF-8"}
+	}
+	return nil
+}
+
+// MatchAnswer normalizes and compares a typed answer with the expected answer
+// and caller-supplied alternatives.
+func MatchAnswer(input AnswerInput) (AnswerResult, error) {
+	matcherInput := AnswerMatcherInput{
+		Language: input.Language, PartOfSpeech: input.PartOfSpeech, Expected: input.Expected,
+		Alternatives: input.Alternatives, GermanArticle: input.GermanArticle,
+		WrongArticleRating: input.WrongArticleRating,
+	}
+	if err := validateAnswerMatcherInput(matcherInput); err != nil {
 		return AnswerResult{}, err
 	}
-	answer := normalize(input.Language, input.Answer, input.PartOfSpeech)
+	if !utf8.ValidString(input.Answer) || strings.TrimSpace(input.Answer) == "" {
+		return AnswerResult{}, &MatchError{Kind: ErrInvalidInput, Field: "answer", Why: "must be non-empty valid UTF-8"}
+	}
+	matcher, err := NewAnswerMatcher(matcherInput)
+	if err != nil {
+		return AnswerResult{}, err
+	}
+	return matcher.Match(input.Answer)
+}
+
+// Match classifies a typed answer, preserving typo and Polish diacritics
+// behavior. Accepted answers are prepared only when the matcher is compiled.
+func (matcher *AnswerMatcher) Match(value string) (AnswerResult, error) {
+	if !utf8.ValidString(value) || strings.TrimSpace(value) == "" {
+		return AnswerResult{}, &MatchError{Kind: ErrInvalidInput, Field: "answer", Why: "must be non-empty valid UTF-8"}
+	}
+	answer := normalize(matcher.language, value, matcher.partOfSpeech)
 	if answer == "" {
 		return AnswerResult{Match: MatchWrong, SuggestedRating: RatingAgain}, nil
 	}
 
 	answerStem, answerArticle := answer, ""
-	if input.Language == "de" && input.GermanArticle != "" {
+	if matcher.language == "de" && matcher.germanArticle != "" {
 		answerStem, answerArticle = splitArticle(answer)
 	}
 
-	// German alternatives are accepted as complete answers; the note's article
-	// policy applies to the primary noun, whose article is stored separately.
-	for _, candidate := range accepted.alternatives {
-		if answer == candidate {
-			return exactResult(), nil
-		}
+	if result := matcher.matchExactOrArticleNormalized(answer, answerStem, answerArticle); result.Match != MatchWrong {
+		return result, nil
 	}
 
-	for _, candidate := range accepted.primary {
-		if answer == candidate && (input.Language != "de" || input.GermanArticle == "") {
-			return exactResult(), nil
-		}
-		if answerStem == candidate {
-			if input.Language != "de" || input.GermanArticle == "" || answerArticle == input.GermanArticle {
-				return exactResult(), nil
-			}
-			return AnswerResult{Match: MatchArticle, SuggestedRating: input.WrongArticleRating}, nil
-		}
-	}
-
-	for _, candidate := range accepted.all {
-		if input.Language == "de" && input.GermanArticle != "" {
+	for _, candidate := range matcher.fuzzyCandidates {
+		if matcher.language == "de" && matcher.germanArticle != "" {
 			candidate, _ = splitArticle(candidate)
 		}
-		if input.Language == "pl" && polishDiacriticsOnlyDiffer(answerStem, candidate) {
+		if matcher.language == "pl" && polishDiacriticsOnlyDiffer(answerStem, candidate) {
 			return typoResult(), nil
 		}
 		if isOneEditAway(answerStem, candidate) {
@@ -140,13 +196,50 @@ func MatchAnswer(input AnswerInput) (AnswerResult, error) {
 	return AnswerResult{Match: MatchWrong, SuggestedRating: RatingAgain}, nil
 }
 
+// MatchExactOrArticle classifies only exact answers and German article-only
+// mistakes. It deliberately does not scan accepted answers for fuzzy matches,
+// making it suitable for multiple-choice distractor filtering.
+func (matcher *AnswerMatcher) MatchExactOrArticle(value string) (AnswerResult, error) {
+	if !utf8.ValidString(value) || strings.TrimSpace(value) == "" {
+		return AnswerResult{}, &MatchError{Kind: ErrInvalidInput, Field: "answer", Why: "must be non-empty valid UTF-8"}
+	}
+	answer := normalize(matcher.language, value, matcher.partOfSpeech)
+	if answer == "" {
+		return AnswerResult{Match: MatchWrong, SuggestedRating: RatingAgain}, nil
+	}
+	answerStem, answerArticle := answer, ""
+	if matcher.language == "de" && matcher.germanArticle != "" {
+		answerStem, answerArticle = splitArticle(answer)
+	}
+	return matcher.matchExactOrArticleNormalized(answer, answerStem, answerArticle), nil
+}
+
+func (matcher *AnswerMatcher) matchExactOrArticleNormalized(answer, answerStem, answerArticle string) AnswerResult {
+	if _, exists := matcher.alternatives[answer]; exists {
+		return exactResult()
+	}
+	if matcher.language == "de" && matcher.germanArticle != "" {
+		if _, exists := matcher.primary[answerStem]; exists {
+			if answerArticle == matcher.germanArticle {
+				return exactResult()
+			}
+			return AnswerResult{Match: MatchArticle, SuggestedRating: matcher.wrongArticleRating}
+		}
+		return AnswerResult{Match: MatchWrong, SuggestedRating: RatingAgain}
+	}
+	if _, exists := matcher.primary[answer]; exists {
+		return exactResult()
+	}
+	return AnswerResult{Match: MatchWrong, SuggestedRating: RatingAgain}
+}
+
 type acceptedAnswersSet struct {
 	primary      []string
 	alternatives []string
 	all          []string
 }
 
-func acceptedAnswers(input AnswerInput) (acceptedAnswersSet, error) {
+func acceptedAnswers(input AnswerMatcherInput) (acceptedAnswersSet, error) {
 	var result acceptedAnswersSet
 	for _, variant := range strings.Split(input.Expected, ";") {
 		variant = strings.TrimSpace(variant)

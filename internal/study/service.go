@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
 	"sort"
@@ -439,6 +440,14 @@ func (s *Service) ChoiceOptions(ctx context.Context, userID, cardID int64) ([]st
 	if correct == "" {
 		return nil, ErrChoiceUnavailable
 	}
+	matcher, err := lang.NewAnswerMatcher(lang.AnswerMatcherInput{
+		Language: answerInput.Language, PartOfSpeech: answerInput.PartOfSpeech, Expected: answerInput.Expected,
+		Alternatives: answerInput.Alternatives, GermanArticle: answerInput.GermanArticle,
+		WrongArticleRating: answerInput.WrongArticleRating,
+	})
+	if err != nil {
+		return nil, ErrInternal
+	}
 
 	rows, err := queries.ListStudyChoiceDistractors(ctx, gen.ListStudyChoiceDistractorsParams{
 		UserID: userID, Direction: row.Direction, DeckID: row.DeckID, NoteID: row.NoteID,
@@ -446,36 +455,46 @@ func (s *Service) ChoiceOptions(ctx context.Context, userID, cardID int64) ([]st
 	if err != nil {
 		return nil, ErrInternal
 	}
-	distractors := make([]string, 0, len(rows))
+	distractors := make([]string, 0, 3)
 	seen := map[string]struct{}{choiceIdentity(correct): {}}
-	for _, candidateRow := range rows {
-		candidates := strings.Split(candidateRow.Answer, ";")
-		if row.Direction == "forward" {
-			var alternatives []string
-			if err := json.Unmarshal([]byte(candidateRow.Alternatives), &alternatives); err != nil {
-				return nil, ErrInternal
-			}
-			candidates = append(candidates, alternatives...)
+	considerCandidate := func(candidate string) (bool, error) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return true, nil
 		}
-		for _, candidate := range candidates {
-			candidate = strings.TrimSpace(candidate)
-			if candidate == "" {
-				continue
-			}
-			answerInput.Answer = candidate
-			match, matchErr := lang.MatchAnswer(answerInput)
-			if matchErr != nil {
+		match, matchErr := matcher.MatchExactOrArticle(candidate)
+		if matchErr != nil {
+			return false, matchErr
+		}
+		if match.Match == lang.MatchExact || match.Match == lang.MatchArticle {
+			return true, nil
+		}
+		identity := choiceIdentity(candidate)
+		if _, exists := seen[identity]; exists {
+			return true, nil
+		}
+		seen[identity] = struct{}{}
+		distractors = append(distractors, candidate)
+		return len(distractors) < 3, nil
+	}
+
+collectDistractors:
+	for _, candidateRow := range rows {
+		more, candidateErr := forEachChoiceVariant(candidateRow.Answer, considerCandidate)
+		if candidateErr != nil {
+			return nil, ErrInternal
+		}
+		if !more {
+			break collectDistractors
+		}
+		if row.Direction == "forward" {
+			more, candidateErr = forEachChoiceAlternative(candidateRow.Alternatives, considerCandidate)
+			if candidateErr != nil {
 				return nil, ErrInternal
 			}
-			if match.Match == lang.MatchExact || match.Match == lang.MatchArticle {
-				continue
+			if !more {
+				break collectDistractors
 			}
-			identity := choiceIdentity(candidate)
-			if _, exists := seen[identity]; exists {
-				continue
-			}
-			seen[identity] = struct{}{}
-			distractors = append(distractors, candidate)
 		}
 	}
 	if len(distractors) < 3 {
@@ -489,6 +508,52 @@ func (s *Service) ChoiceOptions(ctx context.Context, userID, cardID int64) ([]st
 		choices[i], choices[j] = choices[j], choices[i]
 	})
 	return choices, nil
+}
+
+func forEachChoiceVariant(value string, visit func(string) (bool, error)) (bool, error) {
+	for {
+		candidate, remainder, found := strings.Cut(value, ";")
+		more, err := visit(candidate)
+		if err != nil || !more {
+			return more, err
+		}
+		if !found {
+			return true, nil
+		}
+		value = remainder
+	}
+}
+
+func forEachChoiceAlternative(raw string, visit func(string) (bool, error)) (bool, error) {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	token, err := decoder.Token()
+	delimiter, isDelimiter := token.(json.Delim)
+	if err != nil || !isDelimiter || delimiter != '[' {
+		return false, fmt.Errorf("invalid choice alternatives array")
+	}
+	for decoder.More() {
+		var candidate string
+		if err := decoder.Decode(&candidate); err != nil {
+			return false, err
+		}
+		more, err := visit(candidate)
+		if err != nil || !more {
+			return more, err
+		}
+	}
+	token, err = decoder.Token()
+	delimiter, isDelimiter = token.(json.Delim)
+	if err != nil || !isDelimiter || delimiter != ']' {
+		return false, fmt.Errorf("invalid choice alternatives array")
+	}
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return false, fmt.Errorf("unexpected trailing choice alternatives data")
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func answerInputForRow(row gen.GetStudyAnswerCardRow, answer string) (lang.AnswerInput, error) {

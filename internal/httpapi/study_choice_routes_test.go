@@ -130,6 +130,41 @@ func TestStudyChoiceOptionsRequireNewCardAndFourAvailableChoices(t *testing.T) {
 	}
 }
 
+func TestStudyChoiceOptionsStopAfterThreeDistinctDistractors(t *testing.T) {
+	f := newStudyRoutesFixture(t)
+	if _, err := f.database.SQL.Exec(`
+		UPDATE decks SET lang_target = 'de', lang_native = 'pl' WHERE id = ?`, f.ownerDeckID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.database.SQL.Exec(`
+		UPDATE notes SET translation = 'richtig' WHERE deck_id = ?`, f.ownerDeckID); err != nil {
+		t.Fatal(err)
+	}
+	addStudyChoiceNote(t, f, f.ownerDeckID, "distractor terms", "first; second", `["third", "unvisited", "   "]`, "forward")
+
+	response := studyRoutesRequest(f.handler, http.MethodPost, "/api/v1/study/choice-options",
+		`{"card_id":`+strconv.FormatInt(f.cardID, 10)+`}`, f.ownerCookie)
+	if response.Code != http.StatusOK {
+		t.Fatalf("choice options response = %d/%s, want 200; alternatives must not be scanned after three distractors", response.Code, response.Body)
+	}
+	var result struct {
+		Choices []string `json:"choices"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	set := make(map[string]bool, len(result.Choices))
+	for _, choice := range result.Choices {
+		set[choice] = true
+	}
+	if len(result.Choices) != 4 || !set["richtig"] || !set["first"] || !set["second"] || !set["third"] {
+		t.Fatalf("choices = %q, want correct answer and first three distinct distractors", result.Choices)
+	}
+	if set["unvisited"] {
+		t.Errorf("scanned candidate after reaching three distractors: %q", result.Choices)
+	}
+}
+
 func TestStudyChoiceOptionsExcludeGermanArticleOnlyMatches(t *testing.T) {
 	f := newStudyRoutesFixture(t)
 	ctx := context.Background()

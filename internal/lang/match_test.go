@@ -3,6 +3,7 @@ package lang
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -103,6 +104,114 @@ func TestMatchAnswerHandlesLargeStoredContent(t *testing.T) {
 				t.Errorf("MatchAnswer().Match = %q, want %q", got.Match, test.match)
 			}
 		})
+	}
+}
+
+func TestCompiledAnswerMatcherParityAndChoiceClassification(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    AnswerInput
+		want     string
+		wantFast string
+	}{
+		{
+			name: "exact",
+			input: AnswerInput{
+				Language: "en", Expected: "the color", Answer: "COLOR", WrongArticleRating: RatingHard,
+			},
+			want: MatchExact, wantFast: MatchExact,
+		},
+		{
+			name: "alternative",
+			input: AnswerInput{
+				Language: "en", Expected: "color", Alternatives: []string{"colour"}, Answer: "colour", WrongArticleRating: RatingHard,
+			},
+			want: MatchExact, wantFast: MatchExact,
+		},
+		{
+			name: "German article",
+			input: AnswerInput{
+				Language: "de", Expected: "der Hund", GermanArticle: "der", Answer: "die Hund", WrongArticleRating: RatingHard,
+			},
+			want: MatchArticle, wantFast: MatchArticle,
+		},
+		{
+			name: "typo",
+			input: AnswerInput{
+				Language: "en", Expected: "colour", Answer: "colou", WrongArticleRating: RatingHard,
+			},
+			want: MatchTypo, wantFast: MatchWrong,
+		},
+		{
+			name: "Polish diacritics",
+			input: AnswerInput{
+				Language: "pl", Expected: "żółć", Answer: "zolc", WrongArticleRating: RatingHard,
+			},
+			want: MatchTypo, wantFast: MatchWrong,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			matcher, err := NewAnswerMatcher(AnswerMatcherInput{
+				Language: tc.input.Language, PartOfSpeech: tc.input.PartOfSpeech,
+				Expected: tc.input.Expected, Alternatives: tc.input.Alternatives,
+				GermanArticle: tc.input.GermanArticle, WrongArticleRating: tc.input.WrongArticleRating,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			compiled, err := matcher.Match(tc.input.Answer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			compat, err := MatchAnswer(tc.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if compiled != compat || compiled.Match != tc.want {
+				t.Errorf("compiled Match() = %+v, MatchAnswer() = %+v; want %q", compiled, compat, tc.want)
+			}
+
+			fast, err := matcher.MatchExactOrArticle(tc.input.Answer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fast.Match != tc.wantFast {
+				t.Errorf("MatchExactOrArticle() = %+v, want match %q", fast, tc.wantFast)
+			}
+		})
+	}
+}
+
+func TestCompiledAnswerMatcherHandlesManyAlternativesAndCandidates(t *testing.T) {
+	const count = 2048
+	alternatives := make([]string, count)
+	for i := range alternatives {
+		alternatives[i] = fmt.Sprintf("accepted-%04d", i)
+	}
+	matcher, err := NewAnswerMatcher(AnswerMatcherInput{
+		Language: "en", Expected: "primary", Alternatives: alternatives, WrongArticleRating: RatingHard,
+	})
+	if err != nil {
+		t.Fatalf("compile %d alternatives: %v", count, err)
+	}
+	for i := 0; i < count; i++ {
+		candidate := fmt.Sprintf("distractor-%04d", i)
+		got, err := matcher.MatchExactOrArticle(candidate)
+		if err != nil {
+			t.Fatalf("classify %q: %v", candidate, err)
+		}
+		if got.Match != MatchWrong {
+			t.Fatalf("MatchExactOrArticle(%q) = %+v, want wrong", candidate, got)
+		}
+	}
+	got, err := matcher.MatchExactOrArticle(alternatives[count-1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Match != MatchExact {
+		t.Fatalf("last alternative classification = %+v, want exact", got)
 	}
 }
 
