@@ -16,6 +16,7 @@ import (
 	"github.com/pestit/retain/internal/db/gen"
 	"github.com/pestit/retain/internal/srs"
 	"github.com/pestit/retain/internal/study"
+	syncservice "github.com/pestit/retain/internal/sync"
 )
 
 type studyRoutesFixture struct {
@@ -87,13 +88,48 @@ func newStudyRoutesFixture(t *testing.T) *studyRoutesFixture {
 	cardID := studyRoutesCardForTerm(t, database, ownerID, ownerDeckID, "hello")
 	otherCardID := studyRoutesCardForTerm(t, database, other.ID, otherDeckID, "foreign")
 	mux := http.NewServeMux()
-	RegisterStudyRoutes(mux, authService, study.NewService(database, studyRoutesClock{now: now}))
+	studyService := study.NewService(database, studyRoutesClock{now: now})
+	RegisterStudyRoutes(mux, authService, studyService)
+	RegisterSyncRoutes(mux, authService, syncservice.NewService(database, studyService))
 	return &studyRoutesFixture{
 		database: database, handler: mux,
 		ownerCookie: &http.Cookie{Name: sessionCookieName, Value: login.Token},
 		otherCookie: &http.Cookie{Name: sessionCookieName, Value: otherToken},
 		ownerID:     ownerID, otherID: other.ID, ownerDeckID: ownerDeckID, otherDeckID: otherDeckID,
 		cardID: cardID, otherCardID: otherCardID, now: now,
+	}
+}
+
+func TestSyncRouteAuthenticatesAndBindsCursorToOwner(t *testing.T) {
+	f := newStudyRoutesFixture(t)
+	unauthenticated := studyRoutesRequest(f.handler, http.MethodPost, "/api/v1/sync", `{"reviews":[]}`, nil)
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated sync = %d/%s, want 401", unauthenticated.Code, unauthenticated.Body)
+	}
+	ownerResponse := studyRoutesRequest(f.handler, http.MethodPost, "/api/v1/sync", `{"reviews":[]}`, f.ownerCookie)
+	if ownerResponse.Code != http.StatusOK {
+		t.Fatalf("owner sync = %d/%s, want 200", ownerResponse.Code, ownerResponse.Body)
+	}
+	var result struct {
+		Cursor       string `json:"cursor"`
+		HasMore      bool   `json:"has_more"`
+		ChangedCards []any  `json:"changed_cards"`
+	}
+	if err := json.Unmarshal(ownerResponse.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode sync response: %v", err)
+	}
+	if result.Cursor == "" || result.HasMore || len(result.ChangedCards) != 1 {
+		t.Fatalf("sync response = %+v, want signed cursor and initial owner card", result)
+	}
+	foreign := studyRoutesRequest(f.handler, http.MethodPost, "/api/v1/sync",
+		`{"reviews":[],"since":"`+result.Cursor+`"}`, f.otherCookie)
+	if foreign.Code != http.StatusBadRequest || !strings.Contains(foreign.Body.String(), `"code":"invalid_cursor"`) {
+		t.Errorf("cross-owner cursor response = %d/%s, want 400 invalid_cursor", foreign.Code, foreign.Body)
+	}
+	invalidReview := `{"reviews":[{"id":"018f0f3e-7b00-7000-8000-000000000001","card_id":999999,"rating":3,"mode":"flip","reviewed_at":"2026-04-03T12:00:00Z","duration_ms":500}]}`
+	rejected := studyRoutesRequest(f.handler, http.MethodPost, "/api/v1/sync", invalidReview, f.ownerCookie)
+	if rejected.Code != http.StatusOK || !strings.Contains(rejected.Body.String(), `"code":"not_found"`) {
+		t.Errorf("rejected review response = %d/%s, want 200 with per-review rejection", rejected.Code, rejected.Body)
 	}
 }
 

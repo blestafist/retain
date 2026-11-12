@@ -2,6 +2,7 @@ const API_BASE = '/api/v1';
 
 export interface User {
   id: number;
+  sync_scope: number;
   email: string;
   name: string;
   is_admin?: boolean;
@@ -110,6 +111,9 @@ function isMeResponse(value: unknown): value is MeResponse {
 
   const { user } = value;
   return typeof user.id === 'number'
+    && typeof user.sync_scope === 'number'
+    && Number.isSafeInteger(user.sync_scope)
+    && user.sync_scope > 0
     && typeof user.email === 'string'
     && typeof user.name === 'string'
     && (user.is_admin === undefined || typeof user.is_admin === 'boolean')

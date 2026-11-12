@@ -174,6 +174,22 @@ type Session struct {
 	CreatedAt time.Time
 }
 
+type SyncEvent struct {
+	Seq          int64
+	OwnerID      int64
+	OwnerScopeID int64
+	EntityType   string
+	EntityID     int64
+	Operation    string
+	Payload      string
+	CreatedAt    time.Time
+}
+
+type SyncOwnerScope struct {
+	ScopeID int64
+	UserID  int64
+}
+
 type User struct {
 	ID           int64
 	Email        string

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiError, patchMeSettings, type MeResponse, type UserSettings, type UserSettingsPatch } from '../api/client';
 import { meQueryKey } from '../auth/session';
+import { updateCachedSettings } from '../offline/database';
 import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
 
@@ -147,7 +148,12 @@ export function SettingsPage({ settings }: { settings: UserSettings }) {
   const [saved, setSaved] = useState(false);
   const mutation = useMutation({
     mutationFn: patchMeSettings,
-    onSuccess: (nextSettings) => {
+    onSuccess: async (nextSettings) => {
+      try {
+        await updateCachedSettings(nextSettings);
+      } catch {
+        // Settings are persisted by the server; offline profile caching is best-effort.
+      }
       queryClient.setQueryData<MeResponse | null>(meQueryKey, (current) => (
         current ? { ...current, settings: nextSettings } : current
       ));

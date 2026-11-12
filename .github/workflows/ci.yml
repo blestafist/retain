@@ -83,6 +83,6 @@ jobs:
           assert_status 200 'GET /' http://127.0.0.1:18080/
           html=$(cat "$RUNNER_TEMP/retain-smoke-response")
           grep -F '<div id="root"></div>' <<< "$html"
-          asset=$(sed -nE 's/.*src="([^"]+\.js)".*/\1/p' <<< "$html")
+          asset=$(grep -oE 'src="[^"]+\.js"' <<< "$html" | head -n 1 | cut -d '"' -f 2)
           test -n "$asset"
           assert_status 200 "GET $asset" "http://127.0.0.1:18080$asset"

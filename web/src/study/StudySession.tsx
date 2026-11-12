@@ -1,12 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ApiError } from '../api/client';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { liveQuery } from 'dexie';
+import { ApiError, type UserSettings } from '../api/client';
 import { getDecks, type DeckId, type DeckNode, type NativeLanguage, type TargetLanguage } from '../api/content';
 import { checkStudyAnswer, createUUIDv7, getNextStudyQueue, getStudyChoiceOptions, getStudyQueue, submitStudyReview, undoStudyReview, type AnswerMatch, type QueueCard, type ReviewInput, type StudyMode, type StudyRating } from '../api/study';
 import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
 import { useLlmStatus } from '../content/hooks';
 import { StudyLlmTools } from './StudyLlmTools';
+import {
+  cacheStudyQueue,
+  discardRejectedOfflineReview,
+  getCachedQueue,
+  isOfflineCardTombstoned,
+  offlineDatabase,
+  rejectedOfflineReviews,
+  type OfflineReview,
+} from '../offline/database';
+import { cacheServerCard, isNetworkFailure, saveOfflineReview, synchronizeOfflineData } from '../offline/sync';
 
 const ratingLabels: Record<StudyRating, 'again' | 'hard' | 'good' | 'easy'> = {
   1: 'again',
@@ -30,7 +41,9 @@ interface ReviewedCard {
 }
 
 function messageFor(error: unknown): string {
-  return error instanceof ApiError && error.serverMessage ? error.serverMessage : t('requestFailed');
+  if (error instanceof ApiError && error.serverMessage) return error.serverMessage;
+  if (error instanceof Error && error.message === t('offlineQueueUnavailable')) return error.message;
+  return t('requestFailed');
 }
 
 function findLanguages(decks: DeckNode[], deckId?: DeckId): { target?: TargetLanguage; native?: NativeLanguage } {
@@ -86,15 +99,56 @@ function SpeakIcon() {
   return <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 10v4h4l5 4V6l-5 4H4Z" /><path d="M16 9a5 5 0 0 1 0 6m2-9a9 9 0 0 1 0 12" /></svg>;
 }
 
-export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: DeckId | null; ttsAuto?: boolean }) {
+export function StudySession({
+  ownerID,
+  ownerScopeID,
+  settings,
+  deckId = null,
+  ttsAuto = false,
+}: {
+  ownerID: number;
+  ownerScopeID: number;
+  settings: UserSettings;
+  deckId?: DeckId | null;
+  ttsAuto?: boolean;
+}) {
+  const queryClient = useQueryClient();
   const deckKey = deckId === null ? '' : String(deckId);
+  const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine);
+  const [offlineSaved, setOfflineSaved] = useState(false);
   const queueQuery = useQuery({
-    queryKey: ['study-queue', deckKey],
-    queryFn: () => getStudyQueue({ deckId, limit: queuePageSize }),
+    queryKey: ['study-queue', ownerID, deckKey],
+    queryFn: async () => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        const cached = await getCachedQueue(ownerID, ownerScopeID, deckId, queuePageSize);
+        if (cached.length > 0) return cached;
+        throw new Error(t('offlineQueueUnavailable'));
+      }
+      try {
+        await synchronizeOfflineData(ownerID, ownerScopeID, settings).catch(() => undefined);
+        const cards = await getStudyQueue({ deckId, limit: queuePageSize });
+        try {
+          return await cacheStudyQueue(ownerID, ownerScopeID, deckId, cards, settings);
+        } catch {
+          // Online studying remains available if browser storage is unavailable.
+        }
+        return cards;
+      } catch (error) {
+        if (!isNetworkFailure(error)) throw error;
+        const cached = await getCachedQueue(ownerID, ownerScopeID, deckId, queuePageSize);
+        if (cached.length > 0) return cached;
+        throw new Error(t('offlineQueueUnavailable'), { cause: error });
+      }
+    },
     retry: false,
   });
   const decksQuery = useQuery({ queryKey: ['decks'], queryFn: getDecks, retry: false });
   const llmStatusQuery = useLlmStatus();
+  const rejectedReviewsQuery = useQuery({
+    queryKey: ['offline-rejected-reviews', ownerID],
+    queryFn: () => rejectedOfflineReviews(ownerID, ownerScopeID),
+    retry: false,
+  });
   const [sessionQueue, setSessionQueue] = useState<{ deckKey: string; cards: QueueCard[]; hasMore: boolean } | null>(null);
   const [reviewed, setReviewed] = useState<ReviewedCard[]>([]);
   const [answerShown, setAnswerShown] = useState(false);
@@ -121,10 +175,10 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
   const choiceOptionsQuery = useQuery({
     queryKey: ['study-choice-options', currentCard?.id ?? null],
     queryFn: () => getStudyChoiceOptions(currentCard!.id),
-    enabled: studyMode === 'choice' && currentCard?.state === 0,
+    enabled: isOnline && studyMode === 'choice' && currentCard?.state === 0,
     retry: false,
   });
-  const effectiveMode: StudyMode = studyMode === 'choice' && currentCard?.state !== 0 ? 'flip' : studyMode;
+  const effectiveMode: StudyMode = !isOnline || (studyMode === 'choice' && currentCard?.state !== 0) ? 'flip' : studyMode;
   const languages = useMemo(
     () => findLanguages(decksQuery.data ?? [], currentCard?.deck_id ?? deckId ?? undefined),
     [currentCard?.deck_id, deckId, decksQuery.data],
@@ -141,6 +195,29 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
   }, [deckId]);
 
   useEffect(() => {
+    const updateNetworkState = () => {
+      setIsOnline(navigator.onLine);
+      if (navigator.onLine) setOfflineSaved(false);
+    };
+    window.addEventListener('online', updateNetworkState);
+    window.addEventListener('offline', updateNetworkState);
+    return () => {
+      window.removeEventListener('online', updateNetworkState);
+      window.removeEventListener('offline', updateNetworkState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isOnline && typeof navigator !== 'undefined' && navigator.onLine) {
+      void synchronizeOfflineData(ownerID, ownerScopeID, settings).catch(() => undefined);
+    }
+  }, [isOnline, ownerID, ownerScopeID, settings]);
+
+  useEffect(() => {
+    if (!isOnline && studyMode !== 'flip') setStudyMode('flip');
+  }, [isOnline, studyMode]);
+
+  useEffect(() => {
     if (!queueQuery.data || activeSession) return;
     setSessionQueue({
       deckKey,
@@ -148,6 +225,41 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
       hasMore: queueQuery.data.length === queuePageSize,
     });
   }, [activeSession, deckKey, queueQuery.data]);
+
+  useEffect(() => {
+    if (!activeSession) return undefined;
+    const session = activeSession;
+    const subscription = liveQuery(async () => {
+      try {
+        const owner = await offlineDatabase.metadata.get('owner');
+        if (owner?.value !== ownerScopeID) return [] as number[];
+        const unavailable: number[] = [];
+        for (const card of session.cards) {
+          const [cachedCard, note] = await Promise.all([
+            offlineDatabase.cards.get(card.id),
+            offlineDatabase.notes.get(card.note_id),
+          ]);
+          if (cachedCard?.deleted || note?.deleted) unavailable.push(card.id);
+        }
+        return unavailable;
+      } catch {
+        return [];
+      }
+    }).subscribe({
+      next: (ids) => {
+        if (ids.length === 0) return;
+        const unavailable = new Set(ids);
+        setSessionQueue((current) => {
+          if (!current || current.deckKey !== session.deckKey) return current;
+          const cards = current.cards.filter((card) => !unavailable.has(card.id));
+          return cards.length === current.cards.length ? current : { ...current, cards };
+        });
+        setReviewed((current) => current.filter(({ card }) => !unavailable.has(card.id)));
+      },
+      error: () => undefined,
+    });
+    return () => subscription.unsubscribe();
+  }, [activeSession, ownerScopeID]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return undefined;
@@ -190,11 +302,60 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
     setBusy(true);
     setError(null);
     try {
-      await submitStudyReview(input);
+      const saveLocally = async () => {
+        const offlineReview: OfflineReview = {
+          ...input,
+          owner_id: ownerID,
+          account_scope_id: ownerScopeID,
+          state_before: card.state,
+        };
+        await saveOfflineReview(ownerID, ownerScopeID, offlineReview, settings);
+      };
+      let savedOffline = false;
+      if (isOnline && (typeof navigator === 'undefined' || navigator.onLine)) {
+        try {
+          const serverCard = await submitStudyReview(input);
+          try {
+            await cacheServerCard(ownerID, ownerScopeID, {
+              ...serverCard,
+              user_id: ownerID,
+              suspended: false,
+              is_leech: false,
+              deleted: false,
+            }, settings);
+          } catch {
+            // The server has accepted the answer; local cache failure must not undo that result.
+          }
+        } catch (caught) {
+          if (!isNetworkFailure(caught)) throw caught;
+          await saveLocally();
+          savedOffline = true;
+        }
+      } else {
+        await saveLocally();
+        savedOffline = true;
+      }
       pendingReviewRef.current = null;
       setPendingReview(null);
-      setReviewed((previous) => [...previous, { id: input.id, card }]);
+      let cardTombstoned = false;
+      try {
+        cardTombstoned = await isOfflineCardTombstoned(ownerID, ownerScopeID, card.id, card.note_id);
+      } catch {
+        // Online studying remains available if local storage cannot be read.
+      }
+      if (!cardTombstoned) setReviewed((previous) => [...previous, { id: input.id, card }]);
       setAnswerShown(false);
+      setOfflineSaved(savedOffline);
+      if (!savedOffline) {
+        // Refresh the sequenced feed after an online mutation; cached snapshots
+        // with a feed sequence reject unversioned review responses.
+        void synchronizeOfflineData(ownerID, ownerScopeID, settings).catch(() => undefined);
+      }
+      if (savedOffline && typeof navigator !== 'undefined' && navigator.onLine) {
+        void synchronizeOfflineData(ownerID, ownerScopeID, settings)
+          .then(() => queryClient.invalidateQueries({ queryKey: ['offline-rejected-reviews', ownerID] }))
+          .catch(() => undefined);
+      }
     } catch (caught) {
       setError(caught);
       if (caught instanceof ApiError && caught.status >= 400 && caught.status < 500 && caught.status !== 408) {
@@ -204,7 +365,7 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [isOnline, ownerID, ownerScopeID, queryClient, settings]);
 
   const rate = useCallback(async (rating: StudyRating) => {
     if (!currentCard || busy) return;
@@ -233,11 +394,23 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
     setLoadingMore(true);
     setError(null);
     try {
-      const nextPage = await getNextStudyQueue({
-        deckId,
-        limit: queuePageSize,
-        excludeCardIds: activeSession.cards.map((card) => card.id),
-      });
+      const excludeCardIds = activeSession.cards.map((card) => card.id);
+      let nextPage: QueueCard[];
+      if (isOnline && (typeof navigator === 'undefined' || navigator.onLine)) {
+        try {
+          nextPage = await getNextStudyQueue({ deckId, limit: queuePageSize, excludeCardIds });
+          try {
+            nextPage = await cacheStudyQueue(ownerID, ownerScopeID, deckId, nextPage, settings);
+          } catch {
+            // The fetched online page can still be used for this session.
+          }
+        } catch (caught) {
+          if (!isNetworkFailure(caught)) throw caught;
+          nextPage = await getCachedQueue(ownerID, ownerScopeID, deckId, queuePageSize * 20);
+        }
+      } else {
+        nextPage = await getCachedQueue(ownerID, ownerScopeID, deckId, queuePageSize * 20);
+      }
       setSessionQueue((previous) => {
         if (!previous || previous.deckKey !== deckKey) return previous;
         const seen = new Set([
@@ -256,7 +429,7 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
     } finally {
       setLoadingMore(false);
     }
-  }, [activeSession, deckId, deckKey, loadingMore, reviewed]);
+  }, [activeSession, deckId, deckKey, isOnline, loadingMore, ownerID, ownerScopeID, reviewed, settings]);
 
   const onSwipeStart = useCallback((event: PointerEvent<HTMLElement>) => {
     if (event.pointerType !== 'touch' || !event.isPrimary || !currentCard) return;
@@ -314,15 +487,27 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
     setBusy(true);
     setError(null);
     try {
-      await undoStudyReview(last.id);
-      setReviewed((previous) => previous.slice(0, -1));
+      const serverCard = await undoStudyReview(last.id);
+      try {
+        await cacheServerCard(ownerID, ownerScopeID, {
+          ...serverCard,
+          user_id: ownerID,
+          suspended: false,
+          is_leech: false,
+          deleted: false,
+        }, settings);
+      } catch {
+        // Keep the completed server undo even if IndexedDB cannot be updated.
+      }
+      setReviewed((previous) => previous.filter(({ id }) => id !== last.id));
       setAnswerShown(false);
+      void synchronizeOfflineData(ownerID, ownerScopeID, settings).catch(() => undefined);
     } catch (caught) {
       setError(caught);
     } finally {
       setBusy(false);
     }
-  }, [busy, pendingReview, reviewed]);
+  }, [busy, ownerID, ownerScopeID, pendingReview, reviewed, settings]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -353,9 +538,36 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
         </div>
         <div className="flex gap-2" aria-label={t('sessionActions')}>
           {voice && currentCard && <Button type="button" variant="tonal" onClick={() => speak(currentCard, voice)}><SpeakIcon />{t('speak')}</Button>}
-          {reviewed.length > 0 && <Button type="button" variant="tonal" disabled={busy || pendingReview !== null} onClick={() => void undo()}>{t(busy ? 'undoing' : 'undo')}</Button>}
+          {reviewed.length > 0 && <Button type="button" variant="tonal" disabled={busy || pendingReview !== null || !isOnline} onClick={() => void undo()}>{t(busy ? 'undoing' : 'undo')}</Button>}
         </div>
       </header>
+
+      {!isOnline && <p className="m-0 rounded-2xl bg-secondary-container p-4 text-on-secondary-container" role="status">{t('offlineStudyHint')}</p>}
+      {offlineSaved && <p className="m-0 text-sm text-on-surface-variant" role="status">{t('offlineReviewSaved')}</p>}
+      {(rejectedReviewsQuery.data?.length ?? 0) > 0 && (
+        <aside className="grid gap-3 rounded-2xl border border-error p-4 text-on-surface" role="alert">
+          <div>
+            <h2 className="m-0 text-lg font-semibold">{t('offlineRejectedHeading')}</h2>
+            <p className="mb-0 mt-1">{t('offlineRejectedDescription')}</p>
+          </div>
+          <ul className="m-0 grid list-none gap-2 p-0">
+            {rejectedReviewsQuery.data?.map((review) => (
+              <li key={review.id} className="flex flex-wrap items-center justify-between gap-2">
+                <span>{t('offlineRejectedReview')} {review.id}</span>
+                <Button
+                  type="button"
+                  variant="tonal"
+                  onClick={() => void discardRejectedOfflineReview(ownerID, ownerScopeID, review.id)
+                    .then(() => rejectedReviewsQuery.refetch())
+                    .catch(setError)}
+                >
+                  {t('discardOfflineReview')}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </aside>
+      )}
 
       {currentCard && (
         <div role="group" aria-label={t('studyModeGroup')} className="flex flex-wrap gap-2">
@@ -369,7 +581,7 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
               type="button"
               variant={effectiveMode === mode ? 'filled' : 'tonal'}
               aria-pressed={effectiveMode === mode}
-              disabled={isCheckingAnswer || busy}
+              disabled={isCheckingAnswer || busy || (!isOnline && mode !== 'flip')}
               onClick={() => {
                 setStudyMode(mode);
                 setAnswerShown(false);
@@ -546,7 +758,7 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
               </div>
             )}
           </article>
-          {llmStatusQuery.data?.enabled === true && (
+          {isOnline && llmStatusQuery.data?.enabled === true && (
             <StudyLlmTools
               key={currentCard.id}
               card={currentCard}

@@ -404,8 +404,13 @@ func TestLoginSessionsAuthenticationAndLogout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Login(valid) error = %v", err)
 	}
-	if result.User != publicUser(user) {
-		t.Errorf("Login().User = %+v, want %+v", result.User, publicUser(user))
+	scopeID, err := database.Queries().GetSyncOwnerScope(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetSyncOwnerScope() error = %v", err)
+	}
+	wantUser := publicUser(user, scopeID)
+	if result.User != wantUser {
+		t.Errorf("Login().User = %+v, want %+v", result.User, wantUser)
 	}
 	if want := c.Now().Add(sessionLifetime); !result.ExpiresAt.Equal(want) {
 		t.Errorf("Login().ExpiresAt = %v, want %v", result.ExpiresAt, want)

@@ -508,7 +508,7 @@ POST   /study/review             {id(uuid), card_id, rating, mode, reviewed_at, 
 POST   /study/undo               {review_id}
 POST   /cards/{id}/suspend | /unsuspend | /reset
 
-POST   /sync                     {reviews:[...], since} → {applied, changed_cards, changed_notes}
+POST   /sync                     {reviews:[...], since} → {applied, rejected, changed_cards, changed_notes, cursor, has_more}
 
 GET    /stats/overview           streak, today, totals
 GET    /stats/forecast?days=30
@@ -532,15 +532,16 @@ Errors: `{"error": {"code": "not_found", "message": "..."}}` (messages in Englis
 
 ## 10. Offline and sync
 
-1. The service worker caches the app shell (precache) and API GET requests (stale-while-revalidate).
-2. At session start the client fetches the queue (`/study/queue`) with a day's buffer and stores it in IndexedDB.
-3. Offline answer: `ts-fsrs` computes the new state locally → the card is updated in IndexedDB → a log entry with a UUIDv7 and `reviewed_at` goes into the `outbox` queue.
-4. When back online: `POST /sync` with a batch of logs.
-   - The server inserts logs idempotently (`ON CONFLICT(id) DO NOTHING`).
-   - If logs "from the past" arrive for a card (from another device), the server **recomputes the card by replaying all its logs ordered by `reviewed_at`**.
-   - The response contains up-to-date cards; the client overwrites its cache.
-5. Word edit conflicts: last-write-wins by `updated_at`.
-6. LLM features are unavailable offline — buttons are disabled with a hint.
+1. The service worker precaches the app shell and uses stale-while-revalidate only for safe API GET requests; authenticated and mutation responses are never cached.
+2. At session start the client fetches the queue (`/study/queue`) with a day's buffer and stores cards and notes in IndexedDB.
+3. Offline answer: `ts-fsrs` computes the new state locally → the card is updated in IndexedDB → a log entry with a UUIDv7 and `reviewed_at` goes into the durable `outbox`.
+4. When online, `POST /sync` sends a bounded batch of logs and an optional opaque `since` cursor. The server inserts logs idempotently (`ON CONFLICT(id) DO NOTHING`). If older logs arrive from another device, it recomputes each affected card by replaying active logs ordered by `reviewed_at` and returns the authoritative card state. A permanently invalid/inaccessible review is returned in `rejected` without blocking feed pagination; the client retains it in the outbox, marks it for attention, and only deletes it after an explicit user action.
+5. Server changes are delivered through an append-only `sync_events` log with a globally monotonic sequence and an immutable, never-reused per-account owner-scope ID. Numeric user IDs can be reused after account deletion, so they are not sufficient as the feed isolation key. Events include current note/card snapshots and tombstones; authorization loss must produce a tombstone so clients remove data they can no longer access. The client stores the scope ID with its offline owner marker so a reused numeric user ID cannot inherit old IndexedDB data or outbox entries.
+6. The `since` value is an opaque, versioned HMAC-signed cursor bound to the authenticated user and its owner scope. The signing key is generated once and persisted in `app_settings`; it is not a new required environment secret. Each response has `cursor` and `has_more`; clients apply every page and continue until there are no more events and the cursor stabilizes. Each page's state is applied atomically in IndexedDB before advancing the locally stored cursor.
+7. The client applies server-authoritative card snapshots only when their feed sequence is not older than the cached snapshot, then removes acknowledged outbox entries. A failed request or page application must leave pending reviews and the prior cursor intact for safe retry. Pending and rejected outbox entries survive logout and account switches, remain bound to their immutable account scope, and are only deleted after server acknowledgement or an explicit user action.
+8. Word edit conflicts use last-write-wins by `updated_at`. LLM features are unavailable offline — buttons are disabled with a hint.
+
+The initial sync must also deliver currently active notes and cards that existed before `sync_events` was introduced. Stage 8 uses one next-sequential migration (`00009` after the current `00008`) for the event log, capture triggers, and initial snapshot; do not leave a migration-number gap.
 
 ---
 
