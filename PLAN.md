@@ -498,6 +498,7 @@ POST   /llm/check-answer         {card_id, answer}       → {accepted, explanat
 GET    /jobs/{id}                background job status and progress
 
 GET    /study/queue?deck_id=&limit=50   cards + interval previews
+POST   /study/queue/next               {deck_id, limit, exclude_card_ids} next batch, excluding cards already in this session
 POST   /study/review             {id(uuid), card_id, rating, mode, reviewed_at, duration_ms}
 POST   /study/undo               {review_id}
 POST   /cards/{id}/suspend | /unsuspend | /reset

@@ -14,8 +14,35 @@ import (
 // The caller is responsible for placing state-changing routes behind the same-origin guard.
 func RegisterStudyRoutes(mux *http.ServeMux, authService *auth.Service, studyService *study.Service) {
 	mux.HandleFunc("GET /api/v1/study/queue", studyQueueHandler(authService, studyService))
+	mux.HandleFunc("POST /api/v1/study/queue/next", studyNextQueueHandler(authService, studyService))
 	mux.HandleFunc("POST /api/v1/study/review", studyReviewHandler(authService, studyService))
 	mux.HandleFunc("POST /api/v1/study/undo", studyUndoHandler(authService, studyService))
+}
+
+func studyNextQueueHandler(authService *auth.Service, service *study.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := authenticatedUser(w, r, authService)
+		if !ok {
+			return
+		}
+		var input struct {
+			DeckID         *int64  `json:"deck_id"`
+			Limit          int     `json:"limit"`
+			ExcludeCardIDs []int64 `json:"exclude_card_ids"`
+		}
+		if err := DecodeJSON(r, &input); err != nil {
+			writeJSONDecodeError(w, err)
+			return
+		}
+		result, err := service.QueueExcluding(r.Context(), user.ID, input.DeckID, input.Limit, input.ExcludeCardIDs)
+		if err != nil {
+			writeStudyError(w, err)
+			return
+		}
+		if err := WriteJSON(w, http.StatusOK, result); err != nil {
+			writeInternalError(w)
+		}
+	}
 }
 
 func studyQueueHandler(authService *auth.Service, service *study.Service) http.HandlerFunc {

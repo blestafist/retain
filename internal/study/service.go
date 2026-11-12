@@ -27,6 +27,7 @@ var (
 )
 
 const maxQueueLimit = 500
+const maxQueueExcludedCards = 10000
 
 // Service provides transactional, user-scoped study operations.
 type Service struct {
@@ -97,11 +98,28 @@ type userOptions struct {
 // Queue returns due cards in Review, Learning/Relearning, New order. A parent
 // deck includes all active descendants; daily counters are user-wide.
 func (s *Service) Queue(ctx context.Context, userID int64, deckID *int64, limit int) ([]QueueCard, error) {
+	return s.QueueExcluding(ctx, userID, deckID, limit, nil)
+}
+
+// QueueExcluding returns a batch of due cards while skipping IDs already
+// present in the caller's active session. Exclusions are applied before daily
+// limits so a continuation batch does not consume allowance for prior cards.
+func (s *Service) QueueExcluding(ctx context.Context, userID int64, deckID *int64, limit int, excludedCardIDs []int64) ([]QueueCard, error) {
 	if !s.ready() || userID <= 0 {
 		return nil, ErrInternal
 	}
-	if limit <= 0 || limit > maxQueueLimit || (deckID != nil && *deckID <= 0) {
+	if limit <= 0 || limit > maxQueueLimit || (deckID != nil && *deckID <= 0) || len(excludedCardIDs) > maxQueueExcludedCards {
 		return nil, ErrInvalidInput
+	}
+	excluded := make(map[int64]struct{}, len(excludedCardIDs))
+	for _, cardID := range excludedCardIDs {
+		if cardID <= 0 {
+			return nil, ErrInvalidInput
+		}
+		if _, duplicate := excluded[cardID]; duplicate {
+			return nil, ErrInvalidInput
+		}
+		excluded[cardID] = struct{}{}
 	}
 
 	tx, queries, err := s.begin(ctx)
@@ -154,6 +172,9 @@ func (s *Service) Queue(ctx context.Context, userID int64, deckID *int64, limit 
 	newRemaining := remaining(options.newPerDay, newCount)
 	result := make([]QueueCard, 0, limit)
 	for _, row := range rows {
+		if _, skip := excluded[row.CardID]; skip {
+			continue
+		}
 		card, err := srsCardFromQueueRow(row)
 		if err != nil {
 			return nil, ErrInternal

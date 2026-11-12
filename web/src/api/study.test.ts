@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createUUIDv7, getStudyQueue, submitStudyReview, undoStudyReview } from './study';
+import { createUUIDv7, getNextStudyQueue, getStudyQueue, submitStudyReview, undoStudyReview } from './study';
 
 const card = {
   id: 5,
@@ -44,6 +44,25 @@ describe('study API', () => {
     expect(queue[0]?.front).toBe('hello');
     expect(queue[0]?.previews[4]?.interval).toBe('1m0s');
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/study/queue?deck_id=2&limit=10');
+  });
+
+  it('requests a subsequent queue batch while excluding cards from the active session', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify([queueCard()]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const queue = await getNextStudyQueue({ deckId: '2', limit: 10, excludeCardIds: [5, 6] });
+
+    expect(queue).toHaveLength(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/study/queue/next');
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('POST');
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      deck_id: 2,
+      limit: 10,
+      exclude_card_ids: [5, 6],
+    });
   });
 
   it('posts a review and undo through the core routes', async () => {

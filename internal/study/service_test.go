@@ -354,6 +354,25 @@ func TestQueueRespectsNestedDeckOrderLimitsAndLocalDay(t *testing.T) {
 	}
 }
 
+func TestQueueExcludingReturnsCardsAfterPreviouslyLoadedBatch(t *testing.T) {
+	now := time.Date(2025, time.June, 4, 12, 0, 0, 0, time.UTC)
+	f := newStudyFixture(t, now)
+	first := f.card(t, f.userID, f.parentID, srs.Learning, now.Add(-time.Hour))
+	second := f.card(t, f.userID, f.parentID, srs.Learning, now.Add(-time.Minute))
+	third := f.card(t, f.userID, f.parentID, srs.Learning, now)
+
+	queue, err := f.service.QueueExcluding(context.Background(), f.userID, &f.parentID, 2, []int64{first, second})
+	if err != nil {
+		t.Fatalf("QueueExcluding() error = %v", err)
+	}
+	if len(queue) != 1 || queue[0].ID != third {
+		t.Fatalf("QueueExcluding() = %#v, want only unseen card %d", queue, third)
+	}
+	if _, err := f.service.QueueExcluding(context.Background(), f.userID, &f.parentID, 2, []int64{first, first}); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("QueueExcluding() duplicate IDs error = %v, want ErrInvalidInput", err)
+	}
+}
+
 func TestUserDayBoundsTimezoneAndDST(t *testing.T) {
 	location, err := time.LoadLocation("America/Los_Angeles")
 	if err != nil {

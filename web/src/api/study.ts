@@ -205,6 +205,21 @@ export async function getStudyQueue({ deckId = null, limit = 50 }: {
   return decodeQueueCards(await request(`/study/queue?${params.toString()}`));
 }
 
+export async function getNextStudyQueue({ deckId = null, limit = 50, excludeCardIds = [] }: {
+  deckId?: DeckId | null;
+  limit?: number;
+  excludeCardIds?: number[];
+} = {}): Promise<QueueCard[]> {
+  return decodeQueueCards(await request('/study/queue/next', {
+    method: 'POST',
+    body: {
+      deck_id: deckId === null ? null : Number(deckId),
+      limit,
+      exclude_card_ids: excludeCardIds,
+    },
+  }));
+}
+
 export async function submitStudyReview(input: ReviewInput): Promise<StudyCard> {
   return decodeStudyCard(await request('/study/review', { method: 'POST', body: input }));
 }

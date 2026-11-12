@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } 
 import { useQuery } from '@tanstack/react-query';
 import { ApiError } from '../api/client';
 import { getDecks, type DeckId, type DeckNode, type NativeLanguage, type TargetLanguage } from '../api/content';
-import { createUUIDv7, getStudyQueue, submitStudyReview, undoStudyReview, type QueueCard, type ReviewInput, type StudyRating } from '../api/study';
+import { createUUIDv7, getNextStudyQueue, getStudyQueue, submitStudyReview, undoStudyReview, type QueueCard, type ReviewInput, type StudyRating } from '../api/study';
 import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
 
@@ -165,6 +165,10 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
       setAnswerShown(false);
     } catch (caught) {
       setError(caught);
+      if (caught instanceof ApiError && caught.status >= 400 && caught.status < 500) {
+        pendingReviewRef.current = null;
+        setPendingReview(null);
+      }
     } finally {
       setBusy(false);
     }
@@ -197,7 +201,11 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
     setLoadingMore(true);
     setError(null);
     try {
-      const nextPage = await getStudyQueue({ deckId, limit: queuePageSize });
+      const nextPage = await getNextStudyQueue({
+        deckId,
+        limit: queuePageSize,
+        excludeCardIds: activeSession.cards.map((card) => card.id),
+      });
       setSessionQueue((previous) => {
         if (!previous || previous.deckKey !== deckKey) return previous;
         const seen = new Set([
@@ -216,7 +224,7 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
     } finally {
       setLoadingMore(false);
     }
-  }, [activeSession?.hasMore, deckId, deckKey, loadingMore, reviewed]);
+  }, [activeSession, deckId, deckKey, loadingMore, reviewed]);
 
   const onSwipeStart = useCallback((event: PointerEvent<HTMLElement>) => {
     if (event.pointerType !== 'touch' || !event.isPrimary || !currentCard) return;
@@ -236,7 +244,7 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
 
   const undo = useCallback(async () => {
     const last = reviewed.at(-1);
-    if (!last || busy) return;
+    if (!last || busy || pendingReview !== null) return;
     setBusy(true);
     setError(null);
     try {
@@ -248,7 +256,7 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
     } finally {
       setBusy(false);
     }
-  }, [busy, reviewed]);
+  }, [busy, pendingReview, reviewed]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -268,7 +276,7 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
 
   const sessionReady = activeSession !== null;
   const progress = queue.length === 0 ? 100 : (reviewed.length / queue.length) * 100;
-  const complete = sessionReady && !queueQuery.isError && !currentCard;
+  const complete = sessionReady && !currentCard;
 
   return (
     <section className="mx-auto grid w-full max-w-4xl gap-5 py-6" aria-labelledby="study-session-heading">
@@ -279,7 +287,7 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
         </div>
         <div className="flex gap-2" aria-label={t('sessionActions')}>
           {voice && currentCard && <Button type="button" variant="tonal" onClick={() => speak(currentCard, voice)}><SpeakIcon />{t('speak')}</Button>}
-          {reviewed.length > 0 && <Button type="button" variant="tonal" disabled={busy} onClick={() => void undo()}>{t(busy ? 'undoing' : 'undo')}</Button>}
+          {reviewed.length > 0 && <Button type="button" variant="tonal" disabled={busy || pendingReview !== null} onClick={() => void undo()}>{t(busy ? 'undoing' : 'undo')}</Button>}
         </div>
       </header>
 

@@ -158,6 +158,7 @@ func TestStudyRoutesQueueReviewUndoAndOwnerIsolation(t *testing.T) {
 	f := newStudyRoutesFixture(t)
 	for _, request := range []struct{ method, target, body string }{
 		{http.MethodGet, "/api/v1/study/queue", ""},
+		{http.MethodPost, "/api/v1/study/queue/next", `{"limit":10,"exclude_card_ids":[]}`},
 		{http.MethodPost, "/api/v1/study/review", `{}`},
 		{http.MethodPost, "/api/v1/study/undo", `{}`},
 	} {
@@ -176,6 +177,16 @@ func TestStudyRoutesQueueReviewUndoAndOwnerIsolation(t *testing.T) {
 	queue := studyRoutesRequest(f.handler, http.MethodGet, "/api/v1/study/queue?deck_id="+strconv.FormatInt(f.ownerDeckID, 10)+"&limit=10", "", f.ownerCookie)
 	if queue.Code != http.StatusOK || !strings.Contains(queue.Body.String(), `"front":"hello"`) {
 		t.Fatalf("owner queue = %d/%s, want card prompt", queue.Code, queue.Body)
+	}
+	nextQueue := studyRoutesRequest(f.handler, http.MethodPost, "/api/v1/study/queue/next",
+		`{"deck_id":`+strconv.FormatInt(f.ownerDeckID, 10)+`,"limit":10,"exclude_card_ids":[`+strconv.FormatInt(f.cardID, 10)+`]}`, f.ownerCookie)
+	if nextQueue.Code != http.StatusOK || strings.TrimSpace(nextQueue.Body.String()) != "[]" {
+		t.Errorf("next owner queue = %d/%s, want empty after excluding its only card", nextQueue.Code, nextQueue.Body)
+	}
+	duplicateExclusion := studyRoutesRequest(f.handler, http.MethodPost, "/api/v1/study/queue/next",
+		`{"limit":10,"exclude_card_ids":[`+strconv.FormatInt(f.cardID, 10)+`,`+strconv.FormatInt(f.cardID, 10)+`]}`, f.ownerCookie)
+	if duplicateExclusion.Code != http.StatusBadRequest {
+		t.Errorf("next queue with duplicate exclusions = %d/%s, want 400", duplicateExclusion.Code, duplicateExclusion.Body)
 	}
 	foreignQueue := studyRoutesRequest(f.handler, http.MethodGet,
 		"/api/v1/study/queue?deck_id="+strconv.FormatInt(f.otherDeckID, 10), "", f.ownerCookie)
