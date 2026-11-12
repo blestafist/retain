@@ -68,6 +68,9 @@ export const en = {
   intervalDays: '{count}d', intervalMonths: '{count}mo', intervalYears: '{count}y',
   studyComplete: 'Session complete', noCardsToStudy: 'There are no cards due right now.',
   studyCompleteDescription: 'You reviewed every card in this queue.', undoing: 'Undoing…',
+  moreStudyCardsAvailable: 'There are more due cards beyond this batch.', loadMoreStudyCards: 'Load more cards',
+  loadingMoreStudyCards: 'Loading more cards…', swipeRatingHint: 'On a touch screen, swipe left for Again or right for Good.',
+  retryReview: 'Retry this review', retryingReview: 'Retrying review…',
 
   settingsHeading: 'Settings', settingsDescription: 'Personalize your study schedule and learning experience.',
   learningSettings: 'Learning limits', learningSettingsDescription: 'Choose how many new and due cards to study each day.',

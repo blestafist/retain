@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StudySession } from './StudySession';
@@ -28,13 +28,14 @@ const queueCard = {
   }])),
 };
 
-function jsonResponse(value: unknown) {
-  return new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } });
+function jsonResponse(value: unknown, status = 200) {
+  return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
 function renderSession() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={queryClient}><StudySession /></QueryClientProvider>);
+  const rendered = render(<QueryClientProvider client={queryClient}><StudySession /></QueryClientProvider>);
+  return { ...rendered, queryClient };
 }
 
 afterEach(() => {
@@ -64,5 +65,125 @@ describe('study session', () => {
     await user.click(screen.getByRole('button', { name: t('undo') }));
     expect(await screen.findByRole('heading', { name: 'hello' })).toBeTruthy();
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain('/api/v1/study/undo');
+  });
+
+  it('keeps the same review ID and payload when retrying an uncertain request', async () => {
+    const user = userEvent.setup();
+    let attempts = 0;
+    const requestBodies: string[] = [];
+    const fetchMock = vi.fn<typeof fetch>((input, init) => {
+      const url = String(input);
+      if (url === '/api/v1/study/queue?deck_id=&limit=50') return Promise.resolve(jsonResponse([queueCard]));
+      if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([]));
+      if (url === '/api/v1/study/review') {
+        requestBodies.push(String(init?.body));
+        attempts += 1;
+        if (attempts === 1) return Promise.resolve(jsonResponse({ error: { code: 'temporarily_unavailable' } }, 503));
+        return Promise.resolve(jsonResponse({ ...queueCard }));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSession();
+    await screen.findByRole('heading', { name: 'hello' });
+    await user.click(screen.getByRole('button', { name: t('showAnswer') }));
+    await user.click(screen.getByRole('button', { name: new RegExp(t('good')) }));
+    expect(await screen.findByRole('button', { name: t('retryReview') })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: t('retryReview') }));
+    expect(await screen.findByRole('heading', { name: t('studyComplete') })).toBeTruthy();
+
+    expect(requestBodies).toHaveLength(2);
+    expect(requestBodies[1]).toBe(requestBodies[0]);
+  });
+
+  it('keeps the session queue stable when the server refetch omits a reviewed card', async () => {
+    const user = userEvent.setup();
+    const secondCard = { ...queueCard, id: 6, front: 'second', back: 'zweite' };
+    const thirdCard = { ...queueCard, id: 7, front: 'third', back: 'dritte' };
+    let queueRequests = 0;
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = String(input);
+      if (url === '/api/v1/study/queue?deck_id=&limit=50') {
+        queueRequests += 1;
+        return Promise.resolve(jsonResponse(queueRequests === 1 ? [queueCard, secondCard, thirdCard] : [secondCard, thirdCard]));
+      }
+      if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([]));
+      if (url === '/api/v1/study/review') return Promise.resolve(jsonResponse({ ...queueCard }));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { queryClient } = renderSession();
+    await screen.findByRole('heading', { name: 'hello' });
+    await user.click(screen.getByRole('button', { name: t('showAnswer') }));
+    await user.click(screen.getByRole('button', { name: new RegExp(t('good')) }));
+    expect(await screen.findByRole('heading', { name: 'second' })).toBeTruthy();
+
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ['study-queue', ''] });
+    });
+    expect(screen.getByRole('heading', { name: 'second' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'third' })).toBeNull();
+  });
+
+  it('loads another queue batch instead of treating the first fifty cards as completion', async () => {
+    const user = userEvent.setup();
+    const firstBatch = Array.from({ length: 50 }, (_, index) => ({
+      ...queueCard,
+      id: index + 1,
+      front: `card ${index + 1}`,
+    }));
+    const nextCard = { ...queueCard, id: 1000, front: 'card 51' };
+    let queueRequests = 0;
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = String(input);
+      if (url === '/api/v1/study/queue?deck_id=&limit=50') {
+        queueRequests += 1;
+        return Promise.resolve(jsonResponse(queueRequests === 1 ? firstBatch : [nextCard]));
+      }
+      if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([]));
+      if (url === '/api/v1/study/review') return Promise.resolve(jsonResponse({ ...queueCard }));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSession();
+    await screen.findByRole('heading', { name: 'card 1' });
+    for (let index = 0; index < firstBatch.length; index += 1) {
+      await user.click(screen.getByRole('button', { name: t('showAnswer') }));
+      await user.click(screen.getByRole('button', { name: new RegExp(t('good')) }));
+    }
+
+    expect(screen.queryByRole('heading', { name: t('studyComplete') })).toBeNull();
+    await user.click(screen.getByRole('button', { name: t('loadMoreStudyCards') }));
+    expect(await screen.findByRole('heading', { name: 'card 51' })).toBeTruthy();
+    expect(queueRequests).toBe(2);
+  });
+
+  it('rates a revealed card with Again when swiped left on touch', async () => {
+    const user = userEvent.setup();
+    let reviewBody: unknown;
+    const fetchMock = vi.fn<typeof fetch>((input, init) => {
+      const url = String(input);
+      if (url === '/api/v1/study/queue?deck_id=&limit=50') return Promise.resolve(jsonResponse([queueCard]));
+      if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([]));
+      if (url === '/api/v1/study/review') {
+        reviewBody = JSON.parse(String(init?.body));
+        return Promise.resolve(jsonResponse({ ...queueCard }));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSession();
+    await screen.findByRole('heading', { name: 'hello' });
+    await user.click(screen.getByRole('button', { name: t('showAnswer') }));
+    const card = screen.getByRole('article', { name: t('studyCard') });
+    fireEvent.pointerDown(card, { pointerId: 1, pointerType: 'touch', isPrimary: true, clientX: 200, clientY: 100 });
+    fireEvent.pointerUp(card, { pointerId: 1, pointerType: 'touch', isPrimary: true, clientX: 100, clientY: 105 });
+
+    await screen.findByRole('heading', { name: t('studyComplete') });
+    expect(reviewBody).toMatchObject({ card_id: queueCard.id, rating: 1 });
   });
 });

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ApiError } from '../api/client';
 import { getDecks, type DeckId, type DeckNode, type NativeLanguage, type TargetLanguage } from '../api/content';
-import { createUUIDv7, getStudyQueue, submitStudyReview, undoStudyReview, type QueueCard, type StudyRating } from '../api/study';
+import { createUUIDv7, getStudyQueue, submitStudyReview, undoStudyReview, type QueueCard, type ReviewInput, type StudyRating } from '../api/study';
 import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
 
@@ -19,6 +19,8 @@ const ratingClasses: Record<StudyRating, string> = {
   3: 'bg-rating-good-container text-on-rating-good-container',
   4: 'bg-rating-easy-container text-on-rating-easy-container',
 };
+
+const queuePageSize = 50;
 
 interface ReviewedCard {
   id: string;
@@ -83,19 +85,26 @@ function SpeakIcon() {
 }
 
 export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: DeckId | null; ttsAuto?: boolean }) {
+  const deckKey = deckId === null ? '' : String(deckId);
   const queueQuery = useQuery({
-    queryKey: ['study-queue', deckId === null ? null : String(deckId)],
-    queryFn: () => getStudyQueue({ deckId, limit: 50 }),
+    queryKey: ['study-queue', deckKey],
+    queryFn: () => getStudyQueue({ deckId, limit: queuePageSize }),
     retry: false,
   });
   const decksQuery = useQuery({ queryKey: ['decks'], queryFn: getDecks, retry: false });
+  const [sessionQueue, setSessionQueue] = useState<{ deckKey: string; cards: QueueCard[]; hasMore: boolean } | null>(null);
   const [reviewed, setReviewed] = useState<ReviewedCard[]>([]);
   const [answerShown, setAnswerShown] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pendingReview, setPendingReview] = useState<ReviewInput | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const shownAt = useRef(Date.now());
-  const queue = queueQuery.data ?? [];
+  const pendingReviewRef = useRef<ReviewInput | null>(null);
+  const swipeStart = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const activeSession = sessionQueue?.deckKey === deckKey ? sessionQueue : null;
+  const queue = activeSession?.cards ?? [];
   const currentCard = queue[reviewed.length];
   const languages = useMemo(
     () => findLanguages(decksQuery.data ?? [], currentCard?.deck_id ?? deckId ?? undefined),
@@ -107,7 +116,18 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
   useEffect(() => {
     setReviewed([]);
     setAnswerShown(false);
+    pendingReviewRef.current = null;
+    setPendingReview(null);
   }, [deckId]);
+
+  useEffect(() => {
+    if (!queueQuery.data || activeSession) return;
+    setSessionQueue({
+      deckKey,
+      cards: queueQuery.data,
+      hasMore: queueQuery.data.length === queuePageSize,
+    });
+  }, [activeSession, deckKey, queueQuery.data]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return undefined;
@@ -134,28 +154,85 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
     if (ttsAuto) speak(currentCard, voice);
   }, [currentCard?.id, currentCard?.front, speak, ttsAuto, voice]);
 
-  const rate = useCallback(async (rating: StudyRating) => {
-    if (!currentCard || busy) return;
+  const submitReview = useCallback(async (input: ReviewInput, card: QueueCard) => {
     setBusy(true);
     setError(null);
-    const id = createUUIDv7();
     try {
-      await submitStudyReview({
-        id,
-        card_id: currentCard.id,
-        rating,
-        mode: 'flip',
-        reviewed_at: new Date().toISOString(),
-        duration_ms: Math.max(0, Date.now() - shownAt.current),
-      });
-      setReviewed((previous) => [...previous, { id, card: currentCard }]);
+      await submitStudyReview(input);
+      pendingReviewRef.current = null;
+      setPendingReview(null);
+      setReviewed((previous) => [...previous, { id: input.id, card }]);
       setAnswerShown(false);
     } catch (caught) {
       setError(caught);
     } finally {
       setBusy(false);
     }
-  }, [busy, currentCard]);
+  }, []);
+
+  const rate = useCallback(async (rating: StudyRating) => {
+    if (!currentCard || busy) return;
+    const existing = pendingReviewRef.current;
+    const input = existing?.card_id === currentCard.id ? existing : {
+        id: createUUIDv7(),
+        card_id: currentCard.id,
+        rating,
+        mode: 'flip',
+        reviewed_at: new Date().toISOString(),
+        duration_ms: Math.max(0, Date.now() - shownAt.current),
+      } satisfies ReviewInput;
+    pendingReviewRef.current = input;
+    setPendingReview(input);
+    await submitReview(input, currentCard);
+  }, [busy, currentCard, submitReview]);
+
+  const retryPendingReview = useCallback(async () => {
+    const input = pendingReviewRef.current;
+    if (!input || !currentCard || input.card_id !== currentCard.id || busy) return;
+    await submitReview(input, currentCard);
+  }, [busy, currentCard, submitReview]);
+
+  const loadMore = useCallback(async () => {
+    if (!activeSession?.hasMore || loadingMore) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const nextPage = await getStudyQueue({ deckId, limit: queuePageSize });
+      setSessionQueue((previous) => {
+        if (!previous || previous.deckKey !== deckKey) return previous;
+        const seen = new Set([
+          ...previous.cards.map((card) => card.id),
+          ...reviewed.map(({ card }) => card.id),
+        ]);
+        const newCards = nextPage.filter((card) => !seen.has(card.id));
+        return {
+          deckKey,
+          cards: [...previous.cards, ...newCards],
+          hasMore: nextPage.length === queuePageSize && newCards.length > 0,
+        };
+      });
+    } catch (caught) {
+      setError(caught);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [activeSession?.hasMore, deckId, deckKey, loadingMore, reviewed]);
+
+  const onSwipeStart = useCallback((event: PointerEvent<HTMLElement>) => {
+    if (event.pointerType !== 'touch' || !event.isPrimary || !currentCard) return;
+    if (event.target instanceof Element && event.target.closest('button, a, input, select, textarea, [contenteditable="true"]')) return;
+    swipeStart.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+  }, [currentCard]);
+
+  const onSwipeEnd = useCallback((event: PointerEvent<HTMLElement>) => {
+    const start = swipeStart.current;
+    swipeStart.current = null;
+    if (!start || start.pointerId !== event.pointerId || !answerShown || busy) return;
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (Math.abs(deltaX) < 80 || Math.abs(deltaX) < Math.abs(deltaY) * 1.3) return;
+    void rate(deltaX < 0 ? 1 : 3);
+  }, [answerShown, busy, rate]);
 
   const undo = useCallback(async () => {
     const last = reviewed.at(-1);
@@ -189,8 +266,9 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [answerShown, busy, currentCard, rate]);
 
+  const sessionReady = activeSession !== null;
   const progress = queue.length === 0 ? 100 : (reviewed.length / queue.length) * 100;
-  const complete = !queueQuery.isPending && !queueQuery.isError && !currentCard;
+  const complete = sessionReady && !queueQuery.isError && !currentCard;
 
   return (
     <section className="mx-auto grid w-full max-w-4xl gap-5 py-6" aria-labelledby="study-session-heading">
@@ -226,7 +304,13 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
             </div>
           </div>
 
-          <article className="grid min-h-80 content-center gap-8 rounded-[2rem] bg-surface-container-low p-6 text-center sm:p-10" aria-label={t('studyCard')}>
+          <article
+            className="grid min-h-80 content-center gap-8 rounded-[2rem] bg-surface-container-low p-6 text-center [touch-action:pan-y] sm:p-10"
+            aria-label={t('studyCard')}
+            onPointerDown={onSwipeStart}
+            onPointerUp={onSwipeEnd}
+            onPointerCancel={() => { swipeStart.current = null; }}
+          >
             <div className="grid gap-4">
               <p className="m-0 text-sm font-medium uppercase tracking-wide text-primary">{t('front')}</p>
               <h2 className="m-0 break-words text-4xl font-semibold text-on-surface sm:text-5xl">{currentCard.front}</h2>
@@ -249,7 +333,7 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
                     <button
                       key={rating}
                       type="button"
-                      disabled={busy}
+                      disabled={busy || pendingReview !== null}
                       onClick={() => void rate(rating)}
                       className={`flex min-h-12 flex-col items-center justify-center rounded-2xl px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 ${ratingClasses[rating]}`}
                     >
@@ -258,14 +342,22 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
                     </button>
                   ))}
                 </div>
+                {pendingReview && <Button type="button" variant="tonal" disabled={busy} onClick={() => void retryPendingReview()}>{t(busy ? 'retryingReview' : 'retryReview')}</Button>}
                 <p className="m-0 text-sm text-on-surface-variant">{t('ratingShortcut')}</p>
+                <p className="m-0 text-sm text-on-surface-variant">{t('swipeRatingHint')}</p>
               </div>
             )}
           </article>
         </>
       )}
 
-      {complete && <div role="status" className="rounded-3xl bg-secondary-container p-6 text-on-secondary-container"><h2 className="m-0 text-2xl font-semibold">{t('studyComplete')}</h2><p className="mb-0">{t(queue.length === 0 ? 'noCardsToStudy' : 'studyCompleteDescription')}</p></div>}
+      {complete && activeSession?.hasMore && (
+        <div className="rounded-3xl bg-surface-container-low p-5">
+          <p className="m-0 mb-3 text-on-surface-variant">{t('moreStudyCardsAvailable')}</p>
+          <Button type="button" disabled={loadingMore} onClick={() => void loadMore()}>{t(loadingMore ? 'loadingMoreStudyCards' : 'loadMoreStudyCards')}</Button>
+        </div>
+      )}
+      {complete && !activeSession?.hasMore && <div role="status" className="rounded-3xl bg-secondary-container p-6 text-on-secondary-container"><h2 className="m-0 text-2xl font-semibold">{t('studyComplete')}</h2><p className="mb-0">{t(queue.length === 0 ? 'noCardsToStudy' : 'studyCompleteDescription')}</p></div>}
     </section>
   );
 }

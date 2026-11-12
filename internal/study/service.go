@@ -441,9 +441,7 @@ func optionsFromSettings(settings gen.UserSetting) (userOptions, error) {
 		if len(weights) != 17 && len(weights) != len(parameters.Weights) {
 			return userOptions{}, fmt.Errorf("%w: invalid FSRS weight count", ErrInternal)
 		}
-		for i, weight := range weights {
-			parameters.Weights[i] = weight
-		}
+		copy(parameters.Weights[:], weights)
 	}
 	scheduler, err := srs.NewScheduler(parameters)
 	if err != nil {

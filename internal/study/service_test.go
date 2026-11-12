@@ -354,15 +354,6 @@ func TestQueueRespectsNestedDeckOrderLimitsAndLocalDay(t *testing.T) {
 	}
 }
 
-func mustLoadLocation(t *testing.T, name string) *time.Location {
-	t.Helper()
-	location, err := time.LoadLocation(name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return location
-}
-
 func TestUserDayBoundsTimezoneAndDST(t *testing.T) {
 	location, err := time.LoadLocation("America/Los_Angeles")
 	if err != nil {
