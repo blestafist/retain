@@ -95,6 +95,37 @@ type Note struct {
 	DeletionBatch      sql.NullString
 }
 
+type ReviewLog struct {
+	ID                  string
+	CardID              int64
+	UserID              int64
+	Rating              int64
+	Mode                string
+	StateBefore         int64
+	StabilityBefore     sql.NullFloat64
+	DifficultyBefore    sql.NullFloat64
+	StabilityAfter      float64
+	DifficultyAfter     float64
+	ScheduledDays       int64
+	SchedulerParameters sql.NullString
+	ReviewedAt          time.Time
+	ReceivedAt          time.Time
+	DurationMs          int64
+	Undone              bool
+}
+
+type ReviewLogProjection struct {
+	ReviewID         string
+	CardID           int64
+	UserID           int64
+	StateBefore      int64
+	StabilityBefore  sql.NullFloat64
+	DifficultyBefore sql.NullFloat64
+	StabilityAfter   float64
+	DifficultyAfter  float64
+	ScheduledDays    int64
+}
+
 type Session struct {
 	TokenHash []byte
 	UserID    int64

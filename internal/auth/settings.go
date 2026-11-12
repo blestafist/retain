@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pestit/retain/internal/db/gen"
+	"github.com/pestit/retain/internal/srs"
 )
 
 // UpdateSettings applies a partial flat snake_case settings patch and returns
@@ -208,7 +209,7 @@ func compactFSRSWeights(raw []byte) (string, error) {
 func validateSettings(settings gen.UserSetting) error {
 	if settings.NewPerDay < 0 || settings.MaxReviewsPerDay < 0 ||
 		math.IsNaN(settings.RequestRetention) || math.IsInf(settings.RequestRetention, 0) ||
-		settings.RequestRetention <= 0 || settings.RequestRetention > 1 || settings.MaximumInterval <= 0 ||
+		settings.RequestRetention <= 0 || settings.RequestRetention >= 1 || settings.MaximumInterval <= 0 ||
 		!validSteps(settings.LearningSteps) || !validSteps(settings.RelearningSteps) {
 		return ErrInvalidInput
 	}
@@ -247,17 +248,8 @@ func validateSettings(settings gen.UserSetting) error {
 }
 
 func validSteps(value string) bool {
-	fields := strings.Fields(value)
-	if len(fields) == 0 {
-		return false
-	}
-	for _, field := range fields {
-		duration, err := time.ParseDuration(field)
-		if err != nil || duration <= 0 {
-			return false
-		}
-	}
-	return true
+	steps, err := srs.ParseSteps(value)
+	return err == nil && len(steps) > 0
 }
 
 func validReminderTime(value string) bool {

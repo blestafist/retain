@@ -80,9 +80,9 @@ func TestOpenAppliesMigrationsOnceAndCreatesAccountAndContentSchema(t *testing.T
 			_ = database.Close()
 			t.Fatalf("read current migration version: %v", err)
 		}
-		if currentVersion != 4 {
+		if currentVersion != 5 {
 			_ = database.Close()
-			t.Errorf("current migration version = %d, want 4", currentVersion)
+			t.Errorf("current migration version = %d, want 5", currentVersion)
 		}
 
 		var productTables int
@@ -92,9 +92,9 @@ func TestOpenAppliesMigrationsOnceAndCreatesAccountAndContentSchema(t *testing.T
 			_ = database.Close()
 			t.Fatalf("count product tables: %v", err)
 		}
-		if productTables != 8 {
+		if productTables != 10 {
 			_ = database.Close()
-			t.Errorf("product tables = %d, want 8", productTables)
+			t.Errorf("product tables = %d, want 10", productTables)
 		}
 
 		if err := database.Close(); err != nil {

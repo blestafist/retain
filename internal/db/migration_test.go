@@ -67,7 +67,7 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 			t.Errorf("close migrated database: %v", err)
 		}
 	})
-	assertMigrationVersion(t, ctx, database.SQL, 4)
+	assertMigrationVersion(t, ctx, database.SQL, 5)
 	assertOriginalContentRowsEqual(t, ctx, database.SQL, wantRows)
 	assertMigrationDeletionBatch(t, ctx, database.SQL, "decks", ids.archivedDeck,
 		fmt.Sprintf("migration-00004-deck-%d", ids.archivedDeck))
@@ -104,7 +104,7 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 	if got := migrationDeckParentDeleteAction(t, ctx, database.SQL); got != "RESTRICT" {
 		t.Fatalf("version-4 decks.parent_id ON DELETE = %q, want RESTRICT", got)
 	}
-	assertLatestMigrationSchema(t, ctx, database.SQL)
+	assertStudyMigrationSchema(t, ctx, database.SQL)
 	assertForeignKeysEnabled(t, ctx, database.SQL)
 	assertForeignKeyCheckClean(t, ctx, database.SQL)
 	assertLatestMigrationColumns(t, ctx, database.SQL)
@@ -309,26 +309,26 @@ DROP TABLE migration_partial_ddl;
 }
 
 type originalContentIDs struct {
-	rootDeck                  int64
-	archivedDeck              int64
-	archivedNote              int64
-	legacyChild               int64
-	legacyGrandchild          int64
-	independentDeck            int64
-	independentChild           int64
-	legacyActiveNote           int64
-	legacyActiveCard           int64
-	independentNote            int64
-	independentNoteCard        int64
-	independentDeckNote        int64
-	independentDeckCard        int64
-	archivedCard               int64
-	foreignDeck                int64
-	foreignNote                int64
-	foreignCard                int64
-	deckIDs                    []int64
-	noteIDs                    []int64
-	cardIDs                    []int64
+	rootDeck            int64
+	archivedDeck        int64
+	archivedNote        int64
+	legacyChild         int64
+	legacyGrandchild    int64
+	independentDeck     int64
+	independentChild    int64
+	legacyActiveNote    int64
+	legacyActiveCard    int64
+	independentNote     int64
+	independentNoteCard int64
+	independentDeckNote int64
+	independentDeckCard int64
+	archivedCard        int64
+	foreignDeck         int64
+	foreignNote         int64
+	foreignCard         int64
+	deckIDs             []int64
+	noteIDs             []int64
+	cardIDs             []int64
 }
 
 func seedOriginalContentRows(t *testing.T, ctx context.Context, database *sql.DB, ownerID int64) originalContentIDs {
@@ -597,6 +597,56 @@ func assertLatestMigrationSchema(t *testing.T, ctx context.Context, database *sq
 	for _, name := range wantNames {
 		if _, ok := objects[name]; !ok {
 			t.Errorf("latest schema is missing %s", name)
+		}
+	}
+}
+
+func assertStudyMigrationSchema(t *testing.T, ctx context.Context, database *sql.DB) {
+	t.Helper()
+	objects := readMigrationSchemaObjects(t, ctx, database)
+	if len(objects) != 26 {
+		t.Errorf("version-5 schema has %d explicit indexes/triggers, want 26: %#v", len(objects), objects)
+	}
+	for _, name := range []string{
+		"index.cards_id_user_id_idx",
+		"index.review_logs_user_reviewed_idx",
+		"index.review_logs_card_reviewed_idx",
+		"index.review_log_projection_user_card_idx",
+		"trigger.review_log_projection_insert",
+		"trigger.review_log_projection_undo",
+		"trigger.review_logs_append_only_update",
+		"trigger.review_logs_append_only_delete",
+	} {
+		if _, ok := objects[name]; !ok {
+			t.Errorf("study migration schema is missing %s", name)
+		}
+	}
+	for table, wanted := range map[string][]string{
+		"review_logs":           {"id", "card_id", "user_id", "rating", "mode", "state_before", "scheduler_parameters", "reviewed_at", "received_at", "duration_ms", "undone"},
+		"review_log_projection": {"review_id", "card_id", "user_id", "state_before", "stability_after", "difficulty_after", "scheduled_days"},
+	} {
+		rows, err := database.QueryContext(ctx, "PRAGMA table_info("+table+")")
+		if err != nil {
+			t.Fatalf("read %s columns: %v", table, err)
+		}
+		columns := make(map[string]bool)
+		for rows.Next() {
+			var cid, notNull, primaryKey int
+			var name, kind string
+			var defaultValue sql.NullString
+			if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primaryKey); err != nil {
+				_ = rows.Close()
+				t.Fatalf("scan %s column: %v", table, err)
+			}
+			columns[name] = true
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatalf("close %s columns: %v", table, err)
+		}
+		for _, name := range wanted {
+			if !columns[name] {
+				t.Errorf("study migration table %s is missing column %s", table, name)
+			}
 		}
 	}
 }
