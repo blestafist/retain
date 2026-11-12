@@ -21,6 +21,7 @@ interface TrackedJob {
   jobId: string;
   deckId: string;
   deckName: string;
+  createdAt?: number;
 }
 
 interface ApplySummary {
@@ -45,13 +46,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function compareJobs(left: TrackedJob, right: TrackedJob): number {
+  if (left.createdAt === undefined && right.createdAt === undefined) return 0;
+  if (left.createdAt === undefined) return -1;
+  if (right.createdAt === undefined) return 1;
+  if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
+  return left.jobId < right.jobId ? -1 : left.jobId > right.jobId ? 1 : 0;
+}
+
 function parseJobs(raw: string | null): TrackedJob[] {
   try {
     const parsed: unknown = JSON.parse(raw ?? '[]');
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is TrackedJob => isRecord(item)
+    return mergeJobs(parsed.filter((item): item is TrackedJob => isRecord(item)
       && typeof item.jobId === 'string' && item.jobId.length > 0
-      && typeof item.deckId === 'string' && typeof item.deckName === 'string').slice(-20);
+      && typeof item.deckId === 'string' && typeof item.deckName === 'string'
+      && (item.createdAt === undefined || (typeof item.createdAt === 'number' && Number.isFinite(item.createdAt)))));
   } catch {
     return [];
   }
@@ -69,10 +79,20 @@ function mergeJobs(...lists: TrackedJob[][]): TrackedJob[] {
   const merged = new Map<string, TrackedJob>();
   for (const list of lists) {
     for (const item of list) {
-      merged.set(item.jobId, item);
+      const previous = merged.get(item.jobId);
+      merged.set(item.jobId, previous && item.createdAt === undefined
+        ? { ...previous, ...item, createdAt: previous.createdAt }
+        : { ...previous, ...item });
     }
   }
-  return [...merged.values()].slice(-20);
+  return [...merged.values()].sort(compareJobs).slice(-20);
+}
+
+function persistJobs(key: string, jobs: TrackedJob[]): void {
+  const serialized = JSON.stringify(jobs);
+  if (window.localStorage.getItem(key) !== serialized) {
+    window.localStorage.setItem(key, serialized);
+  }
 }
 
 function isLocalStorageEvent(event: StorageEvent): boolean {
@@ -97,7 +117,7 @@ function readJobs(ownerId: number): TrackedJob[] {
 
   if (legacyValue !== null) {
     try {
-      window.localStorage.setItem(key, JSON.stringify(jobs));
+      persistJobs(key, jobs);
       try {
         window.sessionStorage.removeItem(key);
       } catch {
@@ -112,7 +132,8 @@ function readJobs(ownerId: number): TrackedJob[] {
 
 function sameJobs(left: TrackedJob[], right: TrackedJob[]): boolean {
   return left.length === right.length && left.every((item, index) =>
-    item.jobId === right[index].jobId && item.deckId === right[index].deckId && item.deckName === right[index].deckName);
+    item.jobId === right[index].jobId && item.deckId === right[index].deckId && item.deckName === right[index].deckName
+    && item.createdAt === right[index].createdAt);
 }
 
 function entriesFor(item: DeckEnrichmentItem): EnrichmentEntry[] {
@@ -202,6 +223,13 @@ function DeckEnrichmentPanelForOwner({ ownerId, deckId, deckName, enabled }: {
   const [applyResults, setApplyResults] = useState<Record<string, ApplySummary>>({});
   const startMutation = useStartDeckEnrichment();
   const applyMutation = useApplyNoteEnrichment();
+
+  useEffect(() => {
+    if (jobs.some((item) => item.jobId === selectedJobId)) return;
+    const latestJob = jobs.at(-1);
+    if (latestJob) setSelectedJobId(latestJob.jobId);
+  }, [jobs, selectedJobId]);
+
   const selectedJob = jobs.find((job) => job.jobId === selectedJobId);
   const jobQuery = useJobStatus(ownerId, selectedJobId, selectedJob !== undefined);
   const job = jobQuery.data;
@@ -213,7 +241,7 @@ function DeckEnrichmentPanelForOwner({ ownerId, deckId, deckName, enabled }: {
     try {
       const latest = readStoredJobs(() => window.localStorage.getItem(key));
       const merged = mergeJobs(latest, jobs);
-      window.localStorage.setItem(key, JSON.stringify(merged));
+      persistJobs(key, merged);
       setJobs((current) => {
         const next = mergeJobs(current, merged);
         return sameJobs(current, next) ? current : next;
@@ -228,14 +256,25 @@ function DeckEnrichmentPanelForOwner({ ownerId, deckId, deckName, enabled }: {
     function onStorage(event: StorageEvent) {
       if (event.key !== key || !isLocalStorageEvent(event)) return;
       const incoming = parseJobs(event.newValue);
+      const receivedNewJobs = incoming.filter((item) => !jobs.some((current) => current.jobId === item.jobId));
+      let merged = mergeJobs(jobs, incoming);
+      try {
+        const latest = readStoredJobs(() => window.localStorage.getItem(key));
+        merged = mergeJobs(latest, merged);
+        persistJobs(key, merged);
+      } catch {
+        // Keep the in-memory merge when storage is unavailable.
+      }
       setJobs((current) => {
-        const next = mergeJobs(current, incoming);
+        const next = mergeJobs(current, merged);
         return sameJobs(current, next) ? current : next;
       });
+      const newestReceivedJob = receivedNewJobs.at(-1);
+      if (newestReceivedJob) setSelectedJobId(newestReceivedJob.jobId);
     }
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, [ownerId]);
+  }, [jobs, ownerId]);
 
   async function start() {
     if (!canStart) return;
@@ -245,8 +284,8 @@ function DeckEnrichmentPanelForOwner({ ownerId, deckId, deckName, enabled }: {
     setApplyResults({});
     try {
       const result = await startMutation.mutateAsync(deckId);
-      const tracked = { jobId: result.job_id, deckId: String(deckId), deckName };
-      setJobs((current) => [...current.filter((item) => item.jobId !== tracked.jobId), tracked].slice(-20));
+      const tracked = { jobId: result.job_id, deckId: String(deckId), deckName, createdAt: Date.now() };
+      setJobs((current) => mergeJobs(current, [tracked]));
       setSelectedJobId(tracked.jobId);
     } catch {
       setStartError(true);
