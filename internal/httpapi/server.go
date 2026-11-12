@@ -9,6 +9,11 @@ import (
 	"time"
 
 	"github.com/pestit/retain/internal/auth"
+	"github.com/pestit/retain/internal/clock"
+	"github.com/pestit/retain/internal/contentimport"
+	"github.com/pestit/retain/internal/db"
+	"github.com/pestit/retain/internal/decks"
+	"github.com/pestit/retain/internal/notes"
 )
 
 const healthCheckTimeout = 2 * time.Second
@@ -21,9 +26,23 @@ type databasePinger interface {
 // behind the same-origin guard. Frontend build output is optional so the
 // server package also works in a fresh checkout.
 func NewHandler(publicOrigin string, database databasePinger, authService *auth.Service, frontend fs.FS) http.Handler {
+	return newHandler(publicOrigin, database, authService, nil, frontend)
+}
+
+// NewHandlerWithContent wires owner-scoped deck, note, import, and export routes.
+func NewHandlerWithContent(publicOrigin string, database databasePinger, authService *auth.Service, contentDB *db.DB, frontend fs.FS) http.Handler {
+	return newHandler(publicOrigin, database, authService, contentDB, frontend)
+}
+
+func newHandler(publicOrigin string, database databasePinger, authService *auth.Service, contentDB *db.DB, frontend fs.FS) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler(database))
 	RegisterAccountRoutes(mux, authService)
+	if contentDB != nil {
+		appClock := clock.Real{}
+		RegisterContentRoutes(mux, authService, decks.NewService(contentDB, appClock), notes.NewService(contentDB, appClock))
+		RegisterImportRoutes(mux, authService, contentimport.NewService(contentDB, appClock))
+	}
 	mux.HandleFunc("GET /schema/retain-v1.json", retainV1SchemaHandler)
 	mux.Handle("GET /", frontendHandler(frontend))
 	return RequireSameOrigin(publicOrigin, mux)

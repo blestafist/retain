@@ -98,7 +98,7 @@ func run(logger *slog.Logger) error {
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewHandler(cfg.PublicOrigin, database.SQL, authService, web.Files()),
+		Handler:           httpapi.NewHandlerWithContent(cfg.PublicOrigin, database.SQL, authService, database, web.Files()),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

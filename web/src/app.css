@@ -265,8 +265,45 @@ body {
   overflow-wrap: anywhere;
 }
 
+.app-content {
+  width: 100%;
+  max-width: 96rem;
+  justify-content: flex-start;
+  padding-block: 1.25rem 4rem;
+}
+
+.app-user-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 1rem;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.app-user-bar .auth-kicker,
+.app-user-name,
+.app-user-email {
+  margin: 0;
+}
+
+.app-user-name {
+  color: var(--md-sys-color-on-surface);
+  font: var(--md-sys-typescale-title-medium);
+}
+
+.app-user-email {
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-body-medium);
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 37.5rem) {
   .auth-card {
     box-shadow: none;
+  }
+
+  .app-user-bar {
+    align-items: flex-start;
   }
 }
