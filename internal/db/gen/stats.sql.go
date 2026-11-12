@@ -19,15 +19,17 @@ SELECT CAST(?1 AS TEXT) AS label,
        CAST(COALESCE(SUM(CASE WHEN projection.state_before = 2 AND logs.rating >= 2 THEN 1 ELSE 0 END), 0) AS INTEGER) AS recalled_reviews
 FROM review_logs AS logs
 JOIN review_log_projection AS projection ON projection.review_id = logs.id
-WHERE logs.user_id = ?2
+ WHERE logs.user_id = ?2
   AND logs.undone = 0
-  AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) >= CAST(?3 AS INTEGER)
-    AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) < CAST(?4 AS INTEGER)
+   AND logs.reviewed_at <= CAST(?3 AS TEXT)
+  AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) >= CAST(?4 AS INTEGER)
+    AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) < CAST(?5 AS INTEGER)
 `
 
 type GetStatsBucketsActivityParams struct {
 	Label     string
 	UserID    int64
+	NowAt     string
 	StartUnix int64
 	EndUnix   int64
 }
@@ -45,6 +47,7 @@ func (q *Queries) GetStatsBucketsActivity(ctx context.Context, arg GetStatsBucke
 	row := q.db.QueryRowContext(ctx, getStatsBucketsActivity,
 		arg.Label,
 		arg.UserID,
+		arg.NowAt,
 		arg.StartUnix,
 		arg.EndUnix,
 	)
@@ -232,9 +235,9 @@ WITH card_metrics AS (
      SELECT CAST(COUNT(*) AS INTEGER) AS total_reviews,
             CAST(COALESCE(SUM(logs.duration_ms), 0) AS INTEGER) AS total_duration_ms,
             CAST(COALESCE(AVG(logs.duration_ms), 0) AS INTEGER) AS average_duration_ms,
-            CAST(COALESCE(SUM(CASE WHEN CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) >= CAST(?3 AS INTEGER)
-                                     AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) < CAST(?4 AS INTEGER)
-                                   THEN 1 ELSE 0 END), 0) AS INTEGER) AS reviews_today,
+             CAST(COALESCE(SUM(CASE WHEN CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) >= CAST(?3 AS INTEGER)
+                                      AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) < CAST(?4 AS INTEGER)
+                                    THEN 1 ELSE 0 END), 0) AS INTEGER) AS reviews_today,
             CAST(COALESCE(SUM(CASE WHEN projection.state_before = 0 AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) >= CAST(?3 AS INTEGER)
                                      AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) < CAST(?4 AS INTEGER)
                                    THEN 1 ELSE 0 END), 0) AS INTEGER) AS new_reviews_today,
@@ -249,7 +252,8 @@ WITH card_metrics AS (
                                    THEN logs.duration_ms ELSE 0 END), 0) AS INTEGER) AS duration_today_ms
      FROM review_logs AS logs
      JOIN review_log_projection AS projection ON projection.review_id = logs.id
-     WHERE logs.user_id = ?2 AND logs.undone = 0
+      WHERE logs.user_id = ?2 AND logs.undone = 0
+         AND logs.reviewed_at <= CAST(?5 AS TEXT)
 )
 SELECT card_metrics.total_cards, card_metrics.new_cards, card_metrics.learning_cards,
        card_metrics.review_cards, card_metrics.relearning_cards, card_metrics.young_cards,
@@ -265,6 +269,7 @@ type GetStatsOverviewParams struct {
 	UserID       int64
 	DayStartUnix int64
 	DayEndUnix   int64
+	NowAt        string
 }
 
 type GetStatsOverviewRow struct {
@@ -293,6 +298,7 @@ func (q *Queries) GetStatsOverview(ctx context.Context, arg GetStatsOverviewPara
 		arg.UserID,
 		arg.DayStartUnix,
 		arg.DayEndUnix,
+		arg.NowAt,
 	)
 	var i GetStatsOverviewRow
 	err := row.Scan(
@@ -328,12 +334,18 @@ WHERE cards.user_id = ?1
   AND cards.state = 2
   AND cards.stability IS NOT NULL
   AND cards.difficulty IS NOT NULL
-  AND cards.last_review IS NOT NULL
+   AND cards.last_review IS NOT NULL
+    AND cards.last_review <= CAST(?2 AS TEXT)
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
   AND decks.owner_id = cards.user_id
 `
+
+type GetStatsRetrievabilityCardsParams struct {
+	UserID int64
+	NowAt  string
+}
 
 type GetStatsRetrievabilityCardsRow struct {
 	ID            int64
@@ -349,8 +361,8 @@ type GetStatsRetrievabilityCardsRow struct {
 	LastReview    sql.NullTime
 }
 
-func (q *Queries) GetStatsRetrievabilityCards(ctx context.Context, userID int64) ([]GetStatsRetrievabilityCardsRow, error) {
-	rows, err := q.db.QueryContext(ctx, getStatsRetrievabilityCards, userID)
+func (q *Queries) GetStatsRetrievabilityCards(ctx context.Context, arg GetStatsRetrievabilityCardsParams) ([]GetStatsRetrievabilityCardsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getStatsRetrievabilityCards, arg.UserID, arg.NowAt)
 	if err != nil {
 		return nil, err
 	}
@@ -559,17 +571,19 @@ WHERE cards.user_id = ?1
   AND decks.deleted_at IS NULL
   AND decks.owner_id = cards.user_id
    AND logs.undone = 0
-   AND projection.stability_after >= 21
-  AND logs.reviewed_at >= CAST(?2 AS TEXT)
-  AND logs.reviewed_at < CAST(?3 AS TEXT)
+  AND projection.stability_after >= 21
+   AND logs.reviewed_at <= CAST(?2 AS TEXT)
+  AND logs.reviewed_at >= CAST(?3 AS TEXT)
+  AND logs.reviewed_at < CAST(?4 AS TEXT)
   AND logs.id = (
        SELECT candidate.id
        FROM review_logs AS candidate
        JOIN review_log_projection AS candidate_projection ON candidate_projection.review_id = candidate.id
        WHERE candidate.card_id = cards.id
         AND candidate.user_id = cards.user_id
-         AND candidate.undone = 0
-         AND candidate_projection.stability_after >= 21
+          AND candidate.undone = 0
+           AND candidate.reviewed_at <= CAST(?2 AS TEXT)
+          AND candidate_projection.stability_after >= 21
       ORDER BY candidate.reviewed_at, candidate.id
       LIMIT 1
   )
@@ -579,6 +593,7 @@ ORDER BY deck_language.lang_target
 
 type GetStatsVocabularyGrowthParams struct {
 	UserID  int64
+	NowAt   string
 	StartAt string
 	EndAt   string
 }
@@ -589,7 +604,12 @@ type GetStatsVocabularyGrowthRow struct {
 }
 
 func (q *Queries) GetStatsVocabularyGrowth(ctx context.Context, arg GetStatsVocabularyGrowthParams) ([]GetStatsVocabularyGrowthRow, error) {
-	rows, err := q.db.QueryContext(ctx, getStatsVocabularyGrowth, arg.UserID, arg.StartAt, arg.EndAt)
+	rows, err := q.db.QueryContext(ctx, getStatsVocabularyGrowth,
+		arg.UserID,
+		arg.NowAt,
+		arg.StartAt,
+		arg.EndAt,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -617,13 +637,15 @@ FROM review_logs AS logs
 JOIN review_log_projection AS projection ON projection.review_id = logs.id
 WHERE logs.user_id = ?1
   AND logs.undone = 0
-  AND logs.reviewed_at >= CAST(?2 AS TEXT)
-  AND logs.reviewed_at < CAST(?3 AS TEXT)
+   AND logs.reviewed_at <= CAST(?2 AS TEXT)
+  AND logs.reviewed_at >= CAST(?3 AS TEXT)
+  AND logs.reviewed_at < CAST(?4 AS TEXT)
 ORDER BY logs.reviewed_at, logs.id
 `
 
 type ListStatsActivityRangeParams struct {
 	UserID  int64
+	NowAt   string
 	StartAt string
 	EndAt   string
 }
@@ -637,7 +659,12 @@ type ListStatsActivityRangeRow struct {
 
 // This uses the user/reviewed_at composite index; Go applies exact local-day buckets.
 func (q *Queries) ListStatsActivityRange(ctx context.Context, arg ListStatsActivityRangeParams) ([]ListStatsActivityRangeRow, error) {
-	rows, err := q.db.QueryContext(ctx, listStatsActivityRange, arg.UserID, arg.StartAt, arg.EndAt)
+	rows, err := q.db.QueryContext(ctx, listStatsActivityRange,
+		arg.UserID,
+		arg.NowAt,
+		arg.StartAt,
+		arg.EndAt,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -680,12 +707,14 @@ WHERE cards.id = ?1
   AND decks.deleted_at IS NULL
   AND decks.owner_id = cards.user_id
    AND logs.undone = 0
+    AND logs.reviewed_at <= CAST(?3 AS TEXT)
 ORDER BY logs.reviewed_at, logs.id
 `
 
 type ListStatsCardCurveLogsParams struct {
 	CardID int64
 	UserID int64
+	NowAt  string
 }
 
 type ListStatsCardCurveLogsRow struct {
@@ -701,7 +730,7 @@ type ListStatsCardCurveLogsRow struct {
 }
 
 func (q *Queries) ListStatsCardCurveLogs(ctx context.Context, arg ListStatsCardCurveLogsParams) ([]ListStatsCardCurveLogsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listStatsCardCurveLogs, arg.CardID, arg.UserID)
+	rows, err := q.db.QueryContext(ctx, listStatsCardCurveLogs, arg.CardID, arg.UserID, arg.NowAt)
 	if err != nil {
 		return nil, err
 	}
@@ -841,18 +870,27 @@ FROM review_logs AS logs
 JOIN review_log_projection AS projection ON projection.review_id = logs.id
 WHERE logs.user_id = ?1
   AND logs.undone = 0
-  AND logs.reviewed_at < CAST(?2 AS TEXT)
+  AND logs.reviewed_at >= CAST(?2 AS TEXT)
+  AND logs.reviewed_at < CAST(?3 AS TEXT)
+  AND logs.reviewed_at <= CAST(?4 AS TEXT)
 ORDER BY logs.reviewed_at DESC
 `
 
 type ListStatsReviewTimestampsParams struct {
-	UserID int64
-	EndAt  string
+	UserID  int64
+	StartAt string
+	EndAt   string
+	NowAt   string
 }
 
-// The service maps timestamps to study days in one indexed pass to derive streaks.
+// The service maps a bounded date range to study days for streak calculation.
 func (q *Queries) ListStatsReviewTimestamps(ctx context.Context, arg ListStatsReviewTimestampsParams) ([]time.Time, error) {
-	rows, err := q.db.QueryContext(ctx, listStatsReviewTimestamps, arg.UserID, arg.EndAt)
+	rows, err := q.db.QueryContext(ctx, listStatsReviewTimestamps,
+		arg.UserID,
+		arg.StartAt,
+		arg.EndAt,
+		arg.NowAt,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -43,7 +43,7 @@ func newStatsFixture(t *testing.T) *statsFixture {
 		}
 	})
 
-	clock := &statsTestClock{now: time.Date(2026, time.April, 3, 7, 0, 0, 0, time.UTC)}
+	clock := &statsTestClock{now: time.Date(2026, time.April, 3, 10, 59, 0, 0, time.UTC)}
 	queries := database.Queries()
 	owner, err := queries.CreateUser(ctx, gen.CreateUserParams{
 		Email: "stats-owner@example.test", Name: "Stats owner", PasswordHash: "unused", CreatedAt: clock.now,
@@ -218,6 +218,47 @@ func TestOverviewUsesUserDayBoundsExcludesUndoneAndScopesOwners(t *testing.T) {
 	}
 }
 
+func TestFutureReviewTimestampsAreExcludedFromAnalytics(t *testing.T) {
+	f := newStatsFixture(t)
+	f.clock.now = time.Date(2026, time.April, 3, 10, 0, 0, 0, time.UTC)
+
+	overview, err := f.service.Overview(context.Background(), f.userID)
+	if err != nil {
+		t.Fatalf("Overview() error = %v", err)
+	}
+	if overview.Today.Reviews != 1 || overview.Today.DurationMs != 1000 || overview.Reviews.Total != 2 || overview.Reviews.TotalDurationMs != 1700 {
+		t.Errorf("overview counted future review timestamps: today=%+v totals=%+v", overview.Today, overview.Reviews)
+	}
+
+	retention, err := f.service.Retention(context.Background(), f.userID, "week")
+	if err != nil {
+		t.Fatalf("Retention() error = %v", err)
+	}
+	lastRetention := retention.Points[len(retention.Points)-1]
+	if lastRetention.ReviewCards != 2 || lastRetention.RecalledReviews != 2 {
+		t.Errorf("current retention counted future reviews: %+v", lastRetention)
+	}
+
+	heatmap, err := f.service.Heatmap(context.Background(), f.userID, 2026)
+	if err != nil {
+		t.Fatalf("Heatmap() error = %v", err)
+	}
+	if got := activityForDate(t, heatmap.Days, "2026-04-02"); got.Reviews != 1 {
+		t.Errorf("study-day activity = %+v, want only the review up to now", got)
+	}
+	if got := activityForDate(t, heatmap.Days, "2026-04-03"); got.Reviews != 0 {
+		t.Errorf("future reviews appeared in the next study day: %+v", got)
+	}
+
+	curve, err := f.service.Curve(context.Background(), f.userID, f.cards[0])
+	if err != nil {
+		t.Fatalf("Curve() error = %v", err)
+	}
+	if len(curve.Reviews) != 2 {
+		t.Errorf("curve reviews = %d, want future events excluded", len(curve.Reviews))
+	}
+}
+
 func TestHeatmapRetentionAndGrowthUseLocalBucketsAndExcludeUndone(t *testing.T) {
 	f := newStatsFixture(t)
 	heatmap, err := f.service.Heatmap(context.Background(), f.userID, 2026)
@@ -278,6 +319,7 @@ func TestHeatmapGroupsActivityAcrossSpringGapAndFallFold(t *testing.T) {
 
 	t.Run("fall fold", func(t *testing.T) {
 		f := newStatsFixture(t)
+		f.clock.now = time.Date(2026, time.November, 2, 10, 0, 0, 0, time.UTC)
 		if _, err := f.database.SQL.Exec(`UPDATE user_settings SET day_start_hour = 1 WHERE user_id = ?`, f.userID); err != nil {
 			t.Fatalf("set fall day start: %v", err)
 		}
@@ -612,9 +654,14 @@ func TestStreakTimestampQueryUsesCompositeIndex(t *testing.T) {
 		SELECT logs.reviewed_at
 		FROM review_logs AS logs
 		JOIN review_log_projection AS projection ON projection.review_id = logs.id
-		WHERE logs.user_id = ? AND logs.undone = 0 AND logs.reviewed_at < CAST(? AS TEXT)
+		WHERE logs.user_id = ? AND logs.undone = 0
+		  AND logs.reviewed_at >= CAST(? AS TEXT) AND logs.reviewed_at < CAST(? AS TEXT)
+		  AND logs.reviewed_at <= CAST(? AS TEXT)
 		ORDER BY logs.reviewed_at DESC
-	`, f.userID, databaseTimeBoundary(time.Date(2026, time.April, 4, 0, 0, 0, 0, time.UTC)))
+	`, f.userID,
+		databaseTimeBoundary(time.Date(2026, time.March, 4, 0, 0, 0, 0, time.UTC)),
+		databaseTimeBoundary(time.Date(2026, time.April, 4, 0, 0, 0, 0, time.UTC)),
+		time.Date(2026, time.April, 3, 12, 0, 0, 0, time.UTC).String())
 	if err != nil {
 		t.Fatalf("EXPLAIN QUERY PLAN error = %v", err)
 	}

@@ -26,9 +26,9 @@ WITH card_metrics AS (
      SELECT CAST(COUNT(*) AS INTEGER) AS total_reviews,
             CAST(COALESCE(SUM(logs.duration_ms), 0) AS INTEGER) AS total_duration_ms,
             CAST(COALESCE(AVG(logs.duration_ms), 0) AS INTEGER) AS average_duration_ms,
-            CAST(COALESCE(SUM(CASE WHEN CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) >= CAST(sqlc.arg(day_start_unix) AS INTEGER)
-                                     AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) < CAST(sqlc.arg(day_end_unix) AS INTEGER)
-                                   THEN 1 ELSE 0 END), 0) AS INTEGER) AS reviews_today,
+             CAST(COALESCE(SUM(CASE WHEN CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) >= CAST(sqlc.arg(day_start_unix) AS INTEGER)
+                                      AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) < CAST(sqlc.arg(day_end_unix) AS INTEGER)
+                                    THEN 1 ELSE 0 END), 0) AS INTEGER) AS reviews_today,
             CAST(COALESCE(SUM(CASE WHEN projection.state_before = 0 AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) >= CAST(sqlc.arg(day_start_unix) AS INTEGER)
                                      AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) < CAST(sqlc.arg(day_end_unix) AS INTEGER)
                                    THEN 1 ELSE 0 END), 0) AS INTEGER) AS new_reviews_today,
@@ -43,7 +43,8 @@ WITH card_metrics AS (
                                    THEN logs.duration_ms ELSE 0 END), 0) AS INTEGER) AS duration_today_ms
      FROM review_logs AS logs
      JOIN review_log_projection AS projection ON projection.review_id = logs.id
-     WHERE logs.user_id = sqlc.arg(user_id) AND logs.undone = 0
+      WHERE logs.user_id = sqlc.arg(user_id) AND logs.undone = 0
+         AND logs.reviewed_at <= CAST(sqlc.arg(now_at) AS TEXT)
 )
 SELECT card_metrics.total_cards, card_metrics.new_cards, card_metrics.learning_cards,
        card_metrics.review_cards, card_metrics.relearning_cards, card_metrics.young_cards,
@@ -62,19 +63,22 @@ SELECT CAST(sqlc.arg(label) AS TEXT) AS label,
        CAST(COALESCE(SUM(CASE WHEN projection.state_before = 2 AND logs.rating >= 2 THEN 1 ELSE 0 END), 0) AS INTEGER) AS recalled_reviews
 FROM review_logs AS logs
 JOIN review_log_projection AS projection ON projection.review_id = logs.id
-WHERE logs.user_id = sqlc.arg(user_id)
+ WHERE logs.user_id = sqlc.arg(user_id)
   AND logs.undone = 0
+   AND logs.reviewed_at <= CAST(sqlc.arg(now_at) AS TEXT)
   AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) >= CAST(sqlc.arg(start_unix) AS INTEGER)
     AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) < CAST(sqlc.arg(end_unix) AS INTEGER);
 
 -- name: ListStatsReviewTimestamps :many
--- The service maps timestamps to study days in one indexed pass to derive streaks.
+-- The service maps a bounded date range to study days for streak calculation.
 SELECT logs.reviewed_at
 FROM review_logs AS logs
 JOIN review_log_projection AS projection ON projection.review_id = logs.id
 WHERE logs.user_id = sqlc.arg(user_id)
   AND logs.undone = 0
+  AND logs.reviewed_at >= CAST(sqlc.arg(start_at) AS TEXT)
   AND logs.reviewed_at < CAST(sqlc.arg(end_at) AS TEXT)
+  AND logs.reviewed_at <= CAST(sqlc.arg(now_at) AS TEXT)
 ORDER BY logs.reviewed_at DESC;
 
 -- name: ListStatsActivityRange :many
@@ -84,6 +88,7 @@ FROM review_logs AS logs
 JOIN review_log_projection AS projection ON projection.review_id = logs.id
 WHERE logs.user_id = sqlc.arg(user_id)
   AND logs.undone = 0
+   AND logs.reviewed_at <= CAST(sqlc.arg(now_at) AS TEXT)
   AND logs.reviewed_at >= CAST(sqlc.arg(start_at) AS TEXT)
   AND logs.reviewed_at < CAST(sqlc.arg(end_at) AS TEXT)
 ORDER BY logs.reviewed_at, logs.id;
@@ -122,7 +127,8 @@ WHERE cards.user_id = sqlc.arg(user_id)
   AND decks.deleted_at IS NULL
   AND decks.owner_id = cards.user_id
    AND logs.undone = 0
-   AND projection.stability_after >= 21
+  AND projection.stability_after >= 21
+   AND logs.reviewed_at <= CAST(sqlc.arg(now_at) AS TEXT)
   AND logs.reviewed_at >= CAST(sqlc.arg(start_at) AS TEXT)
   AND logs.reviewed_at < CAST(sqlc.arg(end_at) AS TEXT)
   AND logs.id = (
@@ -131,8 +137,9 @@ WHERE cards.user_id = sqlc.arg(user_id)
        JOIN review_log_projection AS candidate_projection ON candidate_projection.review_id = candidate.id
        WHERE candidate.card_id = cards.id
         AND candidate.user_id = cards.user_id
-         AND candidate.undone = 0
-         AND candidate_projection.stability_after >= 21
+          AND candidate.undone = 0
+           AND candidate.reviewed_at <= CAST(sqlc.arg(now_at) AS TEXT)
+          AND candidate_projection.stability_after >= 21
       ORDER BY candidate.reviewed_at, candidate.id
       LIMIT 1
   )
@@ -185,6 +192,7 @@ WHERE cards.id = sqlc.arg(card_id)
   AND decks.deleted_at IS NULL
   AND decks.owner_id = cards.user_id
    AND logs.undone = 0
+    AND logs.reviewed_at <= CAST(sqlc.arg(now_at) AS TEXT)
 ORDER BY logs.reviewed_at, logs.id;
 
 -- name: GetStatsRetrievabilityCards :many
@@ -198,7 +206,8 @@ WHERE cards.user_id = sqlc.arg(user_id)
   AND cards.state = 2
   AND cards.stability IS NOT NULL
   AND cards.difficulty IS NOT NULL
-  AND cards.last_review IS NOT NULL
+   AND cards.last_review IS NOT NULL
+    AND cards.last_review <= CAST(sqlc.arg(now_at) AS TEXT)
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
