@@ -394,6 +394,24 @@ func TestUserDayBoundsTimezoneAndDST(t *testing.T) {
 	}
 }
 
+func TestUserDayBoundsResolvesConfiguredHourInsideSpringGap(t *testing.T) {
+	location, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.March, 8, 10, 30, 0, 0, time.UTC)
+	start, end, err := userDayBounds(now, location, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, time.March, 8, 10, 0, 0, 0, time.UTC); !start.Equal(want) {
+		t.Errorf("day start = %s, want first valid time after gap %s", start, want)
+	}
+	if want := time.Date(2026, time.March, 9, 9, 0, 0, 0, time.UTC); !end.Equal(want) {
+		t.Errorf("next day = %s, want configured-hour boundary %s", end, want)
+	}
+}
+
 func TestReviewIdempotencyOutOfOrderReplayUndoAndAccess(t *testing.T) {
 	now := time.Date(2025, time.January, 5, 12, 0, 0, 0, time.UTC)
 	f := newStudyFixture(t, now)

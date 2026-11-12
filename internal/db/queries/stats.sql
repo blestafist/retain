@@ -65,7 +65,17 @@ JOIN review_log_projection AS projection ON projection.review_id = logs.id
 WHERE logs.user_id = sqlc.arg(user_id)
   AND logs.undone = 0
   AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) >= CAST(sqlc.arg(start_unix) AS INTEGER)
-  AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) < CAST(sqlc.arg(end_unix) AS INTEGER);
+    AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) < CAST(sqlc.arg(end_unix) AS INTEGER);
+
+-- name: ListStatsReviewTimestamps :many
+-- The service maps timestamps to study days in one indexed pass to derive streaks.
+SELECT logs.reviewed_at
+FROM review_logs AS logs
+JOIN review_log_projection AS projection ON projection.review_id = logs.id
+WHERE logs.user_id = sqlc.arg(user_id)
+  AND logs.undone = 0
+  AND logs.reviewed_at < CAST(sqlc.arg(end_at) AS TEXT)
+ORDER BY logs.reviewed_at DESC;
 
 -- name: ListStatsActivityRange :many
 -- This uses the user/reviewed_at composite index; Go applies exact local-day buckets.

@@ -22,7 +22,7 @@ JOIN review_log_projection AS projection ON projection.review_id = logs.id
 WHERE logs.user_id = ?2
   AND logs.undone = 0
   AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) >= CAST(?3 AS INTEGER)
-  AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) < CAST(?4 AS INTEGER)
+    AND CAST(strftime('%s', substr(logs.reviewed_at, 1, 19)) AS INTEGER) < CAST(?4 AS INTEGER)
 `
 
 type GetStatsBucketsActivityParams struct {
@@ -825,6 +825,45 @@ func (q *Queries) ListStatsLeeches(ctx context.Context, userID int64) ([]ListSta
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStatsReviewTimestamps = `-- name: ListStatsReviewTimestamps :many
+SELECT logs.reviewed_at
+FROM review_logs AS logs
+JOIN review_log_projection AS projection ON projection.review_id = logs.id
+WHERE logs.user_id = ?1
+  AND logs.undone = 0
+  AND logs.reviewed_at < CAST(?2 AS TEXT)
+ORDER BY logs.reviewed_at DESC
+`
+
+type ListStatsReviewTimestampsParams struct {
+	UserID int64
+	EndAt  string
+}
+
+// The service maps timestamps to study days in one indexed pass to derive streaks.
+func (q *Queries) ListStatsReviewTimestamps(ctx context.Context, arg ListStatsReviewTimestampsParams) ([]time.Time, error) {
+	rows, err := q.db.QueryContext(ctx, listStatsReviewTimestamps, arg.UserID, arg.EndAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []time.Time
+	for rows.Next() {
+		var reviewed_at time.Time
+		if err := rows.Scan(&reviewed_at); err != nil {
+			return nil, err
+		}
+		items = append(items, reviewed_at)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

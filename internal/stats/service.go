@@ -14,6 +14,7 @@ import (
 	"github.com/pestit/retain/internal/db"
 	"github.com/pestit/retain/internal/db/gen"
 	"github.com/pestit/retain/internal/srs"
+	"github.com/pestit/retain/internal/studyday"
 )
 
 var (
@@ -217,7 +218,7 @@ func (s *Service) Overview(ctx context.Context, userID int64) (Overview, error) 
 		if err != nil {
 			return nil, err
 		}
-		streak, err := s.streak(ctx, userID, dayStart, env.location, env.dayStartHour)
+		streak, err := s.streak(ctx, userID, dayStart, now, env.location, env.dayStartHour)
 		if err != nil {
 			return nil, err
 		}
@@ -424,20 +425,37 @@ func (s *Service) Curve(ctx context.Context, userID, cardID int64) (Curve, error
 		if cardState.State == srs.Review && cardState.Stability > 0 && !cardState.LastReview.IsZero() {
 			end := now
 			scheduledDays := max64(card.ScheduledDays, 0)
-			if scheduledDays > 90 {
-				scheduledDays = 90
-			}
 			if scheduledEnd := cardState.LastReview.Add(time.Duration(scheduledDays) * 24 * time.Hour); scheduledEnd.After(end) {
 				end = scheduledEnd
 			}
-			if span := end.Sub(cardState.LastReview); span > 90*24*time.Hour {
-				end = cardState.LastReview.Add(90 * 24 * time.Hour)
+			if end.Before(cardState.LastReview) {
+				end = cardState.LastReview
 			}
-			for at := cardState.LastReview; !at.After(end); at = at.Add(24 * time.Hour) {
+			span := end.Sub(cardState.LastReview)
+			if span == 0 {
 				pointCard := cardState
 				pointCard.LastReview = cardState.LastReview
-				retrievability := env.scheduler.Retrievability(pointCard, at)
-				curve.Curve = append(curve.Curve, CurvePoint{At: at.UTC(), Retrievability: retrievability})
+				curve.Curve = append(curve.Curve, CurvePoint{
+					At:             cardState.LastReview.UTC(),
+					Retrievability: env.scheduler.Retrievability(pointCard, cardState.LastReview),
+				})
+			} else {
+				steps := int((span + 24*time.Hour - 1) / (24 * time.Hour))
+				if steps > 90 {
+					steps = 90
+				}
+				step := span / time.Duration(steps)
+				for index := range steps {
+					at := cardState.LastReview.Add(step * time.Duration(index))
+					pointCard := cardState
+					curve.Curve = append(curve.Curve, CurvePoint{
+						At: at.UTC(), Retrievability: env.scheduler.Retrievability(pointCard, at),
+					})
+				}
+				pointCard := cardState
+				curve.Curve = append(curve.Curve, CurvePoint{
+					At: end.UTC(), Retrievability: env.scheduler.Retrievability(pointCard, end),
+				})
 			}
 		}
 		return curve, nil
@@ -567,33 +585,63 @@ func (s *Service) knownRightNow(ctx context.Context, userID int64, scheduler srs
 	return known, nil
 }
 
-func (s *Service) streak(ctx context.Context, userID int64, currentStart time.Time, location *time.Location, dayStartHour int) (int, error) {
-	date := calendarDateFromLocal(currentStart, location)
-	start := calendarDayBoundary(date, dayStartHour, location)
-	end := calendarDayBoundary(addCalendarDays(date, 1), dayStartHour, location)
-	activity, err := s.activityBucket(ctx, userID, dateBucket{label: "", start: start, end: end})
+func (s *Service) streak(ctx context.Context, userID int64, currentStart, now time.Time, location *time.Location, dayStartHour int) (int, error) {
+	currentDate := calendarDateFromLocal(currentStart, location)
+	end := calendarDayBoundary(addCalendarDays(currentDate, 1), dayStartHour, location)
+	rows, err := s.database.Queries().ListStatsReviewTimestamps(ctx, gen.ListStatsReviewTimestampsParams{
+		UserID: userID, EndAt: databaseTimeBoundary(end),
+	})
 	if err != nil {
-		return 0, err
+		return 0, ErrInternal
 	}
 	streak := 0
-	if activity.Reviews > 0 {
-		streak++
-	}
-	date = addCalendarDays(date, -1)
-	for {
-		start := calendarDayBoundary(date, dayStartHour, location)
-		end := calendarDayBoundary(addCalendarDays(date, 1), dayStartHour, location)
-		activity, err := s.activityBucket(ctx, userID, dateBucket{label: "", start: start, end: end})
-		if err != nil {
-			return 0, err
+	started := false
+	expectedDate := currentDate
+	for _, value := range rows {
+		reviewedAt := value.UTC()
+		if reviewedAt.After(now) {
+			continue
 		}
-		if activity.Reviews == 0 {
+		date := studyDate(reviewedAt, location, dayStartHour)
+		if date.After(currentDate) {
+			continue
+		}
+		if !started {
+			if date.Equal(currentDate) {
+				started = true
+				streak = 1
+				expectedDate = addCalendarDays(currentDate, -1)
+				continue
+			}
+			yesterday := addCalendarDays(currentDate, -1)
+			if date.Equal(yesterday) {
+				started = true
+				streak = 1
+				expectedDate = addCalendarDays(yesterday, -1)
+				continue
+			}
+			if date.Before(yesterday) {
+				break
+			}
+			continue
+		}
+		if date.Equal(expectedDate) {
+			streak++
+			expectedDate = addCalendarDays(expectedDate, -1)
+		} else if date.Before(expectedDate) {
 			break
 		}
-		streak++
-		date = addCalendarDays(date, -1)
 	}
 	return streak, nil
+}
+
+func studyDate(reviewedAt time.Time, location *time.Location, dayStartHour int) time.Time {
+	local := reviewedAt.In(location)
+	date := calendarDateFromLocal(local, location)
+	if local.Before(calendarDayBoundary(date, dayStartHour, location)) {
+		return addCalendarDays(date, -1)
+	}
+	return date
 }
 
 type activityAggregate struct {
@@ -708,122 +756,15 @@ func makeMonthBuckets(startDate, endDate time.Time, dayStartHour int, location *
 }
 
 func userDayBounds(now time.Time, location *time.Location, startHour int) (time.Time, time.Time) {
-	localNow := now.In(location)
-	date := calendarDateFromLocal(localNow, location)
-	start := calendarDayBoundary(date, startHour, location)
-	if localNow.Before(start) {
-		date = addCalendarDays(date, -1)
-		start = calendarDayBoundary(date, startHour, location)
+	start, end, ok := studyday.Bounds(now, location, startHour)
+	if !ok {
+		return time.Time{}, time.Time{}
 	}
-	end := calendarDayBoundary(addCalendarDays(date, 1), startHour, location)
 	return start, end
 }
 
-// calendarDayBoundary resolves a local start-hour without relying on time.Date's
-// unspecified handling of nonexistent or ambiguous wall times. In a fold, the
-// earliest UTC occurrence is selected. In a gap, the transition instant is the
-// first valid wall time after the configured hour.
 func calendarDayBoundary(date time.Time, startHour int, location *time.Location) time.Time {
-	year, month, day := date.UTC().Date()
-	targetWall := time.Date(year, month, day, startHour, 0, 0, 0, time.UTC)
-	if location == nil || startHour < 0 || startHour > 23 {
-		return targetWall
-	}
-
-	const scanStep = 15 * time.Minute
-	scanStart := targetWall.Add(-48 * time.Hour)
-	scanEnd := targetWall.Add(48 * time.Hour)
-	offsets := make(map[int]struct{})
-	transitions := make([]zoneTransition, 0, 2)
-	previous := scanStart
-	_, previousOffset := previous.In(location).Zone()
-	offsets[previousOffset] = struct{}{}
-	for sample := scanStart.Add(scanStep); !sample.After(scanEnd); sample = sample.Add(scanStep) {
-		_, offset := sample.In(location).Zone()
-		offsets[offset] = struct{}{}
-		if offset != previousOffset {
-			at := findOffsetTransition(previous, sample, previousOffset, location)
-			_, before := at.Add(-time.Second).In(location).Zone()
-			_, after := at.In(location).Zone()
-			transitions = append(transitions, zoneTransition{at: at, before: before, after: after})
-			offsets[before] = struct{}{}
-			offsets[after] = struct{}{}
-		}
-		previous, previousOffset = sample, offset
-	}
-
-	var earliest time.Time
-	for offset := range offsets {
-		candidate := targetWall.Add(-time.Duration(offset) * time.Second)
-		local := candidate.In(location)
-		if sameLocalDate(local, year, month, day) && local.Hour() == startHour && local.Minute() == 0 && local.Second() == 0 {
-			if earliest.IsZero() || candidate.Before(earliest) {
-				earliest = candidate
-			}
-		}
-	}
-	if !earliest.IsZero() {
-		return earliest.UTC()
-	}
-
-	for _, transition := range transitions {
-		if transition.after <= transition.before {
-			continue
-		}
-		gapStart := transition.at.Add(time.Duration(transition.before) * time.Second)
-		gapEnd := transition.at.Add(time.Duration(transition.after) * time.Second)
-		if !targetWall.Before(gapStart) && targetWall.Before(gapEnd) {
-			return transition.at.UTC()
-		}
-	}
-
-	// The gap transition should cover every nonexistent wall time. Keep a
-	// deterministic fallback for unusual historical zone data: select the
-	// closest representable wall time after the requested one on that date.
-	var bestInstant, bestWall time.Time
-	for offset := range offsets {
-		candidate := targetWall.Add(-time.Duration(offset) * time.Second)
-		local := candidate.In(location)
-		if !sameLocalDate(local, year, month, day) {
-			continue
-		}
-		wall := time.Date(year, month, day, local.Hour(), local.Minute(), local.Second(), local.Nanosecond(), time.UTC)
-		if wall.Before(targetWall) {
-			continue
-		}
-		if bestWall.IsZero() || wall.Before(bestWall) || (wall.Equal(bestWall) && candidate.Before(bestInstant)) {
-			bestInstant, bestWall = candidate, wall
-		}
-	}
-	if !bestInstant.IsZero() {
-		return bestInstant.UTC()
-	}
-	return time.Date(year, month, day, startHour, 0, 0, 0, location).UTC()
-}
-
-type zoneTransition struct {
-	at     time.Time
-	before int
-	after  int
-}
-
-func findOffsetTransition(low, high time.Time, oldOffset int, location *time.Location) time.Time {
-	lowUnix, highUnix := low.Unix(), high.Unix()
-	for highUnix-lowUnix > 1 {
-		middle := lowUnix + (highUnix-lowUnix)/2
-		_, offset := time.Unix(middle, 0).In(location).Zone()
-		if offset == oldOffset {
-			lowUnix = middle
-		} else {
-			highUnix = middle
-		}
-	}
-	return time.Unix(highUnix, 0).UTC()
-}
-
-func sameLocalDate(local time.Time, year int, month time.Month, day int) bool {
-	localYear, localMonth, localDay := local.Date()
-	return localYear == year && localMonth == month && localDay == day
+	return studyday.Boundary(date, startHour, location)
 }
 
 func calendarDate(year int, month time.Month, day int) time.Time {

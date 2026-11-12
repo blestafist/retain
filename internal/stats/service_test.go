@@ -525,6 +525,26 @@ func TestCalendarDayBoundaryFallFoldUsesEarliestOccurrence(t *testing.T) {
 	}
 }
 
+func TestUserDayBoundsResolveBerlinFoldToFirstOccurrence(t *testing.T) {
+	location, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, now := range []time.Time{
+		time.Date(2025, time.October, 26, 0, 30, 0, 0, time.UTC), // First 02:30.
+		time.Date(2025, time.October, 26, 1, 30, 0, 0, time.UTC), // Repeated 02:30.
+	} {
+		wantStart := time.Date(2025, time.October, 26, 0, 0, 0, 0, time.UTC)
+		wantEnd := time.Date(2025, time.October, 27, 1, 0, 0, 0, time.UTC)
+
+		gotStart, gotEnd := userDayBounds(now, location, 2)
+		if !gotStart.Equal(wantStart) || !gotEnd.Equal(wantEnd) {
+			t.Errorf("Berlin user day bounds at %s = [%s,%s), want study bounds [%s,%s)",
+				now, gotStart, gotEnd, wantStart, wantEnd)
+		}
+	}
+}
+
 func TestStreakUsesCalendarBoundariesAcrossDST(t *testing.T) {
 	location, err := time.LoadLocation("America/Los_Angeles")
 	if err != nil {
@@ -536,7 +556,7 @@ func TestStreakUsesCalendarBoundariesAcrossDST(t *testing.T) {
 		f.addLog(t, f.cards[0], f.userID, 30, 3, int64(srs.Review), 30, 5, time.Date(2026, time.March, 8, 9, 59, 0, 0, time.UTC), 100)
 		f.addLog(t, f.cards[0], f.userID, 31, 3, int64(srs.Review), 30, 5, time.Date(2026, time.March, 8, 10, 1, 0, 0, time.UTC), 200)
 		current := calendarDayBoundary(calendarDate(2026, time.March, 8), 2, location)
-		got, err := f.service.streak(context.Background(), f.userID, current, location, 2)
+		got, err := f.service.streak(context.Background(), f.userID, current, f.clock.now, location, 2)
 		if err != nil {
 			t.Fatalf("streak() error = %v", err)
 		}
@@ -547,11 +567,12 @@ func TestStreakUsesCalendarBoundariesAcrossDST(t *testing.T) {
 
 	t.Run("fall fold", func(t *testing.T) {
 		f := newStatsFixture(t)
+		f.clock.now = time.Date(2026, time.November, 2, 10, 0, 0, 0, time.UTC)
 		f.addLog(t, f.cards[0], f.userID, 30, 3, int64(srs.Review), 30, 5, time.Date(2026, time.November, 1, 8, 30, 0, 0, time.UTC), 100)
 		f.addLog(t, f.cards[0], f.userID, 31, 3, int64(srs.Review), 30, 5, time.Date(2026, time.November, 1, 9, 30, 0, 0, time.UTC), 200)
 		f.addLog(t, f.cards[0], f.userID, 32, 3, int64(srs.Review), 30, 5, time.Date(2026, time.November, 2, 9, 30, 0, 0, time.UTC), 300)
 		current := calendarDayBoundary(calendarDate(2026, time.November, 2), 1, location)
-		got, err := f.service.streak(context.Background(), f.userID, current, location, 1)
+		got, err := f.service.streak(context.Background(), f.userID, current, f.clock.now, location, 1)
 		if err != nil {
 			t.Fatalf("streak() error = %v", err)
 		}
@@ -559,6 +580,118 @@ func TestStreakUsesCalendarBoundariesAcrossDST(t *testing.T) {
 			t.Errorf("fall streak = %d, want two consecutive local days across the fold", got)
 		}
 	})
+}
+
+func TestStreakUsesStudyDayAcrossBerlinFold(t *testing.T) {
+	f := newStatsFixture(t)
+	location, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.clock.now = time.Date(2025, time.October, 26, 0, 30, 0, 0, time.UTC)
+	if _, err := f.database.SQL.Exec(`UPDATE user_settings SET timezone = 'Europe/Berlin', day_start_hour = 2 WHERE user_id = ?`, f.userID); err != nil {
+		t.Fatalf("set Berlin study day: %v", err)
+	}
+	f.addLog(t, f.cards[0], f.userID, 30, 3, int64(srs.Review), 30, 5, time.Date(2025, time.October, 25, 12, 0, 0, 0, time.UTC), 100)
+	f.addLog(t, f.cards[0], f.userID, 31, 3, int64(srs.Review), 30, 5, f.clock.now, 200)
+	currentStart, _ := userDayBounds(f.clock.now, location, 2)
+
+	got, err := f.service.streak(context.Background(), f.userID, currentStart, f.clock.now, location, 2)
+	if err != nil {
+		t.Fatalf("streak() error = %v", err)
+	}
+	if got != 2 {
+		t.Errorf("streak during first occurrence of Berlin 02:30 = %d, want both consecutive study days", got)
+	}
+}
+
+func TestStreakTimestampQueryUsesCompositeIndex(t *testing.T) {
+	f := newStatsFixture(t)
+	rows, err := f.database.SQL.Query(`
+		EXPLAIN QUERY PLAN
+		SELECT logs.reviewed_at
+		FROM review_logs AS logs
+		JOIN review_log_projection AS projection ON projection.review_id = logs.id
+		WHERE logs.user_id = ? AND logs.undone = 0 AND logs.reviewed_at < CAST(? AS TEXT)
+		ORDER BY logs.reviewed_at DESC
+	`, f.userID, databaseTimeBoundary(time.Date(2026, time.April, 4, 0, 0, 0, 0, time.UTC)))
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN error = %v", err)
+	}
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read query plan: %v", err)
+	}
+	if !strings.Contains(strings.Join(details, "\n"), "review_logs_user_reviewed_idx") {
+		t.Errorf("streak timestamp query plan = %v, want composite user/reviewed_at index", details)
+	}
+}
+
+func TestCurveIncludesScheduledEndAndCurrentTimeWithBoundedSampling(t *testing.T) {
+	tests := []struct {
+		name          string
+		lastReview    time.Time
+		scheduledDays int
+		wantEnd       func(now time.Time, lastReview time.Time, scheduledDays int) time.Time
+	}{
+		{
+			name: "long future interval reaches next review",
+			wantEnd: func(_ time.Time, lastReview time.Time, scheduledDays int) time.Time {
+				return lastReview.Add(time.Duration(scheduledDays) * 24 * time.Hour)
+			},
+		},
+		{
+			name:          "overdue card reaches now",
+			lastReview:    time.Date(2025, time.January, 1, 12, 0, 0, 0, time.UTC),
+			scheduledDays: 30,
+			wantEnd: func(now time.Time, _ time.Time, _ int) time.Time {
+				return now
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newStatsFixture(t)
+			lastReview := tt.lastReview
+			if lastReview.IsZero() {
+				lastReview = f.clock.now.Add(-24 * time.Hour)
+			}
+			scheduledDays := tt.scheduledDays
+			if scheduledDays == 0 {
+				scheduledDays = 365
+			}
+			if _, err := f.database.SQL.Exec(`
+				UPDATE cards SET last_review = ?, stability = 30, difficulty = 5, scheduled_days = ?
+				WHERE id = ?
+			`, lastReview, scheduledDays, f.cards[0]); err != nil {
+				t.Fatalf("set curve card schedule: %v", err)
+			}
+
+			curve, err := f.service.Curve(context.Background(), f.userID, f.cards[0])
+			if err != nil {
+				t.Fatalf("Curve() error = %v", err)
+			}
+			if len(curve.Curve) < 2 || len(curve.Curve) > 91 {
+				t.Fatalf("curve point count = %d, want 2..91", len(curve.Curve))
+			}
+			if !curve.Curve[0].At.Equal(lastReview) {
+				t.Errorf("first curve point = %s, want last review %s", curve.Curve[0].At, lastReview)
+			}
+			wantEnd := tt.wantEnd(f.clock.now, lastReview, scheduledDays)
+			if !curve.Curve[len(curve.Curve)-1].At.Equal(wantEnd) {
+				t.Errorf("last curve point = %s, want %s", curve.Curve[len(curve.Curve)-1].At, wantEnd)
+			}
+		})
+	}
 }
 
 func assertCalendarBoundaries(t *testing.T, dates []time.Time, startHour int, location *time.Location, want []time.Time) {
