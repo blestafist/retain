@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/pestit/retain/internal/study"
@@ -91,7 +92,8 @@ func TestStudyCheckAnswerInheritsLanguagesAndHidesForeignCards(t *testing.T) {
 		t.Fatal(err)
 	}
 	noteResult, err := f.database.SQL.ExecContext(ctx, `
-		INSERT INTO notes(deck_id, term, term_key, translation) VALUES (?, 'to wander', 'to wander', 'бродить')`, childID)
+		INSERT INTO notes(deck_id, term, term_key, translation, fields)
+		VALUES (?, 'to wander', 'to wander', 'бродить', '{"pos":"verb"}')`, childID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,6 +117,31 @@ func TestStudyCheckAnswerInheritsLanguagesAndHidesForeignCards(t *testing.T) {
 			t.Errorf("inherited English answer %q = %+v, want exact/3", answer, result)
 		}
 	}
+	phraseNote, err := f.database.SQL.ExecContext(ctx, `
+		INSERT INTO notes(deck_id, term, term_key, translation, fields)
+		VALUES (?, 'to be or not to be', 'to be or not to be', 'быть или не быть', '{"pos":"phrase"}')`, childID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	phraseNoteID, err := phraseNote.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	phraseCard, err := f.database.SQL.ExecContext(ctx, `
+		INSERT INTO cards(note_id, user_id, direction) VALUES (?, ?, 'reverse')`, phraseNoteID, f.ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	phraseCardID, err := phraseCard.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := studyCheckAnswer(t, f, f.ownerCookie, phraseCardID, "to be or not to be"); result.Match != "exact" {
+		t.Errorf("complete English phrase = %+v, want exact", result)
+	}
+	if result := studyCheckAnswer(t, f, f.ownerCookie, phraseCardID, "be or not to be"); result.Match != "wrong" {
+		t.Errorf("English phrase without leading to = %+v, want wrong", result)
+	}
 
 	foreignResponse := checkAnswerResponse(t, f, f.ownerCookie, f.otherCardID, "foreign")
 	if foreignResponse.Code != http.StatusNotFound {
@@ -136,6 +163,47 @@ func TestStudyCheckAnswerInheritsLanguagesAndHidesForeignCards(t *testing.T) {
 		`{"card_id":`+jsonInt(f.cardID)+`,"answer":"hello","language":"de"}`, f.ownerCookie)
 	if forgedLanguage.Code != http.StatusBadRequest {
 		t.Fatalf("client-supplied language check = %d/%s, want 400", forgedLanguage.Code, forgedLanguage.Body)
+	}
+}
+
+func TestStudyCheckAnswerHandlesOversizedStoredAnswers(t *testing.T) {
+	f := newStudyRoutesFixture(t)
+	ctx := context.Background()
+	if _, err := f.database.SQL.ExecContext(ctx, `
+		UPDATE decks SET lang_target = 'en', lang_native = 'ru' WHERE id = ?`, f.ownerDeckID); err != nil {
+		t.Fatal(err)
+	}
+	longAnswer := strings.Repeat("a", 9000)
+	variants := make([]string, 70)
+	for i := range variants {
+		variants[i] = "variant"
+	}
+	variants[len(variants)-1] = longAnswer
+	if _, err := f.database.SQL.ExecContext(ctx, `
+		UPDATE notes SET translation = ?, alternatives = '[]' WHERE deck_id = ?`, strings.Join(variants, ";"), f.ownerDeckID); err != nil {
+		t.Fatal(err)
+	}
+	result := studyCheckAnswer(t, f, f.ownerCookie, f.cardID, longAnswer)
+	if result.Match != "exact" {
+		t.Fatalf("long answer and stored variants = %+v, want exact", result)
+	}
+
+	alternatives := make([]string, 70)
+	for i := range alternatives {
+		alternatives[i] = "alternative"
+	}
+	alternatives[len(alternatives)-1] = longAnswer
+	alternativesJSON, err := json.Marshal(alternatives)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.database.SQL.ExecContext(ctx, `
+		UPDATE notes SET translation = 'answer', alternatives = ? WHERE deck_id = ?`, string(alternativesJSON), f.ownerDeckID); err != nil {
+		t.Fatal(err)
+	}
+	result = studyCheckAnswer(t, f, f.ownerCookie, f.cardID, longAnswer)
+	if result.Match != "exact" {
+		t.Fatalf("long stored alternative = %+v, want exact", result)
 	}
 }
 

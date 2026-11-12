@@ -464,7 +464,6 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
                     autoComplete="off"
                     autoCapitalize="none"
                     spellCheck={false}
-                    maxLength={512}
                     value={typedAnswer}
                     disabled={isCheckingAnswer || busy}
                     onChange={(event) => { setTypedAnswer(event.target.value); setError(null); }}
@@ -530,7 +529,6 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
                       key={rating}
                       type="button"
                       disabled={busy || pendingReview !== null || isCheckingAnswer}
-                      aria-pressed={answerMatch?.suggested_rating === rating}
                       onClick={() => void rate(rating)}
                       className={`flex min-h-12 flex-col items-center justify-center rounded-2xl px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 ${answerMatch?.suggested_rating === rating ? 'ring-2 ring-primary' : ''} ${ratingClasses[rating]}`}
                     >

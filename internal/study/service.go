@@ -374,7 +374,6 @@ func (s *Service) CheckAnswer(ctx context.Context, userID int64, input CheckAnsw
 		return AnswerResult{}, ErrInternal
 	}
 	if input.CardID <= 0 || !utf8.ValidString(input.Answer) || strings.TrimSpace(input.Answer) == "" ||
-		utf8.RuneCountInString(input.Answer) > 512 ||
 		(input.Mode != "" && input.Mode != "typing" && input.Mode != "choice") {
 		return AnswerResult{}, ErrInvalidInput
 	}
@@ -468,7 +467,7 @@ func (s *Service) ChoiceOptions(ctx context.Context, userID, cardID int64) ([]st
 			if matchErr != nil {
 				return nil, ErrInternal
 			}
-			if match.Match == lang.MatchExact {
+			if match.Match == lang.MatchExact || match.Match == lang.MatchArticle {
 				continue
 			}
 			identity := choiceIdentity(candidate)
@@ -504,6 +503,7 @@ func answerInputForRow(row gen.GetStudyAnswerCardRow, answer string) (lang.Answe
 		return lang.AnswerInput{}, ErrInternal
 	}
 	article := ""
+	partOfSpeech := ""
 	if raw, exists := fields["article"]; exists {
 		if err := json.Unmarshal(raw, &article); err != nil {
 			return lang.AnswerInput{}, ErrInternal
@@ -513,6 +513,11 @@ func answerInputForRow(row gen.GetStudyAnswerCardRow, answer string) (lang.Answe
 		language = row.LangTarget
 		expected = row.Term
 		alternatives = nil // alternatives describe translations, not terms.
+		if raw, exists := fields["pos"]; exists {
+			// Only a valid string POS can authorize the planned English infinitive
+			// normalization; unknown free-form field values remain untouched.
+			_ = json.Unmarshal(raw, &partOfSpeech)
+		}
 		if language == "de" && article == "" {
 			article = inferGermanArticle(expected)
 		}
@@ -533,7 +538,8 @@ func answerInputForRow(row gen.GetStudyAnswerCardRow, answer string) (lang.Answe
 		wrongArticleRating = srs.Again
 	}
 	return lang.AnswerInput{
-		Language: language, Expected: expected, Alternatives: alternatives, Answer: answer,
+		Language: language, PartOfSpeech: partOfSpeech,
+		Expected: expected, Alternatives: alternatives, Answer: answer,
 		GermanArticle: article, WrongArticleRating: int(wrongArticleRating),
 	}, nil
 }

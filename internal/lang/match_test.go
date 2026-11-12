@@ -18,6 +18,7 @@ func TestMatchAnswerGolden(t *testing.T) {
 		Cases  []struct {
 			Name               string   `json:"name"`
 			Language           string   `json:"language"`
+			PartOfSpeech       string   `json:"part_of_speech"`
 			Expected           string   `json:"expected"`
 			Alternatives       []string `json:"alternatives"`
 			Answer             string   `json:"answer"`
@@ -41,6 +42,7 @@ func TestMatchAnswerGolden(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			got, err := MatchAnswer(AnswerInput{
 				Language:           tc.Language,
+				PartOfSpeech:       tc.PartOfSpeech,
 				Expected:           tc.Expected,
 				Alternatives:       tc.Alternatives,
 				Answer:             tc.Answer,
@@ -57,24 +59,48 @@ func TestMatchAnswerGolden(t *testing.T) {
 	}
 }
 
-func TestMatchAnswerBoundsCandidateWork(t *testing.T) {
-	base := AnswerInput{Language: "en", Expected: "hello", Answer: "hello", WrongArticleRating: RatingHard}
-	manyAlternatives := make([]string, maxAcceptedAnswers+1)
-	for i := range manyAlternatives {
-		manyAlternatives[i] = "answer"
+func TestMatchAnswerHandlesLargeStoredContent(t *testing.T) {
+	longAnswer := strings.Repeat("a", 5000)
+	variants := make([]string, 80)
+	for i := range variants {
+		variants[i] = "variant"
 	}
+	variants[len(variants)-1] = longAnswer
+	alternatives := make([]string, 80)
+	for i := range alternatives {
+		alternatives[i] = "alternative"
+	}
+	alternatives[len(alternatives)-1] = longAnswer
 	tests := []struct {
 		name  string
 		input AnswerInput
+		match string
 	}{
-		{name: "too many expected variants", input: AnswerInput{Language: "en", Expected: strings.Repeat("x;", maxAcceptedAnswers), Answer: "x", WrongArticleRating: RatingHard}},
-		{name: "too many alternatives", input: AnswerInput{Language: "en", Expected: base.Expected, Answer: base.Answer, Alternatives: manyAlternatives, WrongArticleRating: RatingHard}},
-		{name: "long typed answer", input: AnswerInput{Language: "en", Expected: base.Expected, Answer: strings.Repeat("x", maxAnswerRunes+1), WrongArticleRating: RatingHard}},
+		{
+			name: "long typed answer and expected variant",
+			input: AnswerInput{
+				Language: "en", Expected: strings.Join(variants, ";"), Answer: longAnswer,
+				WrongArticleRating: RatingHard,
+			},
+			match: MatchExact,
+		},
+		{
+			name: "large alternative set and long alternative",
+			input: AnswerInput{
+				Language: "en", Expected: "answer", Alternatives: alternatives, Answer: longAnswer,
+				WrongArticleRating: RatingHard,
+			},
+			match: MatchExact,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := MatchAnswer(test.input); err == nil {
-				t.Fatal("MatchAnswer() error = nil, want bounded-input error")
+			got, err := MatchAnswer(test.input)
+			if err != nil {
+				t.Fatalf("MatchAnswer() error = %v, want safe match", err)
+			}
+			if got.Match != test.match {
+				t.Errorf("MatchAnswer().Match = %q, want %q", got.Match, test.match)
 			}
 		})
 	}

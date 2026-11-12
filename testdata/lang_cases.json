@@ -160,13 +160,51 @@
       "suggested_rating": 3
     },
     {
-      "name": "english ignores standalone articles and leading to",
+      "name": "english ignores to before a verb when part of speech is known",
       "language": "en",
-      "expected": "go to school",
-      "answer": "To go to the school",
+      "part_of_speech": "verb",
+      "expected": "go",
+      "answer": "To go",
       "wrong_article_rating": 2,
       "match": "exact",
       "suggested_rating": 3
+    },
+    {
+      "name": "english ignores only a leading article",
+      "language": "en",
+      "expected": "the bank",
+      "answer": "bank",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "english keeps an article inside a phrase",
+      "language": "en",
+      "expected": "go to the bank",
+      "answer": "go to bank",
+      "wrong_article_rating": 2,
+      "match": "wrong",
+      "suggested_rating": 1
+    },
+    {
+      "name": "english does not ignore to without verb context",
+      "language": "en",
+      "expected": "go",
+      "answer": "to go",
+      "wrong_article_rating": 2,
+      "match": "wrong",
+      "suggested_rating": 1
+    },
+    {
+      "name": "english retains to in a phrase",
+      "language": "en",
+      "part_of_speech": "phrase",
+      "expected": "to be or not to be",
+      "answer": "be or not to be",
+      "wrong_article_rating": 2,
+      "match": "wrong",
+      "suggested_rating": 1
     },
     {
       "name": "english ignores a and an",

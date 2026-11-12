@@ -130,6 +130,60 @@ func TestStudyChoiceOptionsRequireNewCardAndFourAvailableChoices(t *testing.T) {
 	}
 }
 
+func TestStudyChoiceOptionsExcludeGermanArticleOnlyMatches(t *testing.T) {
+	f := newStudyRoutesFixture(t)
+	ctx := context.Background()
+	if _, err := f.database.SQL.ExecContext(ctx, `
+		UPDATE decks SET lang_target = 'de', lang_native = 'pl' WHERE id = ?`, f.ownerDeckID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.database.SQL.ExecContext(ctx, `
+		UPDATE notes SET term = 'die Bank', translation = 'bank', fields = '{"article":"die"}'
+		WHERE deck_id = ?`, f.ownerDeckID); err != nil {
+		t.Fatal(err)
+	}
+	var noteID int64
+	if err := f.database.SQL.QueryRowContext(ctx, `SELECT id FROM notes WHERE deck_id = ?`, f.ownerDeckID).Scan(&noteID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.database.SQL.ExecContext(ctx, `
+		INSERT INTO cards(note_id, user_id, direction, state) VALUES (?, ?, 'reverse', 0)`, noteID, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	var reverseCardID int64
+	if err := f.database.SQL.QueryRowContext(ctx, `
+		SELECT id FROM cards WHERE note_id = ? AND direction = 'reverse'`, noteID).Scan(&reverseCardID); err != nil {
+		t.Fatal(err)
+	}
+	for _, term := range []string{"Bank", "der Bank", "der Hund", "das Haus", "die Katze"} {
+		addStudyChoiceNote(t, f, f.ownerDeckID, term, "unused", `[]`, "reverse")
+	}
+
+	response := studyRoutesRequest(f.handler, http.MethodPost, "/api/v1/study/choice-options",
+		`{"card_id":`+strconv.FormatInt(reverseCardID, 10)+`}`, f.ownerCookie)
+	if response.Code != http.StatusOK {
+		t.Fatalf("choice options response = %d/%s, want 200", response.Code, response.Body)
+	}
+	var result struct {
+		Choices []string `json:"choices"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	set := make(map[string]bool, len(result.Choices))
+	for _, choice := range result.Choices {
+		set[choice] = true
+	}
+	if len(result.Choices) != 4 || !set["die Bank"] {
+		t.Fatalf("choices = %q, want correct answer and three distractors", result.Choices)
+	}
+	for _, articleOnly := range []string{"Bank", "der Bank"} {
+		if set[articleOnly] {
+			t.Errorf("article-only match %q must not be a distractor: %q", articleOnly, result.Choices)
+		}
+	}
+}
+
 func TestStudyChoiceAnswerIsExactGoodOrWrongAgain(t *testing.T) {
 	f := newStudyRoutesFixture(t)
 	if _, err := f.database.SQL.Exec(`

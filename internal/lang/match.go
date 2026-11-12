@@ -22,20 +22,14 @@ const (
 	RatingGood  = 3
 )
 
-const (
-	maxAnswerBytes      = 2048
-	maxExpectedBytes    = 8192
-	maxAlternativeBytes = 2048
-	maxAnswerRunes      = 512
-	maxAcceptedAnswers  = 64
-)
-
-// AnswerInput contains server-resolved answer data. GermanArticle is optional;
-// when set, it must be der, die, or das. WrongArticleRating must be Again or
-// Hard, even when GermanArticle is empty, so callers always provide an
-// explicit policy.
+// AnswerInput contains server-resolved answer data. PartOfSpeech enables the
+// planned English infinitive normalization only for known verbs.
+// GermanArticle is optional; when set, it must be der, die, or das.
+// WrongArticleRating must be Again or Hard, even when GermanArticle is empty,
+// so callers always provide an explicit policy.
 type AnswerInput struct {
 	Language           string
+	PartOfSpeech       string
 	Expected           string
 	Alternatives       []string
 	Answer             string
@@ -86,20 +80,14 @@ func MatchAnswer(input AnswerInput) (AnswerResult, error) {
 	if input.Language == "de" && input.GermanArticle != "" && !isGermanArticle(input.GermanArticle) {
 		return AnswerResult{}, &MatchError{Kind: ErrInvalidConfig, Field: "german_article", Why: "must be der, die, or das"}
 	}
-	if len(input.Expected) > maxExpectedBytes || !utf8.ValidString(input.Expected) || strings.TrimSpace(input.Expected) == "" {
+	if !utf8.ValidString(input.Expected) || strings.TrimSpace(input.Expected) == "" {
 		return AnswerResult{}, &MatchError{Kind: ErrInvalidInput, Field: "expected", Why: "must be non-empty valid UTF-8"}
 	}
-	if len(input.Answer) > maxAnswerBytes || !utf8.ValidString(input.Answer) || strings.TrimSpace(input.Answer) == "" {
+	if !utf8.ValidString(input.Answer) || strings.TrimSpace(input.Answer) == "" {
 		return AnswerResult{}, &MatchError{Kind: ErrInvalidInput, Field: "answer", Why: "must be non-empty valid UTF-8"}
 	}
-	if strings.Count(input.Expected, ";")+1 > maxAcceptedAnswers {
-		return AnswerResult{}, &MatchError{Kind: ErrInvalidInput, Field: "expected", Why: "contains too many answer variants"}
-	}
-	if len(input.Alternatives) > maxAcceptedAnswers {
-		return AnswerResult{}, &MatchError{Kind: ErrInvalidInput, Field: "alternatives", Why: "contains too many accepted answers"}
-	}
 	for i, alternative := range input.Alternatives {
-		if len(alternative) > maxAlternativeBytes || !utf8.ValidString(alternative) || strings.TrimSpace(alternative) == "" {
+		if !utf8.ValidString(alternative) || strings.TrimSpace(alternative) == "" {
 			return AnswerResult{}, &MatchError{Kind: ErrInvalidInput, Field: fmt.Sprintf("alternatives[%d]", i), Why: "must be non-empty valid UTF-8"}
 		}
 	}
@@ -108,12 +96,9 @@ func MatchAnswer(input AnswerInput) (AnswerResult, error) {
 	if err != nil {
 		return AnswerResult{}, err
 	}
-	answer := normalize(input.Language, input.Answer)
+	answer := normalize(input.Language, input.Answer, input.PartOfSpeech)
 	if answer == "" {
 		return AnswerResult{Match: MatchWrong, SuggestedRating: RatingAgain}, nil
-	}
-	if utf8.RuneCountInString(answer) > maxAnswerRunes {
-		return AnswerResult{}, &MatchError{Kind: ErrInvalidInput, Field: "answer", Why: "is too long after normalization"}
 	}
 
 	answerStem, answerArticle := answer, ""
@@ -168,12 +153,9 @@ func acceptedAnswers(input AnswerInput) (acceptedAnswersSet, error) {
 		if variant == "" {
 			continue
 		}
-		normalized := normalize(input.Language, variant)
+		normalized := normalize(input.Language, variant, input.PartOfSpeech)
 		if normalized == "" {
 			continue
-		}
-		if utf8.RuneCountInString(normalized) > maxAnswerRunes {
-			return acceptedAnswersSet{}, &MatchError{Kind: ErrInvalidInput, Field: "expected", Why: "contains an answer that is too long"}
 		}
 		if input.Language == "de" && input.GermanArticle != "" {
 			stem, variantArticle := splitArticle(normalized)
@@ -182,25 +164,19 @@ func acceptedAnswers(input AnswerInput) (acceptedAnswersSet, error) {
 			}
 			normalized = stem
 		}
-		result.primary = appendUnique(result.primary, normalized)
+		result.primary = append(result.primary, normalized)
 	}
 	if len(result.primary) == 0 {
 		return acceptedAnswersSet{}, &MatchError{Kind: ErrInvalidInput, Field: "expected", Why: "must contain a non-empty answer"}
 	}
-	if len(result.primary)+len(input.Alternatives) > maxAcceptedAnswers {
-		return acceptedAnswersSet{}, &MatchError{Kind: ErrInvalidInput, Field: "alternatives", Why: "contains too many accepted answers"}
-	}
 	result.all = append(result.all, result.primary...)
 	for i, alternative := range input.Alternatives {
-		normalized := normalize(input.Language, alternative)
+		normalized := normalize(input.Language, alternative, input.PartOfSpeech)
 		if normalized == "" {
 			return acceptedAnswersSet{}, &MatchError{Kind: ErrInvalidInput, Field: fmt.Sprintf("alternatives[%d]", i), Why: "normalizes to an empty answer"}
 		}
-		if utf8.RuneCountInString(normalized) > maxAnswerRunes {
-			return acceptedAnswersSet{}, &MatchError{Kind: ErrInvalidInput, Field: fmt.Sprintf("alternatives[%d]", i), Why: "is too long after normalization"}
-		}
-		result.alternatives = appendUnique(result.alternatives, normalized)
-		result.all = appendUnique(result.all, normalized)
+		result.alternatives = append(result.alternatives, normalized)
+		result.all = append(result.all, normalized)
 	}
 	return result, nil
 }
@@ -231,7 +207,7 @@ func isGermanArticle(article string) bool {
 	}
 }
 
-func normalize(language, value string) string {
+func normalize(language, value, partOfSpeech string) string {
 	value = norm.NFC.String(value)
 	value = strings.ToLower(value)
 	if language == "ru" {
@@ -252,17 +228,13 @@ func normalize(language, value string) string {
 		}
 	}
 	if language == "en" {
-		filtered := fields[:0]
-		for _, field := range fields {
-			switch field {
+		if len(fields) > 0 {
+			switch fields[0] {
 			case "a", "an", "the":
-				continue
-			default:
-				filtered = append(filtered, field)
+				fields = fields[1:]
 			}
 		}
-		fields = filtered
-		if len(fields) > 0 && fields[0] == "to" {
+		if strings.EqualFold(strings.TrimSpace(partOfSpeech), "verb") && len(fields) > 0 && fields[0] == "to" {
 			fields = fields[1:]
 		}
 	}
@@ -290,48 +262,46 @@ func splitArticle(value string) (stem, article string) {
 	return value, ""
 }
 
-func appendUnique(values []string, value string) []string {
-	for _, existing := range values {
-		if existing == value {
-			return values
-		}
-	}
-	return append(values, value)
-}
-
 func isOneEditAway(left, right string) bool {
-	a, b := []rune(left), []rune(right)
-	if left == right || len(a)-len(b) > 1 || len(b)-len(a) > 1 {
+	if left == right {
 		return false
 	}
-	if len(a) < len(b) {
-		a, b = b, a
+	leftRunes, rightRunes := utf8.RuneCountInString(left), utf8.RuneCountInString(right)
+	if leftRunes-rightRunes > 1 || rightRunes-leftRunes > 1 {
+		return false
 	}
-	if len(a) == len(b) {
+	if leftRunes == rightRunes {
 		differences := 0
-		for i := range a {
-			if a[i] != b[i] {
+		for left != "" {
+			leftRune, leftSize := utf8.DecodeRuneInString(left)
+			rightRune, rightSize := utf8.DecodeRuneInString(right)
+			if leftRune != rightRune {
 				differences++
 				if differences > 1 {
 					return false
 				}
 			}
+			left, right = left[leftSize:], right[rightSize:]
 		}
 		return differences == 1
 	}
-	longIndex, shortIndex := 0, 0
+	longer, shorter := left, right
+	if leftRunes < rightRunes {
+		longer, shorter = right, left
+	}
 	editUsed := false
-	for longIndex < len(a) && shortIndex < len(b) {
-		if a[longIndex] == b[shortIndex] {
-			longIndex++
-			shortIndex++
+	for longer != "" && shorter != "" {
+		longRune, longSize := utf8.DecodeRuneInString(longer)
+		shortRune, shortSize := utf8.DecodeRuneInString(shorter)
+		if longRune == shortRune {
+			longer, shorter = longer[longSize:], shorter[shortSize:]
 			continue
 		}
 		if editUsed {
 			return false
 		}
 		editUsed = true
-		longIndex++
+		longer = longer[longSize:]
 	}
 	// The unmatched final rune in the longer answer is the one edit.
 	return true
