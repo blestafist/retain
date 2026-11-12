@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createUUIDv7, getNextStudyQueue, getStudyQueue, submitStudyReview, undoStudyReview } from './study';
+import { checkStudyAnswer, createUUIDv7, decodeChoiceOptions, getNextStudyQueue, getStudyChoiceOptions, getStudyQueue, submitStudyReview, undoStudyReview } from './study';
 
 const card = {
   id: 5,
@@ -68,6 +68,7 @@ describe('study API', () => {
   it('posts a review and undo through the core routes', async () => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify(card), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(card), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify(card), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
     const review = {
@@ -85,6 +86,29 @@ describe('study API', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual(review);
     expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/study/undo');
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ review_id: review.id });
+
+    await submitStudyReview({ ...review, id: '018f0f3e-7b00-7000-8000-000000000032', mode: 'typing' });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({ mode: 'typing' });
+  });
+
+  it('requests validated choice options and checks typed or selected answers', async () => {
+    const choices = ['Hund', 'Katze', 'Vogel', 'Fisch'];
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ match: 'article', suggested_rating: 2 }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ match: 'wrong', suggested_rating: 1 }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getStudyChoiceOptions(5)).resolves.toEqual({ choices });
+    await expect(checkStudyAnswer(5, 'die Katze')).resolves.toEqual({ match: 'article', suggested_rating: 2 });
+    await expect(checkStudyAnswer(5, 'Katze', 'choice')).resolves.toEqual({ match: 'wrong', suggested_rating: 1 });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/study/choice-options');
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ card_id: 5 }));
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({ card_id: 5, answer: 'die Katze' }));
+    expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(JSON.stringify({ card_id: 5, answer: 'Katze', mode: 'choice' }));
+    expect(() => decodeChoiceOptions({ choices: ['one', 'two', 'three'] })).toThrow();
+    expect(() => decodeChoiceOptions({ choices: ['same', 'same', 'third', 'fourth'] })).toThrow();
   });
 
   it('creates canonical UUIDv7 identifiers', () => {

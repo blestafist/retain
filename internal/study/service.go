@@ -9,21 +9,26 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"sort"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/pestit/retain/internal/clock"
 	"github.com/pestit/retain/internal/db"
 	"github.com/pestit/retain/internal/db/gen"
+	"github.com/pestit/retain/internal/lang"
 	"github.com/pestit/retain/internal/srs"
 )
 
 var (
-	ErrInvalidInput = errors.New("invalid study input")
-	ErrNotFound     = errors.New("study resource not found")
-	ErrConflict     = errors.New("study id conflicts with another review")
-	ErrInternal     = errors.New("internal study service error")
+	ErrInvalidInput      = errors.New("invalid study input")
+	ErrNotFound          = errors.New("study resource not found")
+	ErrConflict          = errors.New("study id conflicts with another review")
+	ErrChoiceUnavailable = errors.New("multiple-choice options are unavailable")
+	ErrInternal          = errors.New("internal study service error")
 )
 
 const maxQueueLimit = 500
@@ -74,6 +79,21 @@ type QueueCard struct {
 	Front    string                 `json:"front"`
 	Back     string                 `json:"back"`
 	Previews map[srs.Rating]Preview `json:"previews"`
+}
+
+// CheckAnswerInput contains the card identifier and learner-entered response.
+// Expected answers and language metadata are always resolved by the server.
+type CheckAnswerInput struct {
+	CardID int64  `json:"card_id"`
+	Answer string `json:"answer"`
+	Mode   string `json:"mode,omitempty"`
+}
+
+// AnswerResult reports a match classification and a suggested FSRS rating.
+// It does not create a review; the learner still chooses a rating explicitly.
+type AnswerResult struct {
+	Match           string     `json:"match"`
+	SuggestedRating srs.Rating `json:"suggested_rating"`
 }
 
 // ReviewInput contains the client-generated UUIDv7 and answer metadata.
@@ -283,6 +303,9 @@ func (s *Service) Review(ctx context.Context, userID int64, input ReviewInput) (
 	if !found {
 		return Card{}, ErrInternal
 	}
+	if input.Mode == "choice" && metadata.stateBefore != srs.New {
+		return Card{}, ErrInvalidInput
+	}
 	if _, err := queries.InsertReviewLog(ctx, gen.InsertReviewLogParams{
 		ID: input.ID, CardID: input.CardID, UserID: userID, Rating: int64(input.Rating),
 		Mode: input.Mode, StateBefore: int64(metadata.stateBefore),
@@ -342,6 +365,195 @@ func reviewLogMatchesInput(existing gen.ReviewLog, userID int64, input ReviewInp
 		existing.Mode == input.Mode &&
 		existing.ReviewedAt.UTC().Equal(input.ReviewedAt.UTC()) &&
 		existing.DurationMs == input.DurationMS
+}
+
+// CheckAnswer compares an answer with server-side note and deck data. It never
+// trusts language, direction, expected answers, or article policy from client input.
+func (s *Service) CheckAnswer(ctx context.Context, userID int64, input CheckAnswerInput) (AnswerResult, error) {
+	if !s.ready() || userID <= 0 {
+		return AnswerResult{}, ErrInternal
+	}
+	if input.CardID <= 0 || !utf8.ValidString(input.Answer) || strings.TrimSpace(input.Answer) == "" ||
+		utf8.RuneCountInString(input.Answer) > 512 ||
+		(input.Mode != "" && input.Mode != "typing" && input.Mode != "choice") {
+		return AnswerResult{}, ErrInvalidInput
+	}
+	if input.Mode == "" {
+		input.Mode = "typing"
+	}
+
+	row, err := s.database.Queries().GetStudyAnswerCard(ctx, gen.GetStudyAnswerCardParams{
+		CardID: input.CardID, UserID: userID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return AnswerResult{}, ErrNotFound
+	}
+	if err != nil {
+		return AnswerResult{}, ErrInternal
+	}
+	if input.Mode == "choice" && (row.State != int64(srs.New) || row.Suspended) {
+		return AnswerResult{}, ErrChoiceUnavailable
+	}
+	answerInput, err := answerInputForRow(row, input.Answer)
+	if err != nil {
+		return AnswerResult{}, err
+	}
+	if input.Mode == "choice" {
+		correct := strings.TrimSpace(strings.Split(answerInput.Expected, ";")[0])
+		if input.Answer != correct {
+			return AnswerResult{Match: lang.MatchWrong, SuggestedRating: srs.Again}, nil
+		}
+		return AnswerResult{Match: lang.MatchExact, SuggestedRating: srs.Good}, nil
+	}
+	result, err := lang.MatchAnswer(answerInput)
+	if err != nil {
+		return AnswerResult{}, ErrInternal
+	}
+	return AnswerResult{Match: result.Match, SuggestedRating: srs.Rating(result.SuggestedRating)}, nil
+}
+
+// ChoiceOptions returns one correct answer and three distinct distractors from
+// the note's actual deck and card direction. Only active New cards can use it.
+func (s *Service) ChoiceOptions(ctx context.Context, userID, cardID int64) ([]string, error) {
+	if !s.ready() || userID <= 0 {
+		return nil, ErrInternal
+	}
+	if cardID <= 0 {
+		return nil, ErrInvalidInput
+	}
+	queries := s.database.Queries()
+	row, err := queries.GetStudyAnswerCard(ctx, gen.GetStudyAnswerCardParams{CardID: cardID, UserID: userID})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, ErrInternal
+	}
+	if row.State != int64(srs.New) || row.Suspended {
+		return nil, ErrChoiceUnavailable
+	}
+	answerInput, err := answerInputForRow(row, "")
+	if err != nil {
+		return nil, err
+	}
+	correct := strings.TrimSpace(strings.Split(answerInput.Expected, ";")[0])
+	if correct == "" {
+		return nil, ErrChoiceUnavailable
+	}
+
+	rows, err := queries.ListStudyChoiceDistractors(ctx, gen.ListStudyChoiceDistractorsParams{
+		UserID: userID, Direction: row.Direction, DeckID: row.DeckID, NoteID: row.NoteID,
+	})
+	if err != nil {
+		return nil, ErrInternal
+	}
+	distractors := make([]string, 0, len(rows))
+	seen := map[string]struct{}{choiceIdentity(correct): {}}
+	for _, candidateRow := range rows {
+		candidates := strings.Split(candidateRow.Answer, ";")
+		if row.Direction == "forward" {
+			var alternatives []string
+			if err := json.Unmarshal([]byte(candidateRow.Alternatives), &alternatives); err != nil {
+				return nil, ErrInternal
+			}
+			candidates = append(candidates, alternatives...)
+		}
+		for _, candidate := range candidates {
+			candidate = strings.TrimSpace(candidate)
+			if candidate == "" {
+				continue
+			}
+			answerInput.Answer = candidate
+			match, matchErr := lang.MatchAnswer(answerInput)
+			if matchErr != nil {
+				return nil, ErrInternal
+			}
+			if match.Match == lang.MatchExact {
+				continue
+			}
+			identity := choiceIdentity(candidate)
+			if _, exists := seen[identity]; exists {
+				continue
+			}
+			seen[identity] = struct{}{}
+			distractors = append(distractors, candidate)
+		}
+	}
+	if len(distractors) < 3 {
+		return nil, ErrChoiceUnavailable
+	}
+	rand.Shuffle(len(distractors), func(i, j int) {
+		distractors[i], distractors[j] = distractors[j], distractors[i]
+	})
+	choices := append([]string{correct}, distractors[:3]...)
+	rand.Shuffle(len(choices), func(i, j int) {
+		choices[i], choices[j] = choices[j], choices[i]
+	})
+	return choices, nil
+}
+
+func answerInputForRow(row gen.GetStudyAnswerCardRow, answer string) (lang.AnswerInput, error) {
+	language := row.LangNative
+	expected := row.Translation
+	var alternatives []string
+	if err := json.Unmarshal([]byte(row.Alternatives), &alternatives); err != nil {
+		return lang.AnswerInput{}, ErrInternal
+	}
+	fields := make(map[string]json.RawMessage)
+	if err := json.Unmarshal([]byte(row.Fields), &fields); err != nil {
+		return lang.AnswerInput{}, ErrInternal
+	}
+	article := ""
+	if raw, exists := fields["article"]; exists {
+		if err := json.Unmarshal(raw, &article); err != nil {
+			return lang.AnswerInput{}, ErrInternal
+		}
+	}
+	if row.Direction == "reverse" {
+		language = row.LangTarget
+		expected = row.Term
+		alternatives = nil // alternatives describe translations, not terms.
+		if language == "de" && article == "" {
+			article = inferGermanArticle(expected)
+		}
+	} else if row.Direction != "forward" {
+		return lang.AnswerInput{}, ErrInternal
+	} else {
+		article = "" // fields.article describes the target term, not its translation.
+	}
+	if language == "" {
+		return lang.AnswerInput{}, ErrInvalidInput
+	}
+	article = strings.ToLower(strings.TrimSpace(article))
+	if language != "de" {
+		article = ""
+	}
+	wrongArticleRating := srs.Hard
+	if row.WrongArticleRating == int64(srs.Again) {
+		wrongArticleRating = srs.Again
+	}
+	return lang.AnswerInput{
+		Language: language, Expected: expected, Alternatives: alternatives, Answer: answer,
+		GermanArticle: article, WrongArticleRating: int(wrongArticleRating),
+	}, nil
+}
+
+func choiceIdentity(value string) string {
+	return strings.Join(strings.Fields(strings.ToLower(value)), " ")
+}
+
+func inferGermanArticle(term string) string {
+	words := strings.Fields(term)
+	if len(words) < 2 {
+		return ""
+	}
+	article := strings.ToLower(strings.Trim(words[0], ".,;:!?\"'()[]{}"))
+	switch article {
+	case "der", "die", "das":
+		return article
+	default:
+		return ""
+	}
 }
 
 // Undo marks a review as undone and rebuilds its card from all remaining active
@@ -510,7 +722,7 @@ func remaining(limit, used int64) int64 {
 	return limit - used
 }
 
-func validMode(mode string) bool { return mode == "flip" }
+func validMode(mode string) bool { return mode == "flip" || mode == "typing" || mode == "choice" }
 
 func validUUIDv7(value string) bool {
 	id, err := uuid.Parse(value)

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } 
 import { useQuery } from '@tanstack/react-query';
 import { ApiError } from '../api/client';
 import { getDecks, type DeckId, type DeckNode, type NativeLanguage, type TargetLanguage } from '../api/content';
-import { createUUIDv7, getNextStudyQueue, getStudyQueue, submitStudyReview, undoStudyReview, type QueueCard, type ReviewInput, type StudyRating } from '../api/study';
+import { checkStudyAnswer, createUUIDv7, getNextStudyQueue, getStudyChoiceOptions, getStudyQueue, submitStudyReview, undoStudyReview, type AnswerMatch, type QueueCard, type ReviewInput, type StudyMode, type StudyRating } from '../api/study';
 import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
 
@@ -95,6 +95,11 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
   const [sessionQueue, setSessionQueue] = useState<{ deckKey: string; cards: QueueCard[]; hasMore: boolean } | null>(null);
   const [reviewed, setReviewed] = useState<ReviewedCard[]>([]);
   const [answerShown, setAnswerShown] = useState(false);
+  const [studyMode, setStudyMode] = useState<StudyMode>('flip');
+  const [typedAnswer, setTypedAnswer] = useState('');
+  const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
+  const [answerMatch, setAnswerMatch] = useState<AnswerMatch | null>(null);
+  const [isCheckingAnswer, setIsCheckingAnswer] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [pendingReview, setPendingReview] = useState<ReviewInput | null>(null);
@@ -105,12 +110,24 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
   const swipeStart = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const activeSession = sessionQueue?.deckKey === deckKey ? sessionQueue : null;
   const queue = activeSession?.cards ?? [];
+  const answerInput = useRef<HTMLInputElement>(null);
+  const currentCardID = useRef<number | undefined>(undefined);
+  const checkSequence = useRef(0);
   const currentCard = queue[reviewed.length];
+  currentCardID.current = currentCard?.id;
+  const choiceOptionsQuery = useQuery({
+    queryKey: ['study-choice-options', currentCard?.id ?? null],
+    queryFn: () => getStudyChoiceOptions(currentCard!.id),
+    enabled: studyMode === 'choice' && currentCard?.state === 0,
+    retry: false,
+  });
+  const effectiveMode: StudyMode = studyMode === 'choice' && currentCard?.state !== 0 ? 'flip' : studyMode;
   const languages = useMemo(
     () => findLanguages(decksQuery.data ?? [], currentCard?.deck_id ?? deckId ?? undefined),
     [currentCard?.deck_id, deckId, decksQuery.data],
   );
   const frontLanguage = currentCard?.direction === 'reverse' ? languages.native : languages.target;
+  const answerLanguage = currentCard?.direction === 'reverse' ? languages.target : languages.native;
   const voice = useMemo(() => findVoice(voices, frontLanguage), [frontLanguage, voices]);
 
   useEffect(() => {
@@ -151,8 +168,20 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
     shownAt.current = Date.now();
     setAnswerShown(false);
     setError(null);
+    setTypedAnswer('');
+    setSelectedChoice(null);
+    setAnswerMatch(null);
+    setIsCheckingAnswer(false);
+    checkSequence.current += 1;
+  }, [currentCard?.id]);
+
+  useEffect(() => {
     if (ttsAuto) speak(currentCard, voice);
   }, [currentCard?.id, currentCard?.front, speak, ttsAuto, voice]);
+
+  useEffect(() => {
+    if (currentCard && effectiveMode === 'typing' && !answerMatch) answerInput.current?.focus();
+  }, [currentCard?.id, effectiveMode, answerMatch]);
 
   const submitReview = useCallback(async (input: ReviewInput, card: QueueCard) => {
     setBusy(true);
@@ -181,14 +210,14 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
         id: createUUIDv7(),
         card_id: currentCard.id,
         rating,
-        mode: 'flip',
+        mode: effectiveMode,
         reviewed_at: new Date().toISOString(),
         duration_ms: Math.max(0, Date.now() - shownAt.current),
       } satisfies ReviewInput;
     pendingReviewRef.current = input;
     setPendingReview(input);
     await submitReview(input, currentCard);
-  }, [busy, currentCard, submitReview]);
+  }, [busy, currentCard, effectiveMode, submitReview]);
 
   const retryPendingReview = useCallback(async () => {
     const input = pendingReviewRef.current;
@@ -242,6 +271,40 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
     void rate(deltaX < 0 ? 1 : 3);
   }, [answerShown, busy, rate]);
 
+  const checkAnswer = useCallback(async (answer = typedAnswer, mode: 'typing' | 'choice' = 'typing') => {
+    if (!currentCard || isCheckingAnswer || busy || !answer.trim()) return;
+    const cardID = currentCard.id;
+    const sequence = ++checkSequence.current;
+    setIsCheckingAnswer(true);
+    setError(null);
+    try {
+      const result = await checkStudyAnswer(cardID, answer, mode);
+      if (checkSequence.current !== sequence || currentCardID.current !== cardID) return;
+      setAnswerMatch(result);
+      setAnswerShown(true);
+    } catch (caught) {
+      if (checkSequence.current === sequence && currentCardID.current === cardID) setError(caught);
+    } finally {
+      if (checkSequence.current === sequence && currentCardID.current === cardID) setIsCheckingAnswer(false);
+    }
+  }, [busy, currentCard, isCheckingAnswer, typedAnswer]);
+
+  function insertCharacter(character: string) {
+    const input = answerInput.current;
+    if (!input) {
+      setTypedAnswer((previous) => previous + character);
+      return;
+    }
+    const start = input.selectionStart ?? typedAnswer.length;
+    const end = input.selectionEnd ?? start;
+    const next = `${typedAnswer.slice(0, start)}${character}${typedAnswer.slice(end)}`;
+    setTypedAnswer(next);
+    requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(start + character.length, start + character.length);
+    });
+  }
+
   const undo = useCallback(async () => {
     const last = reviewed.at(-1);
     if (!last || busy || pendingReview !== null) return;
@@ -262,17 +325,17 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
     function onKeyDown(event: KeyboardEvent) {
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       if (event.target instanceof Element && event.target.closest('a, button, input, select, textarea, [contenteditable="true"]')) return;
-      if ((event.key === ' ' || event.key === 'Spacebar') && currentCard && !answerShown) {
+      if (effectiveMode === 'flip' && (event.key === ' ' || event.key === 'Spacebar') && currentCard && !answerShown) {
         event.preventDefault();
         setAnswerShown(true);
-      } else if (/^[1-4]$/.test(event.key) && answerShown && currentCard && !busy) {
+      } else if (/^[1-4]$/.test(event.key) && answerShown && currentCard && !busy && !isCheckingAnswer) {
         event.preventDefault();
         void rate(Number(event.key) as StudyRating);
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [answerShown, busy, currentCard, rate]);
+  }, [answerShown, busy, currentCard, effectiveMode, isCheckingAnswer, rate]);
 
   const sessionReady = activeSession !== null;
   const progress = queue.length === 0 ? 100 : (reviewed.length / queue.length) * 100;
@@ -291,6 +354,34 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
         </div>
       </header>
 
+      {currentCard && (
+        <div role="group" aria-label={t('studyModeGroup')} className="flex flex-wrap gap-2">
+          {([
+            ['flip', 'flipMode'],
+            ['typing', 'typingMode'],
+            ['choice', 'choiceMode'],
+          ] as const).map(([mode, label]) => (
+            <Button
+              key={mode}
+              type="button"
+              variant={effectiveMode === mode ? 'filled' : 'tonal'}
+              aria-pressed={effectiveMode === mode}
+              disabled={isCheckingAnswer || busy}
+              onClick={() => {
+                setStudyMode(mode);
+                setAnswerShown(false);
+                setTypedAnswer('');
+                setSelectedChoice(null);
+                setAnswerMatch(null);
+                setError(null);
+              }}
+            >
+              {t(label)}
+            </Button>
+          ))}
+        </div>
+      )}
+
       {queueQuery.isPending && <p role="status" className="rounded-3xl bg-surface-container-low p-6 text-on-surface-variant">{t('loadingStudyQueue')}</p>}
       {queueQuery.isError && (
         <div role="alert" className="grid gap-3 rounded-3xl bg-error-container p-5 text-on-error-container">
@@ -298,7 +389,24 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
           <Button type="button" variant="tonal" onClick={() => void queueQuery.refetch()}>{t('tryAgain')}</Button>
         </div>
       )}
-      {error !== null && <p role="alert" className="rounded-xl bg-error-container p-4 text-on-error-container">{messageFor(error)}</p>}
+      {error !== null && (
+        <div role="alert" className="grid gap-3 rounded-xl bg-error-container p-4 text-on-error-container">
+          <p className="m-0">{messageFor(error)}</p>
+          {!answerShown && ((effectiveMode === 'typing' && typedAnswer.trim()) || (effectiveMode === 'choice' && selectedChoice)) && (
+            <Button
+              type="button"
+              variant="tonal"
+              disabled={isCheckingAnswer || busy}
+              onClick={() => {
+                if (effectiveMode === 'choice' && selectedChoice) void checkAnswer(selectedChoice, 'choice');
+                else void checkAnswer();
+              }}
+            >
+              {t(isCheckingAnswer ? 'checkingAnswer' : 'retryAnswer')}
+            </Button>
+          )}
+        </div>
+      )}
 
       {currentCard && (
         <>
@@ -326,14 +434,94 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
                 <div className="mx-auto grid w-full max-w-2xl gap-2 border-t border-outline-variant pt-6">
                   <p className="m-0 text-sm font-medium uppercase tracking-wide text-on-surface-variant">{t('answer')}</p>
                   <p className="m-0 break-words text-2xl text-on-surface">{currentCard.back}</p>
+                  {answerMatch && (
+                    <div role="status" className="mt-3 grid gap-2 rounded-2xl bg-surface-container p-4 text-start">
+                      <p className="m-0 font-medium text-on-surface">{t(answerMatch.match === 'exact' ? 'answerExact' : answerMatch.match === 'typo' ? 'answerTypo' : answerMatch.match === 'article' ? 'answerArticle' : 'answerWrong')}</p>
+                      <p className="m-0 text-sm text-on-surface-variant">
+                        {t('suggestedRating').replace('{rating}', t(answerMatch.suggested_rating === 1 ? 'again' : answerMatch.suggested_rating === 2 ? 'hard' : 'good'))}
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
             {!answerShown ? (
-              <div className="grid justify-items-center gap-2">
-                <Button type="button" onClick={() => setAnswerShown(true)}>{t('showAnswer')}</Button>
-                <p className="m-0 text-sm text-on-surface-variant">{t('showAnswerShortcut')}</p>
-              </div>
+              effectiveMode === 'flip' ? (
+                <div className="grid justify-items-center gap-2">
+                  {studyMode === 'choice' && currentCard.state !== 0 && (
+                    <p className="m-0 text-sm text-on-surface-variant">{t('choiceFlipHint')}</p>
+                  )}
+                  <Button type="button" onClick={() => setAnswerShown(true)}>{t('showAnswer')}</Button>
+                  <p className="m-0 text-sm text-on-surface-variant">{t('showAnswerShortcut')}</p>
+                </div>
+              ) : effectiveMode === 'typing' ? (
+                <form onSubmit={(event) => { event.preventDefault(); void checkAnswer(); }} className="mx-auto grid w-full max-w-2xl gap-3 text-start">
+                  <label htmlFor="typed-answer" className="text-sm font-medium text-on-surface">{t('typeYourAnswer')}</label>
+                  <input
+                    ref={answerInput}
+                    id="typed-answer"
+                    type="text"
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    maxLength={512}
+                    value={typedAnswer}
+                    disabled={isCheckingAnswer || busy}
+                    onChange={(event) => { setTypedAnswer(event.target.value); setError(null); }}
+                    className="min-h-12 w-full rounded-xl border border-outline bg-surface-container-lowest px-4 text-base text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
+                  />
+                  {(answerLanguage === 'de' || answerLanguage === 'pl') && (
+                    <div className="grid gap-2" role="group" aria-label={t(answerLanguage === 'de' ? 'germanCharacterBar' : 'polishCharacterBar')}>
+                      <p className="m-0 text-sm text-on-surface-variant">{t(answerLanguage === 'de' ? 'germanCharacterBar' : 'polishCharacterBar')}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {Array.from(answerLanguage === 'de' ? 'äöüß' : 'ąćęłńóśźż').map((character) => (
+                          <button
+                            key={character}
+                            type="button"
+                            aria-label={t('insertCharacter').replace('{character}', character)}
+                            onClick={() => insertCharacter(character)}
+                            className="min-h-12 min-w-12 rounded-xl bg-surface-container-high px-3 text-lg font-medium text-on-surface hover:bg-secondary-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                          >
+                            {character}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <p className="m-0 text-sm text-on-surface-variant">{t('typedAnswerHint')}</p>
+                  <Button type="submit" disabled={isCheckingAnswer || busy || !typedAnswer.trim()}>
+                    {t(isCheckingAnswer ? 'checkingAnswer' : 'checkAnswer')}
+                  </Button>
+                </form>
+              ) : (
+                <div className="mx-auto grid w-full max-w-2xl gap-3">
+                  {choiceOptionsQuery.isPending && <p role="status" className="m-0 text-on-surface-variant">{t('choiceLoading')}</p>}
+                  {choiceOptionsQuery.isError && (
+                    <div role="alert" className="grid gap-3 rounded-2xl bg-error-container p-4 text-start text-on-error-container">
+                      <p className="m-0">{messageFor(choiceOptionsQuery.error)}</p>
+                      <Button type="button" variant="tonal" onClick={() => void choiceOptionsQuery.refetch()}>{t('tryAgain')}</Button>
+                    </div>
+                  )}
+                  {choiceOptionsQuery.data && (
+                    <div role="group" aria-label={t('choiceOptionsGroup')} className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {choiceOptionsQuery.data.choices.map((choice) => (
+                        <Button
+                          key={choice}
+                          type="button"
+                          variant={selectedChoice === choice ? 'filled' : 'tonal'}
+                          disabled={isCheckingAnswer || busy}
+                          onClick={() => {
+                            setSelectedChoice(choice);
+                            void checkAnswer(choice, 'choice');
+                          }}
+                        >
+                          {choice}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
             ) : (
               <div className="grid gap-3">
                 <div role="group" aria-label={t('ratingGroup')} className="grid grid-cols-2 gap-2 expanded:grid-cols-4">
@@ -341,9 +529,10 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
                     <button
                       key={rating}
                       type="button"
-                      disabled={busy || pendingReview !== null}
+                      disabled={busy || pendingReview !== null || isCheckingAnswer}
+                      aria-pressed={answerMatch?.suggested_rating === rating}
                       onClick={() => void rate(rating)}
-                      className={`flex min-h-12 flex-col items-center justify-center rounded-2xl px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 ${ratingClasses[rating]}`}
+                      className={`flex min-h-12 flex-col items-center justify-center rounded-2xl px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 ${answerMatch?.suggested_rating === rating ? 'ring-2 ring-primary' : ''} ${ratingClasses[rating]}`}
                     >
                       <span className="font-medium">{t(ratingLabels[rating])}</span>
                       <span className="text-sm opacity-80">{formatInterval(currentCard.previews[rating].interval)}</span>

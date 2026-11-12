@@ -1,0 +1,289 @@
+{
+  "format": "retain/lang-cases/v1",
+  "cases": [
+    {
+      "name": "german unicode nfc and case folding",
+      "language": "de",
+      "expected": "schön",
+      "answer": "Schön",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "german umlaut transliteration",
+      "language": "de",
+      "expected": "Übergröße",
+      "answer": "uebergroesse",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "german punctuation becomes token separator",
+      "language": "de",
+      "expected": "Mutter in law",
+      "answer": "Mutter-in-law!",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "common trim lowercase and whitespace collapse",
+      "language": "en",
+      "expected": "  red   apple  ",
+      "answer": " RED\t apple ",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "german does not join punctuation-separated tokens",
+      "language": "de",
+      "expected": "cooperate",
+      "answer": "co-operate",
+      "wrong_article_rating": 2,
+      "match": "typo",
+	  "suggested_rating": 2
+    },
+    {
+      "name": "german correct article",
+      "language": "de",
+      "expected": "Hund",
+      "answer": "Der Hund",
+      "german_article": "der",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "german missing article defaults to configured again",
+      "language": "de",
+      "expected": "Hund",
+      "answer": "Hund",
+      "german_article": "der",
+      "wrong_article_rating": 1,
+      "match": "article",
+      "suggested_rating": 1
+    },
+    {
+      "name": "german wrong article uses configured hard",
+      "language": "de",
+      "expected": "Blume",
+      "answer": "der Blume",
+      "german_article": "die",
+      "wrong_article_rating": 2,
+      "match": "article",
+      "suggested_rating": 2
+    },
+    {
+      "name": "german optional accusative marker",
+      "language": "de",
+      "expected": "berichten über A",
+      "answer": "berichten über",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "german optional dative marker",
+      "language": "de",
+      "expected": "helfen bei D",
+      "answer": "helfen bei",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "german optional genitive marker",
+      "language": "de",
+      "expected": "sich erinnern wegen G",
+      "answer": "sich erinnern wegen",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "german case marker does not make preposition optional",
+      "language": "de",
+      "expected": "berichten über A",
+      "answer": "berichten",
+      "wrong_article_rating": 2,
+      "match": "wrong",
+      "suggested_rating": 1
+    },
+    {
+      "name": "german one stem typo uses normal Hard rating with wrong article",
+      "language": "de",
+      "expected": "Hund",
+      "answer": "die Hundd",
+      "german_article": "der",
+      "wrong_article_rating": 1,
+      "match": "typo",
+      "suggested_rating": 2
+    },
+    {
+      "name": "german empty article setting disables article handling",
+      "language": "de",
+      "expected": "der Hund",
+      "answer": "der HUND",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "german article is ignored when no article is configured",
+      "language": "de",
+      "expected": "Hund",
+      "answer": "Hund",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "english expected semicolon variant",
+      "language": "en",
+      "expected": "color; colour",
+      "answer": "COLOUR",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "english caller alternative",
+      "language": "en",
+      "expected": "apartment",
+      "alternatives": ["flat", "living quarters"],
+      "answer": "flat",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "english ignores standalone articles and leading to",
+      "language": "en",
+      "expected": "go to school",
+      "answer": "To go to the school",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "english ignores a and an",
+      "language": "en",
+      "expected": "apple pie",
+      "answer": "an apple pie",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "english ignores standalone a",
+      "language": "en",
+      "expected": "red car",
+      "answer": "a red car",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "english punctuation separates tokens",
+      "language": "en",
+      "expected": "ice cream",
+      "answer": "ice-cream",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "polish exact diacritics",
+      "language": "pl",
+      "expected": "żółć",
+      "answer": "ŻÓŁĆ",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "polish multiple missing diacritics are hard",
+      "language": "pl",
+      "expected": "żółć",
+      "answer": "zolc",
+      "wrong_article_rating": 2,
+      "match": "typo",
+      "suggested_rating": 2
+    },
+    {
+      "name": "polish diacritics differ alongside a single typo",
+      "language": "pl",
+      "expected": "książka",
+      "answer": "ksiazke",
+      "wrong_article_rating": 2,
+      "match": "wrong",
+      "suggested_rating": 1
+    },
+    {
+      "name": "polish one ordinary edit is hard",
+      "language": "pl",
+      "expected": "kot",
+      "answer": "koc",
+      "wrong_article_rating": 2,
+      "match": "typo",
+      "suggested_rating": 2
+    },
+    {
+      "name": "russian ё normalization",
+      "language": "ru",
+      "expected": "всё",
+      "answer": "все",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "russian stress mark removal",
+      "language": "ru",
+      "expected": "замок",
+      "answer": "за́мок",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "russian canonicalizes precomposed stress sequences",
+      "language": "ru",
+      "expected": "е",
+      "answer": "е́",
+      "wrong_article_rating": 2,
+      "match": "exact",
+      "suggested_rating": 3
+    },
+    {
+      "name": "punctuation-only answer is simply wrong",
+      "language": "en",
+      "expected": "hello",
+      "answer": "!!!",
+      "wrong_article_rating": 2,
+      "match": "wrong",
+      "suggested_rating": 1
+    },
+    {
+      "name": "one levenshtein edit is hard",
+      "language": "en",
+      "expected": "house",
+      "answer": "houze",
+      "wrong_article_rating": 2,
+      "match": "typo",
+      "suggested_rating": 2
+    },
+    {
+      "name": "multiple edits are wrong",
+      "language": "en",
+      "expected": "house",
+      "answer": "cat",
+      "wrong_article_rating": 2,
+      "match": "wrong",
+      "suggested_rating": 1
+    }
+  ]
+}

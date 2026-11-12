@@ -82,6 +82,101 @@ func (q *Queries) GetReviewLog(ctx context.Context, id string) (ReviewLog, error
 	return i, err
 }
 
+const getStudyAnswerCard = `-- name: GetStudyAnswerCard :one
+WITH RECURSIVE card_deck_path(depth, id, parent_id, lang_target, lang_native, visited) AS (
+    SELECT 0, deck.id, deck.parent_id, deck.lang_target, deck.lang_native, printf(',%d,', deck.id)
+    FROM cards
+    JOIN notes ON notes.id = cards.note_id
+    JOIN decks AS deck ON deck.id = notes.deck_id
+    WHERE cards.id = ?1
+      AND cards.user_id = ?2
+      AND cards.deleted_at IS NULL
+      AND notes.deleted_at IS NULL
+      AND deck.deleted_at IS NULL
+      AND deck.owner_id = cards.user_id
+    UNION ALL
+    SELECT child.depth + 1, parent.id, parent.parent_id, parent.lang_target, parent.lang_native,
+           child.visited || printf('%d,', parent.id)
+    FROM card_deck_path AS child
+    JOIN decks AS parent ON parent.id = child.parent_id
+    WHERE parent.owner_id = ?2
+      AND parent.deleted_at IS NULL
+      AND instr(child.visited, printf(',%d,', parent.id)) = 0
+)
+SELECT cards.id AS card_id,
+       cards.note_id,
+       notes.deck_id,
+       cards.direction,
+       cards.state,
+       cards.suspended,
+       notes.term,
+       notes.translation,
+       notes.alternatives,
+       notes.fields,
+       CAST(COALESCE((
+           SELECT lang_target FROM card_deck_path
+           WHERE lang_target IS NOT NULL
+           ORDER BY depth LIMIT 1
+       ), '') AS TEXT) AS lang_target,
+       CAST(COALESCE((
+           SELECT lang_native FROM card_deck_path
+           WHERE lang_native IS NOT NULL
+           ORDER BY depth LIMIT 1
+       ), '') AS TEXT) AS lang_native,
+       deck.wrong_article_rating
+FROM cards
+JOIN notes ON notes.id = cards.note_id
+JOIN decks AS deck ON deck.id = notes.deck_id
+WHERE cards.id = ?1
+  AND cards.user_id = ?2
+  AND cards.deleted_at IS NULL
+  AND notes.deleted_at IS NULL
+  AND deck.deleted_at IS NULL
+  AND deck.owner_id = cards.user_id
+`
+
+type GetStudyAnswerCardParams struct {
+	CardID int64
+	UserID int64
+}
+
+type GetStudyAnswerCardRow struct {
+	CardID             int64
+	NoteID             int64
+	DeckID             int64
+	Direction          string
+	State              int64
+	Suspended          bool
+	Term               string
+	Translation        string
+	Alternatives       string
+	Fields             string
+	LangTarget         string
+	LangNative         string
+	WrongArticleRating int64
+}
+
+func (q *Queries) GetStudyAnswerCard(ctx context.Context, arg GetStudyAnswerCardParams) (GetStudyAnswerCardRow, error) {
+	row := q.db.QueryRowContext(ctx, getStudyAnswerCard, arg.CardID, arg.UserID)
+	var i GetStudyAnswerCardRow
+	err := row.Scan(
+		&i.CardID,
+		&i.NoteID,
+		&i.DeckID,
+		&i.Direction,
+		&i.State,
+		&i.Suspended,
+		&i.Term,
+		&i.Translation,
+		&i.Alternatives,
+		&i.Fields,
+		&i.LangTarget,
+		&i.LangNative,
+		&i.WrongArticleRating,
+	)
+	return i, err
+}
+
 const getStudyCard = `-- name: GetStudyCard :one
 SELECT cards.id, cards.note_id, cards.user_id, cards.direction, cards.state, cards.due, cards.stability, cards.difficulty, cards.elapsed_days, cards.scheduled_days, cards.step, cards.reps, cards.lapses, cards.last_review, cards.suspended, cards.is_leech, cards.updated_at, cards.deleted_at, cards.deletion_batch FROM cards
 JOIN notes ON notes.id = cards.note_id
@@ -372,6 +467,70 @@ func (q *Queries) ListStudyCards(ctx context.Context, arg ListStudyCardsParams) 
 			&i.Term,
 			&i.Translation,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStudyChoiceDistractors = `-- name: ListStudyChoiceDistractors :many
+SELECT DISTINCT CAST(CASE
+    WHEN cards.direction = 'reverse' THEN notes.term
+    ELSE notes.translation
+END AS TEXT) AS answer,
+notes.alternatives
+FROM cards
+JOIN notes ON notes.id = cards.note_id
+JOIN decks ON decks.id = notes.deck_id
+WHERE cards.user_id = ?1
+  AND cards.direction = ?2
+  AND notes.deck_id = ?3
+  AND cards.note_id != ?4
+  AND cards.suspended = 0
+  AND cards.deleted_at IS NULL
+  AND notes.deleted_at IS NULL
+  AND decks.deleted_at IS NULL
+  AND decks.owner_id = cards.user_id
+  AND trim(CASE
+      WHEN cards.direction = 'reverse' THEN notes.term
+      ELSE notes.translation
+  END) != ''
+`
+
+type ListStudyChoiceDistractorsParams struct {
+	UserID    int64
+	Direction string
+	DeckID    int64
+	NoteID    int64
+}
+
+type ListStudyChoiceDistractorsRow struct {
+	Answer       string
+	Alternatives string
+}
+
+func (q *Queries) ListStudyChoiceDistractors(ctx context.Context, arg ListStudyChoiceDistractorsParams) ([]ListStudyChoiceDistractorsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listStudyChoiceDistractors,
+		arg.UserID,
+		arg.Direction,
+		arg.DeckID,
+		arg.NoteID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStudyChoiceDistractorsRow
+	for rows.Next() {
+		var i ListStudyChoiceDistractorsRow
+		if err := rows.Scan(&i.Answer, &i.Alternatives); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -10,11 +10,13 @@ import (
 	"github.com/pestit/retain/internal/study"
 )
 
-// RegisterStudyRoutes registers the authenticated, owner-scoped review workflow.
+// RegisterStudyRoutes registers authenticated, owner-scoped study endpoints.
 // The caller is responsible for placing state-changing routes behind the same-origin guard.
 func RegisterStudyRoutes(mux *http.ServeMux, authService *auth.Service, studyService *study.Service) {
 	mux.HandleFunc("GET /api/v1/study/queue", studyQueueHandler(authService, studyService))
 	mux.HandleFunc("POST /api/v1/study/queue/next", studyNextQueueHandler(authService, studyService))
+	mux.HandleFunc("POST /api/v1/study/choice-options", studyChoiceOptionsHandler(authService, studyService))
+	mux.HandleFunc("POST /api/v1/study/check-answer", studyCheckAnswerHandler(authService, studyService))
 	mux.HandleFunc("POST /api/v1/study/review", studyReviewHandler(authService, studyService))
 	mux.HandleFunc("POST /api/v1/study/undo", studyUndoHandler(authService, studyService))
 }
@@ -35,6 +37,54 @@ func studyNextQueueHandler(authService *auth.Service, service *study.Service) ht
 			return
 		}
 		result, err := service.QueueExcluding(r.Context(), user.ID, input.DeckID, input.Limit, input.ExcludeCardIDs)
+		if err != nil {
+			writeStudyError(w, err)
+			return
+		}
+		if err := WriteJSON(w, http.StatusOK, result); err != nil {
+			writeInternalError(w)
+		}
+	}
+}
+
+func studyChoiceOptionsHandler(authService *auth.Service, service *study.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := authenticatedUser(w, r, authService)
+		if !ok {
+			return
+		}
+		var input struct {
+			CardID int64 `json:"card_id"`
+		}
+		if err := DecodeJSON(r, &input); err != nil {
+			writeJSONDecodeError(w, err)
+			return
+		}
+		choices, err := service.ChoiceOptions(r.Context(), user.ID, input.CardID)
+		if err != nil {
+			writeStudyError(w, err)
+			return
+		}
+		if err := WriteJSON(w, http.StatusOK, struct {
+			Choices []string `json:"choices"`
+		}{Choices: choices}); err != nil {
+			writeInternalError(w)
+		}
+	}
+}
+
+func studyCheckAnswerHandler(authService *auth.Service, service *study.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := authenticatedUser(w, r, authService)
+		if !ok {
+			return
+		}
+		var input study.CheckAnswerInput
+		if err := DecodeJSON(r, &input); err != nil {
+			writeJSONDecodeError(w, err)
+			return
+		}
+		result, err := service.CheckAnswer(r.Context(), user.ID, input)
 		if err != nil {
 			writeStudyError(w, err)
 			return
@@ -159,6 +209,8 @@ func writeStudyError(w http.ResponseWriter, err error) {
 		writeStudyInputError(w)
 	case errors.Is(err, study.ErrConflict):
 		_ = WriteAPIError(w, http.StatusConflict, "conflict", "The review conflicts with an existing review.")
+	case errors.Is(err, study.ErrChoiceUnavailable):
+		_ = WriteAPIError(w, http.StatusConflict, "choice_unavailable", "Multiple choice is unavailable for this card. Use card flip or typed answer.")
 	default:
 		writeInternalError(w)
 	}
