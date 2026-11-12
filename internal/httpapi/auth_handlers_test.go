@@ -87,7 +87,7 @@ func TestAccountRoutesRegistrationLoginMeSettingsAndLogout(t *testing.T) {
 		!cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode || cookie.MaxAge != int((30*24*time.Hour).Seconds()) {
 		t.Errorf("login cookie flags = %+v", cookie)
 	}
-	if got := cookie.Expires.Sub(time.Now()); got < 29*24*time.Hour || got > 31*24*time.Hour {
+	if got := time.Until(cookie.Expires); got < 29*24*time.Hour || got > 31*24*time.Hour {
 		t.Errorf("cookie expiry is not about 30 days away: %v", got)
 	}
 	if strings.Contains(login.Body.String(), cookie.Value) || strings.Contains(login.Body.String(), `"token"`) {

@@ -576,14 +576,6 @@ func readMigrationSchemaObjects(t *testing.T, ctx context.Context, database *sql
 	return objects
 }
 
-func assertMigrationSchemaObjects(t *testing.T, ctx context.Context, database *sql.DB, want map[string]string) {
-	t.Helper()
-	got := readMigrationSchemaObjects(t, ctx, database)
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("schema indexes/triggers changed during migration:\n got: %#v\nwant: %#v", got, want)
-	}
-}
-
 func assertLatestMigrationSchema(t *testing.T, ctx context.Context, database *sql.DB) {
 	t.Helper()
 	objects := readMigrationSchemaObjects(t, ctx, database)
