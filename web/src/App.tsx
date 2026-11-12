@@ -12,6 +12,7 @@ import { SettingsPage } from './settings/SettingsPage';
 import { StudySession } from './study/StudySession';
 
 const DevShowcase = import.meta.env.DEV ? lazy(() => import('./dev/Showcase')) : null;
+const StatsPage = lazy(async () => ({ default: (await import('./stats/StatsPage')).StatsPage }));
 
 export function isDevShowcase(dev: boolean, pathname: string) {
   return dev && pathname === '/dev/ui';
@@ -106,6 +107,7 @@ function AuthenticatedApp() {
               <nav aria-label={t('navigation')} className="flex flex-wrap items-center gap-2">
                 <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/">{t('decksWorkspace')}</a>
                 <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/study">{t('study')}</a>
+                <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/stats" aria-current={window.location.pathname === '/stats' ? 'page' : undefined}>{t('stats')}</a>
                 <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/settings">{t('settings')}</a>
                 {meQuery.data.user.is_admin && <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/admin">{t('admin')}</a>}
               </nav>
@@ -131,6 +133,10 @@ function AuthenticatedApp() {
               <SettingsPage settings={meQuery.data.settings} />
             ) : window.location.pathname === '/admin' ? (
               meQuery.data.user.is_admin ? <AdminPage /> : <section className="mx-auto max-w-3xl rounded-3xl bg-error-container p-6 text-on-error-container" role="alert">{t('adminAccessDenied')}</section>
+            ) : window.location.pathname === '/stats' ? (
+              <Suspense fallback={<p role="status" className="auth-loading">{t('statsLoading')}</p>}>
+                <StatsPage timezone={meQuery.data.settings.timezone} />
+              </Suspense>
             ) : (
               <DecksWorkspace ownerId={meQuery.data.user.id} />
             )}

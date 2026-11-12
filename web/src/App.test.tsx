@@ -230,4 +230,44 @@ describe('account screens', () => {
     expect(screen.getByRole('link', { name: t('admin') }).getAttribute('href')).toBe('/admin');
     expect(screen.queryByRole('heading', { name: t('decksWorkspace') })).toBeNull();
   });
+
+  it('routes signed-in users to analytics and loads the stats API', async () => {
+    const year = new Date().getUTCFullYear();
+    const dayCount = new Date(Date.UTC(year + 1, 0, 0)).getUTCDate();
+    setFetchHandler(async (url) => {
+      if (url === '/api/v1/me') return response(signedInResponse);
+      if (url === '/api/v1/stats/overview') return response({
+        timezone: 'UTC', day_start_hour: 4, streak_days: 0,
+        today: { reviews: 0, new_cards: 0, review_cards: 0, recalled_reviews: 0, retention: 0, duration_ms: 0 },
+        cards: { total: 0, new: 0, learning: 0, review: 0, relearning: 0, due: 0, young: 0, mature: 0, leeches: 0 },
+        reviews: { total: 0, total_duration_ms: 0, average_duration_ms: 0 },
+        known_right_now: 0, desired_retention: 0.9,
+      });
+      if (url === '/api/v1/stats/distribution') return response({
+        states: [], stability: [], difficulty: [], leeches: [], deck_median_stability: [],
+      });
+      if (url.startsWith('/api/v1/stats/forecast?')) return response({
+        days: 30,
+        due: Array.from({ length: 30 }, (_, index) => ({
+          date: new Date(Date.UTC(year, 0, index + 1)).toISOString().slice(0, 10), cards: 0,
+        })),
+      });
+      if (url === '/api/v1/stats/retention?period=week') return response({ period: 'week', desired_retention: 0.9, points: [] });
+      if (url === `/api/v1/stats/heatmap?year=${year}`) return response({
+        year,
+        days: Array.from({ length: dayCount }, (_, index) => ({
+          date: new Date(Date.UTC(year, 0, index + 1)).toISOString().slice(0, 10), reviews: 0, duration_ms: 0,
+        })),
+        vocabulary_growth: [],
+      });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    window.history.replaceState(null, '', '/stats');
+    renderApp();
+
+    expect(await screen.findByRole('heading', { name: t('statsHeading') })).toBeTruthy();
+    expect(screen.getByRole('link', { name: t('stats') }).getAttribute('aria-current')).toBe('page');
+    expect(calls.map(({ url }) => url)).toContain('/api/v1/stats/overview');
+    expect(calls.map(({ url }) => url)).toContain('/api/v1/stats/distribution');
+  });
 });

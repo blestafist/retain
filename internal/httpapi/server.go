@@ -16,6 +16,7 @@ import (
 	"github.com/pestit/retain/internal/llmservice"
 	"github.com/pestit/retain/internal/llmstore"
 	"github.com/pestit/retain/internal/notes"
+	"github.com/pestit/retain/internal/stats"
 	"github.com/pestit/retain/internal/study"
 )
 
@@ -25,8 +26,9 @@ type databasePinger interface {
 	PingContext(context.Context) error
 }
 
-// HandlerOptions contains the Stage 6 LLM services registered by the server.
+// HandlerOptions contains optional application services registered by the server.
 type HandlerOptions struct {
+	StatsService       *stats.Service
 	LLMStore           *llmstore.Store
 	LLMService         *llmservice.Service
 	AskService         *llmservice.AskService
@@ -49,7 +51,7 @@ func NewHandlerWithContent(publicOrigin string, database databasePinger, authSer
 	return newHandler(publicOrigin, database, authService, contentDB, frontend)
 }
 
-// NewHandlerWithOptions wires the Stage 6 LLM routes alongside the existing
+// NewHandlerWithOptions wires optional application routes alongside the
 // account, content, and frontend handlers.
 func NewHandlerWithOptions(publicOrigin string, database databasePinger, authService *auth.Service, contentDB *db.DB, frontend fs.FS, options HandlerOptions) http.Handler {
 	return newHandler(publicOrigin, database, authService, contentDB, frontend, options)
@@ -71,6 +73,11 @@ func newHandler(publicOrigin string, database databasePinger, authService *auth.
 		RegisterContentRoutes(mux, authService, deckService, noteService)
 		RegisterImportRoutes(mux, authService, contentimport.NewService(contentDB, appClock))
 		RegisterStudyRoutes(mux, authService, study.NewService(contentDB, appClock))
+		statsService := options.StatsService
+		if statsService == nil {
+			statsService = stats.NewService(contentDB, appClock)
+		}
+		RegisterStatsRoutes(mux, authService, statsService)
 		if registerLLMRoutes {
 			llmStore := options.LLMStore
 			if llmStore == nil {
@@ -117,7 +124,7 @@ func frontendHandler(frontend fs.FS) http.Handler {
 	files := http.FileServer(http.FS(generated))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/")
-		if r.URL.Path == "/" || r.URL.Path == "/signup" || r.URL.Path == "/study" || r.URL.Path == "/settings" || r.URL.Path == "/admin" {
+		if r.URL.Path == "/" || r.URL.Path == "/signup" || r.URL.Path == "/study" || r.URL.Path == "/settings" || r.URL.Path == "/admin" || r.URL.Path == "/stats" {
 			name = "index.html"
 		}
 		if name == ".gitkeep" || !fs.ValidPath(name) {
