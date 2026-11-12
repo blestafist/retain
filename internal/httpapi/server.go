@@ -14,6 +14,7 @@ import (
 	"github.com/pestit/retain/internal/db"
 	"github.com/pestit/retain/internal/decks"
 	"github.com/pestit/retain/internal/notes"
+	"github.com/pestit/retain/internal/study"
 )
 
 const healthCheckTimeout = 2 * time.Second
@@ -42,6 +43,7 @@ func newHandler(publicOrigin string, database databasePinger, authService *auth.
 		appClock := clock.Real{}
 		RegisterContentRoutes(mux, authService, decks.NewService(contentDB, appClock), notes.NewService(contentDB, appClock))
 		RegisterImportRoutes(mux, authService, contentimport.NewService(contentDB, appClock))
+		RegisterStudyRoutes(mux, authService, study.NewService(contentDB, appClock))
 	}
 	mux.HandleFunc("GET /schema/retain-v1.json", retainV1SchemaHandler)
 	mux.Handle("GET /", frontendHandler(frontend))
@@ -75,7 +77,7 @@ func frontendHandler(frontend fs.FS) http.Handler {
 	files := http.FileServer(http.FS(generated))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/")
-		if r.URL.Path == "/" || r.URL.Path == "/signup" {
+		if r.URL.Path == "/" || r.URL.Path == "/signup" || r.URL.Path == "/study" || r.URL.Path == "/settings" {
 			name = "index.html"
 		}
 		if name == ".gitkeep" || !fs.ValidPath(name) {

@@ -1,0 +1,705 @@
+{
+  "format": "retain/fsrs-golden/v1",
+  "parameters": {
+    "request_retention": 0.9,
+    "maximum_interval": 36500,
+    "enable_fuzz": false,
+    "learning_steps": ["1m", "10m"],
+    "relearning_steps": ["10m"],
+    "weights": [
+      0.40255,
+      1.18385,
+      3.173,
+      15.69105,
+      7.1949,
+      0.5345,
+      1.4604,
+      0.0046,
+      1.54575,
+      0.1192,
+      1.01925,
+      1.9395,
+      0.11,
+      0.29605,
+      2.2698,
+      0.2315,
+      2.9898,
+      0.51655,
+      0.6621
+    ]
+  },
+  "sequences": [
+    {
+      "name": "first-again",
+      "initial": {
+        "state": "new"
+      },
+      "reviews": [
+        {
+          "at": "2025-01-02T03:04:05Z",
+          "rating": 1,
+          "expected": {
+            "state": "learning",
+            "due": "2025-01-02T03:05:05Z",
+            "stability": 0.40255,
+            "difficulty": 7.1949,
+            "elapsed_days": 0,
+            "scheduled_days": 0,
+            "step": 0,
+            "reps": 1,
+            "lapses": 0,
+            "last_review": "2025-01-02T03:04:05Z"
+          },
+          "review_log": {
+            "state": "new",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:04:05Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "learning-and-review-again",
+      "initial": {
+        "state": "new"
+      },
+      "reviews": [
+        {
+          "at": "2025-01-02T03:04:05Z",
+          "rating": 3,
+          "expected": {
+            "state": "learning",
+            "due": "2025-01-02T03:14:05Z",
+            "stability": 3.173,
+            "difficulty": 5.282434422319005,
+            "elapsed_days": 0,
+            "scheduled_days": 0,
+            "step": 1,
+            "reps": 1,
+            "lapses": 0,
+            "last_review": "2025-01-02T03:04:05Z"
+          },
+          "review_log": {
+            "state": "new",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:04:05Z"
+          }
+        },
+        {
+          "at": "2025-01-02T03:14:05Z",
+          "rating": 3,
+          "expected": {
+            "state": "review",
+            "due": "2025-01-06T03:14:05Z",
+            "stability": 4.466858064362218,
+            "difficulty": 5.272967931287446,
+            "elapsed_days": 0,
+            "scheduled_days": 4,
+            "step": 0,
+            "reps": 2,
+            "lapses": 0,
+            "last_review": "2025-01-02T03:14:05Z"
+          },
+          "review_log": {
+            "state": "learning",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:14:05Z"
+          }
+        },
+        {
+          "at": "2025-01-07T03:04:05Z",
+          "rating": 1,
+          "expected": {
+            "state": "relearning",
+            "due": "2025-01-07T03:14:05Z",
+            "stability": 1.2976302777410647,
+            "difficulty": 6.790567694566929,
+            "elapsed_days": 4,
+            "scheduled_days": 0,
+            "step": 0,
+            "reps": 3,
+            "lapses": 1,
+            "last_review": "2025-01-07T03:04:05Z"
+          },
+          "review_log": {
+            "state": "review",
+            "scheduled_days": 4,
+            "elapsed_days": 4,
+            "reviewed_at": "2025-01-07T03:04:05Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "custom-learning-steps",
+      "parameters": {
+        "learning_steps": ["2m", "8m", "30m"],
+        "relearning_steps": ["3m", "12m"]
+      },
+      "initial": {
+        "state": "new"
+      },
+      "reviews": [
+        {
+          "at": "2025-01-02T03:04:05Z",
+          "rating": 3,
+          "expected": {
+            "state": "learning",
+            "due": "2025-01-02T03:12:05Z",
+            "stability": 3.173,
+            "difficulty": 5.282434422319005,
+            "elapsed_days": 0,
+            "scheduled_days": 0,
+            "step": 1,
+            "reps": 1,
+            "lapses": 0,
+            "last_review": "2025-01-02T03:04:05Z"
+          },
+          "review_log": {
+            "state": "new",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:04:05Z"
+          }
+        },
+        {
+          "at": "2025-01-02T03:12:05Z",
+          "rating": 3,
+          "expected": {
+            "state": "learning",
+            "due": "2025-01-02T03:42:05Z",
+            "stability": 4.466858064362218,
+            "difficulty": 5.272967931287446,
+            "elapsed_days": 0,
+            "scheduled_days": 0,
+            "step": 2,
+            "reps": 2,
+            "lapses": 0,
+            "last_review": "2025-01-02T03:12:05Z"
+          },
+          "review_log": {
+            "state": "learning",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:12:05Z"
+          }
+        },
+        {
+          "at": "2025-01-02T03:42:05Z",
+          "rating": 2,
+          "expected": {
+            "state": "learning",
+            "due": "2025-01-02T04:27:05Z",
+            "stability": 3.751452215938514,
+            "difficulty": 6.0270563403407795,
+            "elapsed_days": 0,
+            "scheduled_days": 0,
+            "step": 2,
+            "reps": 3,
+            "lapses": 0,
+            "last_review": "2025-01-02T03:42:05Z"
+          },
+          "review_log": {
+            "state": "learning",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:42:05Z"
+          }
+        },
+        {
+          "at": "2025-01-02T03:57:05Z",
+          "rating": 1,
+          "expected": {
+            "state": "learning",
+            "due": "2025-01-02T03:59:05Z",
+            "stability": 1.8795845673341403,
+            "difficulty": 7.297586215315591,
+            "elapsed_days": 0,
+            "scheduled_days": 0,
+            "step": 0,
+            "reps": 4,
+            "lapses": 0,
+            "last_review": "2025-01-02T03:57:05Z"
+          },
+          "review_log": {
+            "state": "learning",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:57:05Z"
+          }
+        },
+        {
+          "at": "2025-01-02T03:59:05Z",
+          "rating": 3,
+          "expected": {
+            "state": "learning",
+            "due": "2025-01-02T04:07:05Z",
+            "stability": 2.6460250495579185,
+            "difficulty": 7.278850026036247,
+            "elapsed_days": 0,
+            "scheduled_days": 0,
+            "step": 1,
+            "reps": 5,
+            "lapses": 0,
+            "last_review": "2025-01-02T03:59:05Z"
+          },
+          "review_log": {
+            "state": "learning",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:59:05Z"
+          }
+        },
+        {
+          "at": "2025-01-02T04:07:05Z",
+          "rating": 3,
+          "expected": {
+            "state": "learning",
+            "due": "2025-01-02T04:37:05Z",
+            "stability": 3.7249978982421137,
+            "difficulty": 7.260200023227589,
+            "elapsed_days": 0,
+            "scheduled_days": 0,
+            "step": 2,
+            "reps": 6,
+            "lapses": 0,
+            "last_review": "2025-01-02T04:07:05Z"
+          },
+          "review_log": {
+            "state": "learning",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T04:07:05Z"
+          }
+        },
+        {
+          "at": "2025-01-02T04:37:05Z",
+          "rating": 3,
+          "expected": {
+            "state": "review",
+            "due": "2025-01-07T04:37:05Z",
+            "stability": 5.243944816103088,
+            "difficulty": 7.24163581043185,
+            "elapsed_days": 0,
+            "scheduled_days": 5,
+            "step": 0,
+            "reps": 7,
+            "lapses": 0,
+            "last_review": "2025-01-02T04:37:05Z"
+          },
+          "review_log": {
+            "state": "learning",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T04:37:05Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "custom-relearning-steps",
+      "parameters": {
+        "learning_steps": ["2m", "8m", "30m"],
+        "relearning_steps": ["3m", "12m"]
+      },
+      "initial": {
+        "state": "review",
+        "due": "2025-01-02T03:04:05Z",
+        "stability": 20,
+        "difficulty": 6,
+        "scheduled_days": 30,
+        "reps": 5,
+        "last_review": "2024-12-03T03:04:05Z"
+      },
+      "reviews": [
+        {
+          "at": "2025-01-02T03:04:05Z",
+          "rating": 1,
+          "expected": {
+            "state": "relearning",
+            "due": "2025-01-02T03:07:05Z",
+            "stability": 3.200632881314611,
+            "difficulty": 7.279394627311108,
+            "elapsed_days": 30,
+            "scheduled_days": 0,
+            "step": 0,
+            "reps": 6,
+            "lapses": 1,
+            "last_review": "2025-01-02T03:04:05Z"
+          },
+          "review_log": {
+            "state": "review",
+            "scheduled_days": 30,
+            "elapsed_days": 30,
+            "reviewed_at": "2025-01-02T03:04:05Z"
+          }
+        },
+        {
+          "at": "2025-01-02T03:07:05Z",
+          "rating": 3,
+          "expected": {
+            "state": "relearning",
+            "due": "2025-01-02T03:19:05Z",
+            "stability": 4.505758839257187,
+            "difficulty": 7.260742119336585,
+            "elapsed_days": 0,
+            "scheduled_days": 0,
+            "step": 1,
+            "reps": 7,
+            "lapses": 1,
+            "last_review": "2025-01-02T03:07:05Z"
+          },
+          "review_log": {
+            "state": "relearning",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:07:05Z"
+          }
+        },
+        {
+          "at": "2025-01-02T03:19:05Z",
+          "rating": 3,
+          "expected": {
+            "state": "review",
+            "due": "2025-01-08T03:19:05Z",
+            "stability": 6.343077594455503,
+            "difficulty": 7.242175412898744,
+            "elapsed_days": 0,
+            "scheduled_days": 6,
+            "step": 0,
+            "reps": 8,
+            "lapses": 1,
+            "last_review": "2025-01-02T03:19:05Z"
+          },
+          "review_log": {
+            "state": "relearning",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:19:05Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "maximum-interval",
+      "parameters": {
+        "maximum_interval": 3
+      },
+      "initial": {
+        "state": "review",
+        "due": "2025-01-02T03:04:05Z",
+        "stability": 2500,
+        "difficulty": 5,
+        "scheduled_days": 30,
+        "step": 2,
+        "reps": 8,
+        "lapses": 2,
+        "last_review": "2024-09-24T03:04:05Z"
+      },
+      "reviews": [
+        {
+          "at": "2025-01-02T03:04:05Z",
+          "rating": 3,
+          "expected": {
+            "state": "review",
+            "due": "2025-01-05T03:04:05Z",
+            "stability": 2631.806007555743,
+            "difficulty": 4.991832707311108,
+            "elapsed_days": 100,
+            "scheduled_days": 3,
+            "step": 0,
+            "reps": 9,
+            "lapses": 2,
+            "last_review": "2025-01-02T03:04:05Z"
+          },
+          "review_log": {
+            "state": "review",
+            "scheduled_days": 30,
+            "elapsed_days": 100,
+            "reviewed_at": "2025-01-02T03:04:05Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "new-hard",
+      "initial": { "state": "new" },
+      "reviews": [
+        {
+          "at": "2025-01-02T03:04:05Z",
+          "rating": 2,
+          "expected": {
+            "state": "learning",
+            "due": "2025-01-02T03:09:35Z",
+            "stability": 1.18385,
+            "difficulty": 6.488305268471453,
+            "elapsed_days": 0,
+            "scheduled_days": 0,
+            "step": 0,
+            "reps": 1,
+            "lapses": 0,
+            "last_review": "2025-01-02T03:04:05Z"
+          },
+          "review_log": {
+            "state": "new",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:04:05Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "new-easy",
+      "initial": { "state": "new" },
+      "reviews": [
+        {
+          "at": "2025-01-02T03:04:05Z",
+          "rating": 4,
+          "expected": {
+            "state": "review",
+            "due": "2025-01-18T03:04:05Z",
+            "stability": 15.69105,
+            "difficulty": 3.2245015893713678,
+            "elapsed_days": 0,
+            "scheduled_days": 16,
+            "step": 0,
+            "reps": 1,
+            "lapses": 0,
+            "last_review": "2025-01-02T03:04:05Z"
+          },
+          "review_log": {
+            "state": "new",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:04:05Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "learning-easy",
+      "initial": {
+        "state": "learning",
+        "due": "2025-01-02T03:05:05Z",
+        "stability": 0.40255,
+        "difficulty": 7.1949,
+        "step": 0,
+        "reps": 1,
+        "last_review": "2025-01-02T03:04:05Z"
+      },
+      "reviews": [
+        {
+          "at": "2025-01-02T03:10:05Z",
+          "rating": 4,
+          "expected": {
+            "state": "review",
+            "due": "2025-01-04T03:10:05Z",
+            "stability": 0.9499193324188999,
+            "difficulty": 6.723555742087108,
+            "elapsed_days": 0,
+            "scheduled_days": 2,
+            "step": 0,
+            "reps": 2,
+            "lapses": 0,
+            "last_review": "2025-01-02T03:10:05Z"
+          },
+          "review_log": {
+            "state": "learning",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:10:05Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "relearning-again",
+      "initial": {
+        "state": "relearning",
+        "due": "2025-01-02T03:04:05Z",
+        "stability": 3.2,
+        "difficulty": 7.2,
+        "step": 0,
+        "reps": 6,
+        "lapses": 1,
+        "last_review": "2025-01-02T03:04:05Z"
+      },
+      "reviews": [
+        {
+          "at": "2025-01-02T03:04:05Z",
+          "rating": 1,
+          "expected": {
+            "state": "relearning",
+            "due": "2025-01-02T03:14:05Z",
+            "stability": 1.6032912774192267,
+            "difficulty": 8.086226051311106,
+            "elapsed_days": 0,
+            "scheduled_days": 0,
+            "step": 0,
+            "reps": 7,
+            "lapses": 1,
+            "last_review": "2025-01-02T03:04:05Z"
+          },
+          "review_log": {
+            "state": "relearning",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:04:05Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "relearning-hard",
+      "initial": {
+        "state": "relearning",
+        "due": "2025-01-02T03:04:05Z",
+        "stability": 3.2,
+        "difficulty": 7.2,
+        "step": 0,
+        "reps": 6,
+        "lapses": 1,
+        "last_review": "2025-01-02T03:04:05Z"
+      },
+      "reviews": [
+        {
+          "at": "2025-01-02T03:04:05Z",
+          "rating": 2,
+          "expected": {
+            "state": "relearning",
+            "due": "2025-01-02T03:19:05Z",
+            "stability": 2.687492398018982,
+            "difficulty": 7.633969379311108,
+            "elapsed_days": 0,
+            "scheduled_days": 0,
+            "step": 0,
+            "reps": 7,
+            "lapses": 1,
+            "last_review": "2025-01-02T03:04:05Z"
+          },
+          "review_log": {
+            "state": "relearning",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:04:05Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "relearning-easy",
+      "initial": {
+        "state": "relearning",
+        "due": "2025-01-02T03:04:05Z",
+        "stability": 3.2,
+        "difficulty": 7.2,
+        "step": 0,
+        "reps": 6,
+        "lapses": 1,
+        "last_review": "2025-01-02T03:04:05Z"
+      },
+      "reviews": [
+        {
+          "at": "2025-01-02T03:04:05Z",
+          "rating": 4,
+          "expected": {
+            "state": "review",
+            "due": "2025-01-10T03:04:05Z",
+            "stability": 7.551215659521748,
+            "difficulty": 6.729456035311109,
+            "elapsed_days": 0,
+            "scheduled_days": 8,
+            "step": 0,
+            "reps": 7,
+            "lapses": 1,
+            "last_review": "2025-01-02T03:04:05Z"
+          },
+          "review_log": {
+            "state": "relearning",
+            "scheduled_days": 0,
+            "elapsed_days": 0,
+            "reviewed_at": "2025-01-02T03:04:05Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "review-hard",
+      "initial": {
+        "state": "review",
+        "due": "2025-01-02T03:04:05Z",
+        "stability": 20,
+        "difficulty": 6,
+        "scheduled_days": 30,
+        "reps": 5,
+        "lapses": 1,
+        "last_review": "2024-12-03T03:04:05Z"
+      },
+      "reviews": [
+        {
+          "at": "2025-01-02T03:04:05Z",
+          "rating": 2,
+          "expected": {
+            "state": "review",
+            "due": "2025-02-03T03:04:05Z",
+            "stability": 31.64924947988737,
+            "difficulty": 6.633313667311108,
+            "elapsed_days": 30,
+            "scheduled_days": 32,
+            "step": 0,
+            "reps": 6,
+            "lapses": 1,
+            "last_review": "2025-01-02T03:04:05Z"
+          },
+          "review_log": {
+            "state": "review",
+            "scheduled_days": 30,
+            "elapsed_days": 30,
+            "reviewed_at": "2025-01-02T03:04:05Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "review-easy",
+      "initial": {
+        "state": "review",
+        "due": "2025-01-02T03:04:05Z",
+        "stability": 20,
+        "difficulty": 6,
+        "scheduled_days": 30,
+        "reps": 5,
+        "lapses": 1,
+        "last_review": "2024-12-03T03:04:05Z"
+      },
+      "reviews": [
+        {
+          "at": "2025-01-02T03:04:05Z",
+          "rating": 4,
+          "expected": {
+            "state": "review",
+            "due": "2025-06-21T03:04:05Z",
+            "stability": 170.44892481627323,
+            "difficulty": 5.341151747311109,
+            "elapsed_days": 30,
+            "scheduled_days": 170,
+            "step": 0,
+            "reps": 6,
+            "lapses": 1,
+            "last_review": "2025-01-02T03:04:05Z"
+          },
+          "review_log": {
+            "state": "review",
+            "scheduled_days": 30,
+            "elapsed_days": 30,
+            "reviewed_at": "2025-01-02T03:04:05Z"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -4,6 +4,8 @@ go 1.23.0
 
 require (
 	github.com/caarlos0/env/v11 v11.3.1
+	github.com/google/uuid v1.6.0
+	github.com/open-spaced-repetition/go-fsrs/v3 v3.3.1
 	github.com/pressly/goose/v3 v3.24.1
 	golang.org/x/crypto v0.31.0
 	golang.org/x/term v0.27.0
@@ -13,7 +15,6 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect

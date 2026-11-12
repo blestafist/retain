@@ -7,6 +7,8 @@ import './app.css';
 import { t } from './i18n/en';
 import { Button } from './ui/Button';
 import { DecksWorkspace } from './content/DecksWorkspace';
+import { SettingsPage } from './settings/SettingsPage';
+import { StudySession } from './study/StudySession';
 
 const DevShowcase = import.meta.env.DEV ? lazy(() => import('./dev/Showcase')) : null;
 
@@ -100,6 +102,11 @@ function AuthenticatedApp() {
                 <p className="app-user-name">{meQuery.data.user.name}</p>
                 <p className="app-user-email">{meQuery.data.user.email}</p>
               </div>
+              <nav aria-label={t('navigation')} className="flex flex-wrap items-center gap-2">
+                <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/">{t('decksWorkspace')}</a>
+                <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/study">{t('study')}</a>
+                <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/settings">{t('settings')}</a>
+              </nav>
               <Button
                 variant="tonal"
                 type="button"
@@ -116,7 +123,13 @@ function AuthenticatedApp() {
                   : t('requestFailed')}
               </p>
             )}
-            <DecksWorkspace />
+            {window.location.pathname === '/study' ? (
+              <StudySession ttsAuto={meQuery.data.settings.tts_auto} />
+            ) : window.location.pathname === '/settings' ? (
+              <SettingsPage settings={meQuery.data.settings} />
+            ) : (
+              <DecksWorkspace />
+            )}
           </>
         ) : (
           <AuthForms mode={window.location.pathname === '/signup' ? 'signup' : 'signin'} />
