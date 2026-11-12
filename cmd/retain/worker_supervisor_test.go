@@ -13,6 +13,7 @@ func TestSuperviseWorkerRestartsAfterRunFailure(t *testing.T) {
 	defer cancel()
 
 	var calls atomic.Int32
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	restarted := make(chan struct{})
 	delays := make(chan time.Duration, 2)
 	available := make(chan bool, 4)
@@ -28,7 +29,7 @@ func TestSuperviseWorkerRestartsAfterRunFailure(t *testing.T) {
 		}, func(_ context.Context, delay time.Duration) error {
 			delays <- delay
 			return nil
-		}, func(value bool) { available <- value }, nil)
+		}, func(value bool) { available <- value }, nil, func() time.Time { return now })
 	}()
 
 	select {
@@ -50,6 +51,7 @@ func TestSuperviseWorkerRestartsAfterRunFailure(t *testing.T) {
 
 func TestSuperviseWorkerCancellationIsGraceful(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	started := make(chan struct{})
 	result := make(chan error, 1)
 	go func() {
@@ -57,7 +59,7 @@ func TestSuperviseWorkerCancellationIsGraceful(t *testing.T) {
 			close(started)
 			<-ctx.Done()
 			return ctx.Err()
-		}, sleepWorkerBackoff, nil, nil)
+		}, sleepWorkerBackoff, nil, nil, func() time.Time { return now })
 	}()
 
 	select {
@@ -79,13 +81,14 @@ func TestSuperviseWorkerCancellationIsGraceful(t *testing.T) {
 func TestSuperviseWorkerStopsAfterBoundedAttempts(t *testing.T) {
 	var calls atomic.Int32
 	var delays []time.Duration
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	err := superviseWorker(context.Background(), func(context.Context) error {
 		calls.Add(1)
 		return errors.New("private repository error")
 	}, func(_ context.Context, delay time.Duration) error {
 		delays = append(delays, delay)
 		return nil
-	}, nil, nil)
+	}, nil, nil, func() time.Time { return now })
 	if !errors.Is(err, ErrWorkerRestartLimit) {
 		t.Fatalf("superviseWorker() error = %v, want restart limit", err)
 	}
@@ -99,6 +102,39 @@ func TestSuperviseWorkerStopsAfterBoundedAttempts(t *testing.T) {
 	for i := range want {
 		if delays[i] != want[i] {
 			t.Errorf("backoff delay %d = %s, want %s", i, delays[i], want[i])
+		}
+	}
+}
+
+func TestSuperviseWorkerResetsRestartBudgetAfterStableRun(t *testing.T) {
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	var calls int
+	var delays []time.Duration
+	err := superviseWorker(context.Background(), func(context.Context) error {
+		calls++
+		if calls == workerRestartAttempts {
+			now = now.Add(workerStableRunTime)
+		}
+		return errors.New("transient repository error")
+	}, func(_ context.Context, delay time.Duration) error {
+		delays = append(delays, delay)
+		return nil
+	}, nil, nil, func() time.Time { return now })
+
+	if !errors.Is(err, ErrWorkerRestartLimit) {
+		t.Fatalf("superviseWorker() error = %v, want restart limit", err)
+	}
+	if calls != 2*workerRestartAttempts-1 {
+		t.Fatalf("Run calls = %d, want %d after stable run resets the budget", calls, 2*workerRestartAttempts-1)
+	}
+	if len(delays) != calls-1 {
+		t.Fatalf("backoff delays = %d, want %d", len(delays), calls-1)
+	}
+	for index, delay := range delays {
+		wantAttempt := index%(workerRestartAttempts-1) + 1
+		want := workerRestartBase << (wantAttempt - 1)
+		if delay != want {
+			t.Errorf("backoff delay %d = %s, want %s", index, delay, want)
 		}
 	}
 }

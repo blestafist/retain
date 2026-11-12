@@ -192,7 +192,7 @@ func run(logger *slog.Logger) error {
 	if worker != nil {
 		workerErrors = make(chan error, 1)
 		go func() {
-			workerErrors <- superviseWorker(ctx, worker.Run, sleepWorkerBackoff, workerAvailable.Store, logger)
+			workerErrors <- superviseWorker(ctx, worker.Run, sleepWorkerBackoff, workerAvailable.Store, logger, time.Now)
 		}()
 	}
 

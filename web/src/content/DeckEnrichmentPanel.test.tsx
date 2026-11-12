@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DeckEnrichmentPanel } from './DeckEnrichmentPanel';
 import type { JobStatus } from '../api/jobs';
@@ -44,6 +44,7 @@ function renderPanel(ownerId: number) {
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -74,6 +75,78 @@ describe('DeckEnrichmentPanel', () => {
 
     expect(await screen.findByText('Hallo Welt.')).toBeTruthy();
     expect(screen.getByText(/Deck enrichment is complete/)).toBeTruthy();
+  });
+
+  it('merges jobs started in separate tabs and syncs them from owner-scoped storage events', async () => {
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === '/api/v1/decks/70/enrich' && init?.method === 'POST') return Response.json({ job_id: 'tab-one-job' }, { status: 202 });
+      if (url === '/api/v1/decks/71/enrich' && init?.method === 'POST') return Response.json({ job_id: 'tab-two-job' }, { status: 202 });
+      if (url === '/api/v1/jobs/tab-one-job' || url === '/api/v1/jobs/tab-two-job') {
+        const id = url.split('/').at(-1) ?? '';
+        return Response.json({ ...completedJob(id), status: 'queued', result: null });
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? 'GET'} ${url}`);
+    });
+
+    const tabOne = renderPanel(17);
+    const tabTwo = render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>
+        <DeckEnrichmentPanel ownerId={17} deckId={71} deckName="English" enabled />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(within(tabOne.container).getByRole('button', { name: t('enrichDeck') }));
+    fireEvent.click(within(tabTwo.container).getByRole('button', { name: t('enrichDeck') }));
+
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem('retain:deck-enrichment-jobs:v1:17') ?? '[]')).toEqual([
+        { jobId: 'tab-one-job', deckId: '70', deckName: 'German' },
+        { jobId: 'tab-two-job', deckId: '71', deckName: 'English' },
+      ]);
+    });
+
+    const event = new StorageEvent('storage', {
+      key: 'retain:deck-enrichment-jobs:v1:17',
+      newValue: localStorage.getItem('retain:deck-enrichment-jobs:v1:17'),
+      storageArea: localStorage,
+    });
+    window.dispatchEvent(event);
+
+    for (const tab of [tabOne, tabTwo]) {
+      await waitFor(() => {
+        const options = within(tab.container).getAllByRole('option').map((option) => option.getAttribute('value'));
+        expect(options).toContain('tab-one-job');
+        expect(options).toContain('tab-two-job');
+      });
+    }
+
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'retain:deck-enrichment-jobs:v1:18',
+      newValue: JSON.stringify([{ jobId: 'other-owner-job', deckId: '90', deckName: 'Private' }]),
+      storageArea: localStorage,
+    }));
+    expect(within(tabOne.container).queryByRole('option', { name: /other-owner-job/ })).toBeNull();
+    expect(within(tabTwo.container).queryByRole('option', { name: /other-owner-job/ })).toBeNull();
+  });
+
+  it('restores and migrates a legacy owner-scoped session job', async () => {
+    sessionStorage.setItem('retain:deck-enrichment-jobs:v1:17', JSON.stringify([
+      { jobId: 'legacy-job', deckId: '70', deckName: 'German' },
+    ]));
+    fetchMock.mockImplementation(async (input) => {
+      if (String(input) === '/api/v1/jobs/legacy-job') return Response.json(completedJob('legacy-job'));
+      throw new Error(`Unexpected request: ${String(input)}`);
+    });
+
+    renderPanel(17);
+
+    expect(await screen.findByText('Hallo Welt.')).toBeTruthy();
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem('retain:deck-enrichment-jobs:v1:17') ?? '[]')).toEqual([
+        { jobId: 'legacy-job', deckId: '70', deckName: 'German' },
+      ]);
+      expect(sessionStorage.getItem('retain:deck-enrichment-jobs:v1:17')).toBeNull();
+    });
   });
 
   it("does not show the previous owner's tracked jobs or suggestions after an owner switch", async () => {

@@ -17,6 +17,7 @@ const (
 	workerRestartAttempts = 5
 	workerRestartBase     = 100 * time.Millisecond
 	workerRestartMax      = 5 * time.Second
+	workerStableRunTime   = time.Minute
 )
 
 type workerRunFunc func(context.Context) error
@@ -28,6 +29,7 @@ func superviseWorker(
 	sleep workerSleepFunc,
 	setAvailable func(bool),
 	logger *slog.Logger,
+	now func() time.Time,
 ) (result error) {
 	defer func() {
 		if recover() != nil {
@@ -37,20 +39,25 @@ func superviseWorker(
 			}
 		}
 	}()
-	if ctx == nil || run == nil || sleep == nil {
+	if ctx == nil || run == nil || sleep == nil || now == nil {
 		return ErrWorkerSupervisor
 	}
 
-	for attempt := 1; ; attempt++ {
+	restartCount := 0
+	for {
 		if ctx.Err() != nil {
 			return nil
 		}
 		if setAvailable != nil {
 			setAvailable(true)
 		}
+		runStartedAt := now()
 		// All unexpected exits are retried identically; keep the underlying error
 		// out of logs because repository/provider details may be sensitive.
 		_ = run(ctx)
+		if now().Sub(runStartedAt) >= workerStableRunTime {
+			restartCount = 0
+		}
 		if setAvailable != nil {
 			setAvailable(false)
 		}
@@ -58,19 +65,20 @@ func superviseWorker(
 			return nil
 		}
 
-		if attempt >= workerRestartAttempts {
+		restartCount++
+		if restartCount >= workerRestartAttempts {
 			if logger != nil {
-				logger.Error("background jobs worker restart limit reached", "component", "jobs", "attempts", attempt)
+				logger.Error("background jobs worker restart limit reached", "component", "jobs", "attempts", restartCount)
 			}
 			return ErrWorkerRestartLimit
 		}
 
-		backoff := workerRestartBase << (attempt - 1)
+		backoff := workerRestartBase << (restartCount - 1)
 		if backoff > workerRestartMax {
 			backoff = workerRestartMax
 		}
 		if logger != nil {
-			logger.Warn("background jobs worker stopped; restarting", "component", "jobs", "attempt", attempt, "backoff", backoff)
+			logger.Warn("background jobs worker stopped; restarting", "component", "jobs", "attempt", restartCount, "backoff", backoff)
 		}
 		if err := sleep(ctx, backoff); err != nil {
 			if ctx.Err() != nil {

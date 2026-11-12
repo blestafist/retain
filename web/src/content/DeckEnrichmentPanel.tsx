@@ -45,9 +45,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function readJobs(ownerId: number): TrackedJob[] {
+function parseJobs(raw: string | null): TrackedJob[] {
   try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(`${storagePrefix}${ownerId}`) ?? '[]');
+    const parsed: unknown = JSON.parse(raw ?? '[]');
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((item): item is TrackedJob => isRecord(item)
       && typeof item.jobId === 'string' && item.jobId.length > 0
@@ -55,6 +55,64 @@ function readJobs(ownerId: number): TrackedJob[] {
   } catch {
     return [];
   }
+}
+
+function readStoredJobs(read: () => string | null): TrackedJob[] {
+  try {
+    return parseJobs(read());
+  } catch {
+    return [];
+  }
+}
+
+function mergeJobs(...lists: TrackedJob[][]): TrackedJob[] {
+  const merged = new Map<string, TrackedJob>();
+  for (const list of lists) {
+    for (const item of list) {
+      merged.set(item.jobId, item);
+    }
+  }
+  return [...merged.values()].slice(-20);
+}
+
+function isLocalStorageEvent(event: StorageEvent): boolean {
+  if (event.storageArea === null) return true;
+  try {
+    return event.storageArea === window.localStorage;
+  } catch {
+    return false;
+  }
+}
+
+function readJobs(ownerId: number): TrackedJob[] {
+  const key = `${storagePrefix}${ownerId}`;
+  const localJobs = readStoredJobs(() => window.localStorage.getItem(key));
+  let legacyValue: string | null = null;
+  try {
+    legacyValue = window.sessionStorage.getItem(key);
+  } catch {
+    // Session storage can be unavailable in restricted browser contexts.
+  }
+  const jobs = mergeJobs(parseJobs(legacyValue), localJobs);
+
+  if (legacyValue !== null) {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(jobs));
+      try {
+        window.sessionStorage.removeItem(key);
+      } catch {
+        // Keep the durable copy; a stale legacy value is harmless and can be retried later.
+      }
+    } catch {
+      // Keep the legacy key until a durable local storage write succeeds.
+    }
+  }
+  return jobs;
+}
+
+function sameJobs(left: TrackedJob[], right: TrackedJob[]): boolean {
+  return left.length === right.length && left.every((item, index) =>
+    item.jobId === right[index].jobId && item.deckId === right[index].deckId && item.deckName === right[index].deckName);
 }
 
 function entriesFor(item: DeckEnrichmentItem): EnrichmentEntry[] {
@@ -137,7 +195,7 @@ function DeckEnrichmentPanelForOwner({ ownerId, deckId, deckName, enabled }: {
   enabled: boolean;
 }) {
   const [jobs, setJobs] = useState<TrackedJob[]>(() => readJobs(ownerId));
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(() => readJobs(ownerId).at(-1)?.jobId ?? null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(() => jobs.at(-1)?.jobId ?? null);
   const [startError, setStartError] = useState(false);
   const [selectedFields, setSelectedFields] = useState<Record<string, Partial<Record<FieldKey, boolean>>>>({});
   const [applyErrors, setApplyErrors] = useState<Record<string, boolean>>({});
@@ -151,12 +209,33 @@ function DeckEnrichmentPanelForOwner({ ownerId, deckId, deckName, enabled }: {
   const canStart = enabled && !startMutation.isPending && !isActive;
 
   useEffect(() => {
+    const key = `${storagePrefix}${ownerId}`;
     try {
-      window.localStorage.setItem(`${storagePrefix}${ownerId}`, JSON.stringify(jobs.slice(-20)));
+      const latest = readStoredJobs(() => window.localStorage.getItem(key));
+      const merged = mergeJobs(latest, jobs);
+      window.localStorage.setItem(key, JSON.stringify(merged));
+      setJobs((current) => {
+        const next = mergeJobs(current, merged);
+        return sameJobs(current, next) ? current : next;
+      });
     } catch {
       // The job can still be used until this panel is unmounted if storage is unavailable.
     }
   }, [jobs, ownerId]);
+
+  useEffect(() => {
+    const key = `${storagePrefix}${ownerId}`;
+    function onStorage(event: StorageEvent) {
+      if (event.key !== key || !isLocalStorageEvent(event)) return;
+      const incoming = parseJobs(event.newValue);
+      setJobs((current) => {
+        const next = mergeJobs(current, incoming);
+        return sameJobs(current, next) ? current : next;
+      });
+    }
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [ownerId]);
 
   async function start() {
     if (!canStart) return;
