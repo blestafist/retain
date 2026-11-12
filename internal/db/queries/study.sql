@@ -66,7 +66,8 @@ WHERE cards.id = sqlc.arg(card_id)
   AND deck.owner_id = cards.user_id;
 
 -- name: ListStudyChoiceDistractors :many
-SELECT DISTINCT CAST(CASE
+SELECT notes.id AS note_id,
+CAST(CASE
     WHEN cards.direction = 'reverse' THEN notes.term
     ELSE notes.translation
 END AS TEXT) AS answer,
@@ -78,6 +79,7 @@ WHERE cards.user_id = sqlc.arg(user_id)
   AND cards.direction = sqlc.arg(direction)
   AND notes.deck_id = sqlc.arg(deck_id)
   AND cards.note_id != sqlc.arg(note_id)
+  AND notes.id > sqlc.arg(after_note_id)
   AND cards.suspended = 0
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
@@ -86,7 +88,9 @@ WHERE cards.user_id = sqlc.arg(user_id)
   AND trim(CASE
       WHEN cards.direction = 'reverse' THEN notes.term
       ELSE notes.translation
-  END) != '';
+  END) != ''
+ORDER BY notes.id
+LIMIT sqlc.arg(page_size);
 
 -- name: ListStudyCards :many
 WITH RECURSIVE selected_decks(id) AS (

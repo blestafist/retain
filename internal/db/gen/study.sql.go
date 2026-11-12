@@ -481,7 +481,8 @@ func (q *Queries) ListStudyCards(ctx context.Context, arg ListStudyCardsParams) 
 }
 
 const listStudyChoiceDistractors = `-- name: ListStudyChoiceDistractors :many
-SELECT DISTINCT CAST(CASE
+SELECT notes.id AS note_id,
+CAST(CASE
     WHEN cards.direction = 'reverse' THEN notes.term
     ELSE notes.translation
 END AS TEXT) AS answer,
@@ -493,6 +494,7 @@ WHERE cards.user_id = ?1
   AND cards.direction = ?2
   AND notes.deck_id = ?3
   AND cards.note_id != ?4
+  AND notes.id > ?5
   AND cards.suspended = 0
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
@@ -502,16 +504,21 @@ WHERE cards.user_id = ?1
       WHEN cards.direction = 'reverse' THEN notes.term
       ELSE notes.translation
   END) != ''
+ORDER BY notes.id
+LIMIT ?6
 `
 
 type ListStudyChoiceDistractorsParams struct {
-	UserID    int64
-	Direction string
-	DeckID    int64
-	NoteID    int64
+	UserID      int64
+	Direction   string
+	DeckID      int64
+	NoteID      int64
+	AfterNoteID int64
+	PageSize    int64
 }
 
 type ListStudyChoiceDistractorsRow struct {
+	NoteID       int64
 	Answer       string
 	Alternatives string
 }
@@ -522,6 +529,8 @@ func (q *Queries) ListStudyChoiceDistractors(ctx context.Context, arg ListStudyC
 		arg.Direction,
 		arg.DeckID,
 		arg.NoteID,
+		arg.AfterNoteID,
+		arg.PageSize,
 	)
 	if err != nil {
 		return nil, err
@@ -530,7 +539,7 @@ func (q *Queries) ListStudyChoiceDistractors(ctx context.Context, arg ListStudyC
 	var items []ListStudyChoiceDistractorsRow
 	for rows.Next() {
 		var i ListStudyChoiceDistractorsRow
-		if err := rows.Scan(&i.Answer, &i.Alternatives); err != nil {
+		if err := rows.Scan(&i.NoteID, &i.Answer, &i.Alternatives); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

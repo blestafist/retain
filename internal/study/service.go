@@ -412,6 +412,8 @@ func (s *Service) CheckAnswer(ctx context.Context, userID int64, input CheckAnsw
 	return AnswerResult{Match: result.Match, SuggestedRating: srs.Rating(result.SuggestedRating)}, nil
 }
 
+const choiceDistractorPageSize int64 = 128
+
 // ChoiceOptions returns one correct answer and three distinct distractors from
 // the note's actual deck and card direction. Only active New cards can use it.
 func (s *Service) ChoiceOptions(ctx context.Context, userID, cardID int64) ([]string, error) {
@@ -449,14 +451,9 @@ func (s *Service) ChoiceOptions(ctx context.Context, userID, cardID int64) ([]st
 		return nil, ErrInternal
 	}
 
-	rows, err := queries.ListStudyChoiceDistractors(ctx, gen.ListStudyChoiceDistractorsParams{
-		UserID: userID, Direction: row.Direction, DeckID: row.DeckID, NoteID: row.NoteID,
-	})
-	if err != nil {
-		return nil, ErrInternal
-	}
 	distractors := make([]string, 0, 3)
 	seen := map[string]struct{}{choiceIdentity(correct): {}}
+	var afterNoteID int64
 	considerCandidate := func(candidate string) (bool, error) {
 		candidate = strings.TrimSpace(candidate)
 		if candidate == "" {
@@ -479,22 +476,38 @@ func (s *Service) ChoiceOptions(ctx context.Context, userID, cardID int64) ([]st
 	}
 
 collectDistractors:
-	for _, candidateRow := range rows {
-		more, candidateErr := forEachChoiceVariant(candidateRow.Answer, considerCandidate)
-		if candidateErr != nil {
+	for len(distractors) < 3 {
+		rows, queryErr := queries.ListStudyChoiceDistractors(ctx, gen.ListStudyChoiceDistractorsParams{
+			UserID: userID, Direction: row.Direction, DeckID: row.DeckID, NoteID: row.NoteID,
+			AfterNoteID: afterNoteID, PageSize: choiceDistractorPageSize,
+		})
+		if queryErr != nil {
 			return nil, ErrInternal
 		}
-		if !more {
-			break collectDistractors
+		if len(rows) == 0 {
+			break
 		}
-		if row.Direction == "forward" {
-			more, candidateErr = forEachChoiceAlternative(candidateRow.Alternatives, considerCandidate)
+		for _, candidateRow := range rows {
+			afterNoteID = candidateRow.NoteID
+			more, candidateErr := forEachChoiceVariant(candidateRow.Answer, considerCandidate)
 			if candidateErr != nil {
 				return nil, ErrInternal
 			}
 			if !more {
 				break collectDistractors
 			}
+			if row.Direction == "forward" {
+				more, candidateErr = forEachChoiceAlternative(candidateRow.Alternatives, considerCandidate)
+				if candidateErr != nil {
+					return nil, ErrInternal
+				}
+				if !more {
+					break collectDistractors
+				}
+			}
+		}
+		if len(rows) < int(choiceDistractorPageSize) {
+			break
 		}
 	}
 	if len(distractors) < 3 {
