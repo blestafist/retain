@@ -220,12 +220,12 @@ func TestOverviewUsesUserDayBoundsExcludesUndoneAndScopesOwners(t *testing.T) {
 
 func TestFutureReviewTimestampsAreExcludedFromAnalytics(t *testing.T) {
 	f := newStatsFixture(t)
-	f.clock.now = time.Date(2026, time.April, 3, 10, 0, 0, 300_000_000, time.UTC)
+	f.clock.now = time.Date(2026, time.April, 3, 10, 0, 0, 0, time.UTC)
 	if _, err := f.database.SQL.Exec(`UPDATE review_logs SET undone = 1 WHERE id = ?`, testLogID(2)); err != nil {
 		t.Fatalf("undo fixture review to test fractional timestamp: %v", err)
 	}
 	f.addLog(t, f.cards[0], f.userID, 8, 3, int64(srs.Review), 32, 5,
-		time.Date(2026, time.April, 3, 10, 0, 0, 100_000_000, time.UTC), 1000)
+		time.Date(2026, time.April, 3, 9, 59, 59, 900_000_000, time.UTC), 1000)
 	f.addLog(t, f.cards[0], f.userID, 7, 3, int64(srs.Review), 33, 5,
 		time.Date(2026, time.April, 3, 10, 0, 0, 500_000_000, time.UTC), 4000)
 	futureReview := time.Date(2026, time.April, 3, 10, 45, 0, 0, time.UTC)
@@ -274,7 +274,7 @@ func TestFutureReviewTimestampsAreExcludedFromAnalytics(t *testing.T) {
 	if len(curve.Reviews) != 2 {
 		t.Errorf("curve reviews = %d, want future events excluded", len(curve.Reviews))
 	}
-	wantLastReview := time.Date(2026, time.April, 3, 10, 0, 0, 100_000_000, time.UTC)
+	wantLastReview := time.Date(2026, time.April, 3, 9, 59, 59, 900_000_000, time.UTC)
 	if curve.State != int64(srs.Review) || curve.Stability == nil || *curve.Stability != 32 || curve.LastReview == nil || !curve.LastReview.Equal(wantLastReview) {
 		var stability float64
 		var lastReview time.Time
@@ -350,6 +350,7 @@ func TestHeatmapGroupsActivityAcrossSpringGapAndFallFold(t *testing.T) {
 		f.addLog(t, f.cards[0], f.userID, 30, 3, int64(srs.Review), 30, 5, time.Date(2026, time.March, 8, 9, 59, 0, 0, time.UTC), 100)
 		f.addLog(t, f.cards[0], f.userID, 31, 3, int64(srs.Review), 30, 5, time.Date(2026, time.March, 8, 10, 0, 0, 0, time.UTC), 200)
 		f.addLog(t, f.cards[0], f.userID, 32, 3, int64(srs.Review), 30, 5, time.Date(2026, time.March, 8, 10, 1, 0, 0, time.UTC), 300)
+		f.addLog(t, f.cards[0], f.userID, 33, 3, int64(srs.Review), 30, 5, time.Date(2026, time.March, 8, 10, 0, 0, 500_000_000, time.UTC), 400)
 
 		heatmap, err := f.service.Heatmap(context.Background(), f.userID, 2026)
 		if err != nil {
@@ -358,8 +359,8 @@ func TestHeatmapGroupsActivityAcrossSpringGapAndFallFold(t *testing.T) {
 		if got := activityForDate(t, heatmap.Days, "2026-03-07"); got.Reviews != 1 || got.DurationMs != 100 {
 			t.Errorf("March 7 bucket = %+v, want only the 09:59 UTC review before the spring boundary", got)
 		}
-		if got := activityForDate(t, heatmap.Days, "2026-03-08"); got.Reviews != 2 || got.DurationMs != 500 {
-			t.Errorf("March 8 bucket = %+v, want reviews at and after the first valid 03:00 local boundary", got)
+		if got := activityForDate(t, heatmap.Days, "2026-03-08"); got.Reviews != 3 || got.DurationMs != 900 {
+			t.Errorf("March 8 bucket = %+v, want reviews at and after the first valid 03:00 local boundary, including fractional seconds", got)
 		}
 	})
 

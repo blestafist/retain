@@ -56,6 +56,7 @@ FROM card_metrics CROSS JOIN log_metrics;
 
 -- name: GetStatsBucketsActivity :one
 -- start_unix/end_unix are user-local day/period boundaries computed by the service.
+-- now_at is modernc SQLite's canonical UTC time.Time.String() format for exact text cutoffs.
 SELECT CAST(sqlc.arg(label) AS TEXT) AS label,
        CAST(COUNT(*) AS INTEGER) AS reviews,
        CAST(COALESCE(SUM(logs.duration_ms), 0) AS INTEGER) AS duration_ms,
@@ -71,6 +72,7 @@ JOIN review_log_projection AS projection ON projection.review_id = logs.id
 
 -- name: ListStatsReviewTimestamps :many
 -- The service maps a bounded date range to study days for streak calculation.
+-- The bounds and now_at match modernc SQLite's canonical, lexically sortable UTC datetime text.
 SELECT logs.reviewed_at
 FROM review_logs AS logs
 JOIN review_log_projection AS projection ON projection.review_id = logs.id
@@ -195,6 +197,7 @@ WHERE cards.id = sqlc.arg(card_id)
 ORDER BY logs.reviewed_at, logs.id;
 
 -- name: GetStatsRetrievabilityCards :many
+-- Reconstruct cards at now from the last active review at/before now and the next replay state.
 WITH RECURSIVE ranked_past_reviews AS (
     SELECT logs.card_id, logs.id, logs.reviewed_at,
            projection.stability_after, projection.difficulty_after, projection.scheduled_days,

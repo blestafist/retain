@@ -43,6 +43,7 @@ type GetStatsBucketsActivityRow struct {
 }
 
 // start_unix/end_unix are user-local day/period boundaries computed by the service.
+// now_at is modernc SQLite's canonical UTC time.Time.String() format for exact text cutoffs.
 func (q *Queries) GetStatsBucketsActivity(ctx context.Context, arg GetStatsBucketsActivityParams) (GetStatsBucketsActivityRow, error) {
 	row := q.db.QueryRowContext(ctx, getStatsBucketsActivity,
 		arg.Label,
@@ -393,6 +394,7 @@ type GetStatsRetrievabilityCardsRow struct {
 	LastReviewText string
 }
 
+// Reconstruct cards at now from the last active review at/before now and the next replay state.
 func (q *Queries) GetStatsRetrievabilityCards(ctx context.Context, arg GetStatsRetrievabilityCardsParams) ([]GetStatsRetrievabilityCardsRow, error) {
 	rows, err := q.db.QueryContext(ctx, getStatsRetrievabilityCards, arg.NowAt, arg.UserID)
 	if err != nil {
@@ -914,6 +916,7 @@ type ListStatsReviewTimestampsParams struct {
 }
 
 // The service maps a bounded date range to study days for streak calculation.
+// The bounds and now_at match modernc SQLite's canonical, lexically sortable UTC datetime text.
 func (q *Queries) ListStatsReviewTimestamps(ctx context.Context, arg ListStatsReviewTimestampsParams) ([]time.Time, error) {
 	rows, err := q.db.QueryContext(ctx, listStatsReviewTimestamps,
 		arg.UserID,

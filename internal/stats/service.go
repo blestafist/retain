@@ -209,7 +209,7 @@ func (s *Service) Overview(ctx context.Context, userID int64) (Overview, error) 
 		now := s.now()
 		dayStart, dayEnd := userDayBounds(now, env.location, env.dayStartHour)
 		row, err := s.database.Queries().GetStatsOverview(ctx, gen.GetStatsOverviewParams{
-			NowAt: now.UTC().String(), NowUnix: unixTime(now), UserID: userID,
+			NowAt: databaseTimeBoundary(now), NowUnix: unixTime(now), UserID: userID,
 			DayStartUnix: unixTime(dayStart), DayEndUnix: unixTime(dayEnd),
 		})
 		if err != nil {
@@ -340,7 +340,7 @@ func (s *Service) Heatmap(ctx context.Context, userID int64, year int) (Heatmap,
 			return nil, ErrInternal
 		}
 		activityRows, err := s.database.Queries().ListStatsActivityRange(ctx, gen.ListStatsActivityRangeParams{
-			UserID: userID, NowAt: now.UTC().String(),
+			UserID: userID, NowAt: databaseTimeBoundary(now),
 			StartAt: databaseTimeBoundary(buckets[0].start), EndAt: databaseTimeBoundary(buckets[len(buckets)-1].end),
 		})
 		if err != nil {
@@ -351,7 +351,7 @@ func (s *Service) Heatmap(ctx context.Context, userID int64, year int) (Heatmap,
 		growth := make([]VocabularyGrowth, 0)
 		for _, bucket := range growthBuckets {
 			rows, err := s.database.Queries().GetStatsVocabularyGrowth(ctx, gen.GetStatsVocabularyGrowthParams{
-				UserID: userID, NowAt: now.UTC().String(),
+				UserID: userID, NowAt: databaseTimeBoundary(now),
 				StartAt: databaseTimeBoundary(bucket.start), EndAt: databaseTimeBoundary(bucket.end),
 			})
 			if err != nil {
@@ -618,7 +618,7 @@ func (s *Service) environment(ctx context.Context, userID int64) (userEnvironmen
 
 func (s *Service) knownRightNow(ctx context.Context, userID int64, scheduler srs.Scheduler, now time.Time) (float64, error) {
 	rows, err := s.database.Queries().GetStatsRetrievabilityCards(ctx, gen.GetStatsRetrievabilityCardsParams{
-		UserID: userID, NowAt: now.UTC().String(),
+		UserID: userID, NowAt: databaseTimeBoundary(now),
 	})
 	if err != nil {
 		return 0, ErrInternal
@@ -655,7 +655,7 @@ func (s *Service) streak(ctx context.Context, userID int64, currentStart, now ti
 			UserID:  userID,
 			StartAt: databaseTimeBoundary(calendarDayBoundary(chunkStart, dayStartHour, location)),
 			EndAt:   databaseTimeBoundary(calendarDayBoundary(chunkEnd, dayStartHour, location)),
-			NowAt:   now.UTC().String(),
+			NowAt:   databaseTimeBoundary(now),
 		})
 		if err != nil {
 			return 0, ErrInternal
@@ -732,7 +732,7 @@ type dateBucket struct {
 
 func (s *Service) activityBucket(ctx context.Context, userID int64, bucket dateBucket, now time.Time) (activityAggregate, error) {
 	row, err := s.database.Queries().GetStatsBucketsActivity(ctx, gen.GetStatsBucketsActivityParams{
-		Label: bucket.label, UserID: userID, NowAt: now.UTC().String(),
+		Label: bucket.label, UserID: userID, NowAt: databaseTimeBoundary(now),
 		StartUnix: unixTime(bucket.start), EndUnix: unixTime(bucket.end),
 	})
 	if err != nil {
@@ -861,6 +861,9 @@ func addCalendarMonths(date time.Time, months int) time.Time {
 }
 
 func databaseTimeBoundary(value time.Time) string {
+	// modernc SQLite stores UTC time.Time values in this exact format. For equal
+	// seconds, the whole-second space sorts before a fractional dot, preserving
+	// chronological text ordering including subsecond boundaries.
 	return value.UTC().String()
 }
 
