@@ -165,7 +165,7 @@ export function StudySession({ deckId = null, ttsAuto = false }: { deckId?: Deck
       setAnswerShown(false);
     } catch (caught) {
       setError(caught);
-      if (caught instanceof ApiError && caught.status >= 400 && caught.status < 500) {
+      if (caught instanceof ApiError && caught.status >= 400 && caught.status < 500 && caught.status !== 408) {
         pendingReviewRef.current = null;
         setPendingReview(null);
       }

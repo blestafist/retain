@@ -188,6 +188,35 @@ describe('study session', () => {
     expect(screen.queryByRole('heading', { name: 'third' })).toBeNull();
   });
 
+  it('keeps session completion visible if a background queue refetch fails', async () => {
+    const user = userEvent.setup();
+    let queueRequests = 0;
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = String(input);
+      if (url === '/api/v1/study/queue?deck_id=&limit=50') {
+        queueRequests += 1;
+        return Promise.resolve(queueRequests === 1
+          ? jsonResponse([queueCard])
+          : jsonResponse({ error: { code: 'temporarily_unavailable' } }, 503));
+      }
+      if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([]));
+      if (url === '/api/v1/study/review') return Promise.resolve(jsonResponse({ ...queueCard }));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { queryClient } = renderSession();
+    await screen.findByRole('heading', { name: 'hello' });
+    await user.click(screen.getByRole('button', { name: t('showAnswer') }));
+    await user.click(screen.getByRole('button', { name: new RegExp(t('good')) }));
+    expect(await screen.findByRole('heading', { name: t('studyComplete') })).toBeTruthy();
+
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ['study-queue', ''] });
+    });
+    expect(screen.getByRole('heading', { name: t('studyComplete') })).toBeTruthy();
+  });
+
   it('loads another queue batch instead of treating the first fifty cards as completion', async () => {
     const user = userEvent.setup();
     const firstBatch = Array.from({ length: 50 }, (_, index) => ({
