@@ -67,8 +67,9 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 			t.Errorf("close migrated database: %v", err)
 		}
 	})
-	assertMigrationVersion(t, ctx, database.SQL, 8)
+	assertMigrationVersion(t, ctx, database.SQL, 9)
 	assertOriginalContentRowsEqual(t, ctx, database.SQL, wantRows)
+	assertInitialSyncSnapshot(t, ctx, database.SQL, ids)
 	assertMigrationDeletionBatch(t, ctx, database.SQL, "decks", ids.archivedDeck,
 		fmt.Sprintf("migration-00004-deck-%d", ids.archivedDeck))
 	assertMigrationDeletionBatch(t, ctx, database.SQL, "notes", ids.archivedNote,
@@ -255,6 +256,35 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 		}
 	}
 	assertForeignKeyCheckClean(t, ctx, database.SQL)
+}
+
+func TestSyncCursorKeyIsDroppedOnMigrationRollback(t *testing.T) {
+	ctx := context.Background()
+	database, err := Open(ctx, filepath.Join(t.TempDir(), "sync-rollback.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("DB.Close() error = %v", err)
+		}
+	})
+	if err := database.Queries().InsertSyncCursorKey(ctx, `"old-key"`); err != nil {
+		t.Fatalf("insert cursor signing key: %v", err)
+	}
+
+	provider := newEmbeddedMigrationProvider(t, database.SQL)
+	if _, err := provider.DownTo(ctx, 8); err != nil {
+		t.Fatalf("roll back sync migration: %v", err)
+	}
+	var value string
+	err = database.SQL.QueryRowContext(ctx, `SELECT value FROM app_settings WHERE key = 'sync_cursor_hmac_key'`).Scan(&value)
+	if err != sql.ErrNoRows {
+		t.Fatalf("cursor signing key after rollback = %q, error %v; want no row", value, err)
+	}
+	if _, err := provider.UpTo(ctx, 9); err != nil {
+		t.Fatalf("reapply sync migration: %v", err)
+	}
 }
 
 func TestMigrateFailureRollsBackAtomically(t *testing.T) {
@@ -604,8 +634,8 @@ func assertLatestMigrationSchema(t *testing.T, ctx context.Context, database *sq
 func assertStudyMigrationSchema(t *testing.T, ctx context.Context, database *sql.DB) {
 	t.Helper()
 	objects := readMigrationSchemaObjects(t, ctx, database)
-	if len(objects) != 30 {
-		t.Errorf("stage-6 schema has %d explicit indexes/triggers, want 30: %#v", len(objects), objects)
+	if len(objects) != 43 {
+		t.Errorf("latest schema has %d explicit indexes/triggers, want 43: %#v", len(objects), objects)
 	}
 	for _, name := range []string{
 		"index.cards_id_user_id_idx",
@@ -620,6 +650,19 @@ func assertStudyMigrationSchema(t *testing.T, ctx context.Context, database *sql
 		"index.jobs_user_updated_idx",
 		"index.jobs_active_queue_idx",
 		"trigger.jobs_active_queue_capacity",
+		"index.sync_events_owner_seq_idx",
+		"trigger.sync_owner_scope_insert",
+		"trigger.sync_decks_visibility_update",
+		"trigger.sync_cards_note_deck_update",
+		"trigger.sync_events_append_only_update",
+		"trigger.sync_events_append_only_delete",
+		"trigger.sync_notes_insert",
+		"trigger.sync_notes_update",
+		"trigger.sync_notes_delete",
+		"trigger.sync_cards_insert",
+		"trigger.sync_cards_update",
+		"trigger.sync_cards_owner_update",
+		"trigger.sync_cards_delete",
 	} {
 		if _, ok := objects[name]; !ok {
 			t.Errorf("study migration schema is missing %s", name)
@@ -628,6 +671,8 @@ func assertStudyMigrationSchema(t *testing.T, ctx context.Context, database *sql
 	for table, wanted := range map[string][]string{
 		"review_logs":           {"id", "card_id", "user_id", "rating", "mode", "state_before", "scheduler_parameters", "reviewed_at", "received_at", "duration_ms", "undone"},
 		"review_log_projection": {"review_id", "card_id", "user_id", "state_before", "stability_after", "difficulty_after", "scheduled_days"},
+		"sync_events":           {"seq", "owner_id", "owner_scope_id", "entity_type", "entity_id", "operation", "payload", "created_at"},
+		"sync_owner_scopes":     {"scope_id", "user_id"},
 	} {
 		rows, err := database.QueryContext(ctx, "PRAGMA table_info("+table+")")
 		if err != nil {
@@ -651,6 +696,43 @@ func assertStudyMigrationSchema(t *testing.T, ctx context.Context, database *sql
 			if !columns[name] {
 				t.Errorf("study migration table %s is missing column %s", table, name)
 			}
+		}
+	}
+}
+
+func assertInitialSyncSnapshot(t *testing.T, ctx context.Context, database *sql.DB, ids originalContentIDs) {
+	t.Helper()
+	var ownerID int64
+	if err := database.QueryRowContext(ctx, `SELECT owner_id FROM decks WHERE id = ?`, ids.foreignDeck).Scan(&ownerID); err != nil {
+		t.Fatalf("read snapshot owner ID: %v", err)
+	}
+	for _, item := range []struct {
+		entity string
+		id     int64
+	}{{"note", ids.foreignNote}, {"card", ids.foreignCard}} {
+		var count int
+		if err := database.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM sync_events
+			WHERE owner_id = ? AND entity_type = ? AND entity_id = ? AND operation = 'upsert'
+		`, ownerID, item.entity, item.id).Scan(&count); err != nil {
+			t.Fatalf("count initial %s snapshot: %v", item.entity, err)
+		}
+		if count != 1 {
+			t.Errorf("initial %s snapshot count for %d = %d, want 1", item.entity, item.id, count)
+		}
+	}
+	for _, item := range []struct {
+		entity string
+		id     int64
+	}{{"note", ids.legacyActiveNote}, {"card", ids.legacyActiveCard}} {
+		var count int
+		if err := database.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM sync_events WHERE entity_type = ? AND entity_id = ?
+		`, item.entity, item.id).Scan(&count); err != nil {
+			t.Fatalf("count archived %s snapshot: %v", item.entity, err)
+		}
+		if count != 0 {
+			t.Errorf("archived %s %d was included in initial sync snapshot", item.entity, item.id)
 		}
 	}
 }

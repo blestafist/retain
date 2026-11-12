@@ -18,6 +18,7 @@ import (
 	"github.com/pestit/retain/internal/notes"
 	"github.com/pestit/retain/internal/stats"
 	"github.com/pestit/retain/internal/study"
+	syncservice "github.com/pestit/retain/internal/sync"
 )
 
 const healthCheckTimeout = 2 * time.Second
@@ -29,6 +30,7 @@ type databasePinger interface {
 // HandlerOptions contains optional application services registered by the server.
 type HandlerOptions struct {
 	StatsService       *stats.Service
+	SyncService        *syncservice.Service
 	LLMStore           *llmstore.Store
 	LLMService         *llmservice.Service
 	AskService         *llmservice.AskService
@@ -72,7 +74,13 @@ func newHandler(publicOrigin string, database databasePinger, authService *auth.
 		noteService := notes.NewService(contentDB, appClock)
 		RegisterContentRoutes(mux, authService, deckService, noteService)
 		RegisterImportRoutes(mux, authService, contentimport.NewService(contentDB, appClock))
-		RegisterStudyRoutes(mux, authService, study.NewService(contentDB, appClock))
+		studyService := study.NewService(contentDB, appClock)
+		RegisterStudyRoutes(mux, authService, studyService)
+		syncService := options.SyncService
+		if syncService == nil {
+			syncService = syncservice.NewService(contentDB, studyService)
+		}
+		RegisterSyncRoutes(mux, authService, syncService)
 		statsService := options.StatsService
 		if statsService == nil {
 			statsService = stats.NewService(contentDB, appClock)

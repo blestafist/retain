@@ -51,6 +51,7 @@ var (
 // It deliberately excludes the password hash.
 type User struct {
 	ID        int64     `json:"id"`
+	SyncScope int64     `json:"sync_scope"`
 	Email     string    `json:"email"`
 	Name      string    `json:"name"`
 	IsAdmin   bool      `json:"is_admin"`
@@ -185,6 +186,10 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (User, erro
 	if _, err := queries.CreateUserSettings(ctx, created.ID); err != nil {
 		return User{}, ErrInternal
 	}
+	scopeID, err := queries.GetSyncOwnerScope(ctx, created.ID)
+	if err != nil {
+		return User{}, ErrInternal
+	}
 	consumeAt := s.now()
 	if _, err := queries.ConsumeInvite(ctx, gen.ConsumeInviteParams{
 		UsedBy: created.ID,
@@ -199,7 +204,7 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (User, erro
 	if err := tx.Commit(); err != nil {
 		return User{}, ErrInternal
 	}
-	return publicUser(created), nil
+	return publicUser(created, scopeID), nil
 }
 
 // Login verifies credentials, creates a 30-day session, and returns its raw
@@ -224,6 +229,10 @@ func (s *Service) Login(ctx context.Context, input LoginInput, userAgent string)
 		}
 		return LoginResult{}, ErrInvalidCredentials
 	}
+	if err != nil {
+		return LoginResult{}, ErrInternal
+	}
+	scopeID, err := s.database.Queries().GetSyncOwnerScope(ctx, user.ID)
 	if err != nil {
 		return LoginResult{}, ErrInternal
 	}
@@ -255,7 +264,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput, userAgent string)
 	if err != nil {
 		return LoginResult{}, ErrInternal
 	}
-	return LoginResult{User: publicUser(user), Token: token, ExpiresAt: expiresAt}, nil
+	return LoginResult{User: publicUser(user, scopeID), Token: token, ExpiresAt: expiresAt}, nil
 }
 
 // Logout deletes the session identified by token. Unknown and malformed tokens
@@ -305,7 +314,11 @@ func (s *Service) Authenticate(ctx context.Context, token string) (User, error) 
 	if err != nil {
 		return User{}, ErrInternal
 	}
-	return publicUser(user), nil
+	scopeID, err := queries.GetSyncOwnerScope(ctx, user.ID)
+	if err != nil {
+		return User{}, ErrInternal
+	}
+	return publicUser(user, scopeID), nil
 }
 
 // CreateInvite creates a seven-day invite only for an existing administrator.
@@ -407,7 +420,11 @@ func (s *Service) GetAccount(ctx context.Context, userID int64) (Account, error)
 	if err != nil {
 		return Account{}, ErrInternal
 	}
-	return Account{User: publicUser(user), Settings: publicSettings(settings)}, nil
+	scopeID, err := s.database.Queries().GetSyncOwnerScope(ctx, userID)
+	if err != nil {
+		return Account{}, ErrInternal
+	}
+	return Account{User: publicUser(user, scopeID), Settings: publicSettings(settings)}, nil
 }
 
 type normalizedAccount struct {
@@ -531,9 +548,10 @@ func (s *Service) now() time.Time {
 	return s.clock.Now().UTC()
 }
 
-func publicUser(user gen.User) User {
+func publicUser(user gen.User, scopeID int64) User {
 	return User{
 		ID:        user.ID,
+		SyncScope: scopeID,
 		Email:     user.Email,
 		Name:      user.Name,
 		IsAdmin:   user.IsAdmin,
