@@ -152,35 +152,11 @@ export function suggestMnemonics(noteId: number): Promise<MnemonicResult> {
   return request('/llm/mnemonic', decodeMnemonicResult, { method: 'POST', body: { note_id: noteId } });
 }
 
-function decodeNoteAlternatives(value: unknown, noteId: number): string[] {
-  let collection: unknown = value;
-  if (isRecord(value)) {
-    collection = Array.isArray(value.notes) ? value.notes
-      : Array.isArray(value.items) ? value.items
-        : Array.isArray(value.results) ? value.results
-          : undefined;
-  }
-  if (!Array.isArray(collection)) throw new ApiError(200, 'invalid_response');
-  const note = collection.find((item) => isRecord(item) && item.id === noteId);
-  if (!isRecord(note)) throw new ApiError(404, 'not_found');
-  if (note.alternatives !== undefined && (!Array.isArray(note.alternatives)
-    || !note.alternatives.every((alternative) => typeof alternative === 'string'))) {
-    throw new ApiError(200, 'invalid_response');
-  }
-  return (note.alternatives as string[] | undefined) ?? [];
-}
-
-/** Adds one approved answer without replacing the note's existing alternatives. */
-export async function addNoteAlternative(deckId: number, noteId: number, answer: string): Promise<void> {
-  const alternatives = await request(
-    `/decks/${encodeURIComponent(String(deckId))}/notes`,
-    (value) => decodeNoteAlternatives(value, noteId),
-  );
-  const acceptedAnswer = answer.trim();
-  const merged = alternatives.includes(acceptedAnswer) ? alternatives : [...alternatives, acceptedAnswer];
-  await request(`/notes/${encodeURIComponent(String(noteId))}`, (value) => value, {
-    method: 'PATCH',
-    body: { alternatives: merged },
+/** Adds one approved answer atomically without replacing existing alternatives. */
+export async function addNoteAlternative(noteId: number, answer: string): Promise<void> {
+  await request(`/notes/${encodeURIComponent(String(noteId))}/alternatives`, () => undefined, {
+    method: 'POST',
+    body: { alternative: answer.trim() },
   });
 }
 

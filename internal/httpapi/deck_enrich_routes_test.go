@@ -57,6 +57,30 @@ func TestRegisterDeckEnrichRoutesAuthenticatesAndReturnsJobID(t *testing.T) {
 	}
 }
 
+func TestRegisterDeckEnrichRoutesRejectsSubmissionsWhileWorkerIsRestarting(t *testing.T) {
+	fixture := newLLMAskRouteFixture(t)
+	service := &deckEnrichRouteFake{jobID: "job-123"}
+	available := false
+	mux := http.NewServeMux()
+	RegisterDeckEnrichRoutes(mux, fixture.auth, service, func() bool { return available })
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/decks/23/enrich", nil)
+	request.AddCookie(fixture.cookie)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), `"code":"worker_unavailable"`) || service.calls != 0 {
+		t.Fatalf("unavailable worker response = %d %s, calls=%d", response.Code, response.Body, service.calls)
+	}
+
+	available = true
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/decks/23/enrich", nil)
+	request.AddCookie(fixture.cookie)
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || service.calls != 1 {
+		t.Fatalf("available worker response = %d %s, calls=%d, want accepted submission", response.Code, response.Body, service.calls)
+	}
+}
+
 func TestRegisterDeckEnrichRoutesMapsErrorsWithoutLeakingDetails(t *testing.T) {
 	fixture := newLLMAskRouteFixture(t)
 	tests := []struct {

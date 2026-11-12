@@ -67,28 +67,25 @@ describe('LLM API', () => {
     });
   });
 
-  it('merges an explicitly accepted answer into existing alternatives before patching the note', async () => {
-    fetchMock
-      .mockResolvedValueOnce(response([{ id: 12, alternatives: ['kitty', 'feline'] }]))
-      .mockResolvedValueOnce(response({ id: 12 }));
+  it('adds an explicitly accepted answer through the atomic endpoint', async () => {
+    fetchMock.mockResolvedValueOnce(response({ id: 12 }));
 
-    await addNoteAlternative(7, 12, 'catling');
+    await addNoteAlternative(12, 'catling');
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/decks/7/notes');
-    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/notes/12');
-    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
-      method: 'PATCH',
-      body: JSON.stringify({ alternatives: ['kitty', 'feline', 'catling'] }),
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/notes/12/alternatives');
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ alternative: 'catling' }),
     });
   });
 
-  it('does not duplicate an already accepted answer', async () => {
-    fetchMock
-      .mockResolvedValueOnce(response([{ id: 12, alternatives: ['kitty'] }]))
-      .mockResolvedValueOnce(response({ id: 12 }));
+  it('does not read or patch the full note when adding an answer', async () => {
+    fetchMock.mockResolvedValueOnce(response({ id: 12 }));
 
-    await addNoteAlternative(7, 12, 'kitty');
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ alternatives: ['kitty'] });
+    await addNoteAlternative(12, ' kitty ');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ alternative: 'kitty' });
   });
 
   it('sends the selected deck and word to enrich', async () => {

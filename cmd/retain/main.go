@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -154,6 +155,7 @@ func run(logger *slog.Logger) error {
 		FastModel: cfg.LLMModelFast,
 	})
 	var worker *jobs.Worker
+	var workerAvailable atomic.Bool
 	if cfg.LLMEnabled {
 		worker, err = jobs.New(llmStore, appClock, map[string]jobs.Handler{
 			llmservice.DeckEnrichJobKind: deckEnrichService.Handler(),
@@ -163,13 +165,17 @@ func run(logger *slog.Logger) error {
 		}
 	}
 
+	handlerOptions := httpapi.HandlerOptions{
+		LLMStore: llmStore, LLMService: llmService, AskService: askService,
+		MnemonicService: mnemonicService, SynonymService: synonymService,
+		DeckEnrichService: deckEnrichService, AdminService: adminService,
+	}
+	if worker != nil {
+		handlerOptions.JobWorkerAvailable = workerAvailable.Load
+	}
 	server := &http.Server{
-		Addr: cfg.HTTPAddr,
-		Handler: httpapi.NewHandlerWithOptions(cfg.PublicOrigin, database.SQL, authService, database, web.Files(), httpapi.HandlerOptions{
-			LLMStore: llmStore, LLMService: llmService, AskService: askService,
-			MnemonicService: mnemonicService, SynonymService: synonymService,
-			DeckEnrichService: deckEnrichService, AdminService: adminService,
-		}),
+		Addr:              cfg.HTTPAddr,
+		Handler:           httpapi.NewHandlerWithOptions(cfg.PublicOrigin, database.SQL, authService, database, web.Files(), handlerOptions),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      writeTimeoutForLLM(cfg.LLMTimeout),
@@ -185,21 +191,55 @@ func run(logger *slog.Logger) error {
 	var workerErrors chan error
 	if worker != nil {
 		workerErrors = make(chan error, 1)
-		go func() { workerErrors <- worker.Run(ctx) }()
+		go func() {
+			workerErrors <- superviseWorker(ctx, worker.Run, sleepWorkerBackoff, workerAvailable.Store, logger)
+		}()
 	}
 
 	select {
 	case err := <-serverErrors:
 		stop()
 		if workerErrors != nil {
-			if workerErr := <-workerErrors; workerErr != nil {
-				logger.Error("background jobs worker stopped", "component", "jobs")
+			waitCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			workerErr := waitForWorkerResult(waitCtx, workerErrors)
+			cancel()
+			if workerErr != nil {
+				logger.Error("background jobs supervisor did not shut down cleanly", "component", "jobs")
 			}
 		}
 		if !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("serve HTTP: %w", err)
 		}
 		return nil
+	case workerErr := <-workerErrors:
+		if workerErr == nil && ctx.Err() != nil {
+			logger.Info("shutting down HTTP server")
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			defer cancel()
+			if err := server.Shutdown(shutdownCtx); err != nil {
+				_ = server.Close()
+				return fmt.Errorf("shut down HTTP server: %w", err)
+			}
+			if err := <-serverErrors; !errors.Is(err, http.ErrServerClosed) {
+				return fmt.Errorf("serve HTTP: %w", err)
+			}
+			return nil
+		}
+		if workerErr == nil {
+			workerErr = ErrWorkerSupervisor
+		}
+		stop()
+		logger.Error("background jobs supervisor stopped; shutting down HTTP", "component", "jobs")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			_ = server.Close()
+			return fmt.Errorf("shut down HTTP server after worker failure: %w", err)
+		}
+		if err := <-serverErrors; !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("serve HTTP after worker failure: %w", err)
+		}
+		return fmt.Errorf("supervise background jobs: %w", workerErr)
 	case <-ctx.Done():
 		logger.Info("shutting down HTTP server")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
@@ -212,7 +252,7 @@ func run(logger *slog.Logger) error {
 			return fmt.Errorf("serve HTTP: %w", err)
 		}
 		if workerErrors != nil {
-			if err := <-workerErrors; err != nil {
+			if err := waitForWorkerResult(shutdownCtx, workerErrors); err != nil {
 				return fmt.Errorf("run background jobs: %w", err)
 			}
 		}

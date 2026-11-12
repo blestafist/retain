@@ -490,6 +490,7 @@ POST   /decks/{id}/enrich        → {job_id}  fill empty fields via LLM
 GET    /decks/{id}/notes?q=&tag=&state=&cursor=
 POST   /decks/{id}/notes         creates a note + cards
 PATCH  /notes/{id}
+POST   /notes/{id}/alternatives {alternative}  adds one accepted answer idempotently
 DELETE /notes/{id}
 
 POST   /llm/enrich               {deck_id, word}         → field suggestions

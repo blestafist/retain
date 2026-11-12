@@ -11,6 +11,73 @@ import (
 	"time"
 )
 
+const addNoteAlternative = `-- name: AddNoteAlternative :one
+UPDATE notes
+SET alternatives = CASE
+        WHEN EXISTS (
+            SELECT 1 FROM json_each(notes.alternatives) AS existing_alternative
+            WHERE existing_alternative.type = 'text'
+              AND existing_alternative.value = CAST(?1 AS TEXT)
+        ) THEN notes.alternatives
+        ELSE json_insert(notes.alternatives, '$[#]', CAST(?1 AS TEXT))
+    END,
+    updated_at = CASE
+        WHEN EXISTS (
+            SELECT 1 FROM json_each(notes.alternatives) AS existing_alternative
+            WHERE existing_alternative.type = 'text'
+              AND existing_alternative.value = CAST(?1 AS TEXT)
+        ) THEN notes.updated_at
+        ELSE ?2
+    END
+WHERE notes.id = ?3
+  AND notes.deleted_at IS NULL
+  AND EXISTS (
+      SELECT 1 FROM decks
+      WHERE decks.id = notes.deck_id
+        AND decks.owner_id = ?4
+        AND decks.deleted_at IS NULL
+  )
+RETURNING id, deck_id, term, term_key, translation, transcription, example, example_translation, notes, tags, alternatives, fields, external_id, import_batch_id, created_at, updated_at, deleted_at, deletion_batch
+`
+
+type AddNoteAlternativeParams struct {
+	Alternative string
+	UpdatedAt   time.Time
+	ID          int64
+	OwnerID     int64
+}
+
+func (q *Queries) AddNoteAlternative(ctx context.Context, arg AddNoteAlternativeParams) (Note, error) {
+	row := q.db.QueryRowContext(ctx, addNoteAlternative,
+		arg.Alternative,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.OwnerID,
+	)
+	var i Note
+	err := row.Scan(
+		&i.ID,
+		&i.DeckID,
+		&i.Term,
+		&i.TermKey,
+		&i.Translation,
+		&i.Transcription,
+		&i.Example,
+		&i.ExampleTranslation,
+		&i.Notes,
+		&i.Tags,
+		&i.Alternatives,
+		&i.Fields,
+		&i.ExternalID,
+		&i.ImportBatchID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletionBatch,
+	)
+	return i, err
+}
+
 const createCard = `-- name: CreateCard :one
 INSERT INTO cards (note_id, user_id, direction)
 SELECT notes.id, CAST(?1 AS INTEGER), CAST(?2 AS TEXT)

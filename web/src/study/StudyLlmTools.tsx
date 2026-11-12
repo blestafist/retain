@@ -106,7 +106,7 @@ export function StudyLlmTools({
     setSavingSynonym(true);
     setSynonymError(null);
     try {
-      await addNoteAlternative(card.deck_id, card.note_id, answer);
+      await addNoteAlternative(card.note_id, answer);
       setSynonymSaved(true);
       onSynonymAccepted();
     } catch (caught) {

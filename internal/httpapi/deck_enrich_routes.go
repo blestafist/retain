@@ -14,9 +14,10 @@ type deckEnrichSubmitter interface {
 	Submit(context.Context, int64, int64) (string, error)
 }
 
-// RegisterDeckEnrichRoutes registers POST /api/v1/decks/{id}/enrich. The mux
-// should be wrapped in the server's same-origin guard by its caller.
-func RegisterDeckEnrichRoutes(mux *http.ServeMux, authService *auth.Service, service deckEnrichSubmitter) {
+// RegisterDeckEnrichRoutes registers POST /api/v1/decks/{id}/enrich. When
+// availability is supplied, new jobs are rejected while the worker is down.
+// The mux should be wrapped in the server's same-origin guard by its caller.
+func RegisterDeckEnrichRoutes(mux *http.ServeMux, authService *auth.Service, service deckEnrichSubmitter, availability ...func() bool) {
 	mux.HandleFunc("POST /api/v1/decks/{id}/enrich", func(w http.ResponseWriter, r *http.Request) {
 		if authService == nil {
 			writeInternalError(w)
@@ -29,6 +30,10 @@ func RegisterDeckEnrichRoutes(mux *http.ServeMux, authService *auth.Service, ser
 		deckID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil || deckID <= 0 {
 			_ = WriteAPIError(w, http.StatusNotFound, "not_found", "Resource not found.")
+			return
+		}
+		if len(availability) > 0 && availability[0] != nil && !availability[0]() {
+			_ = WriteAPIError(w, http.StatusServiceUnavailable, "worker_unavailable", "Background jobs are temporarily unavailable.")
 			return
 		}
 		if service == nil {

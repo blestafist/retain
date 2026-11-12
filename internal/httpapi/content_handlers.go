@@ -168,6 +168,34 @@ func updateNoteHandler(authentication *auth.Service, service *notes.Service) htt
 	}
 }
 
+func addNoteAlternativeHandler(authentication *auth.Service, service *notes.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := authenticatedUser(w, r, authentication)
+		if !ok {
+			return
+		}
+		id, ok := contentID(w, r)
+		if !ok {
+			return
+		}
+		var input struct {
+			Alternative string `json:"alternative"`
+		}
+		if err := DecodeJSON(r, &input); err != nil {
+			writeJSONDecodeError(w, err)
+			return
+		}
+		result, err := service.AddAlternative(r.Context(), user.ID, id, input.Alternative)
+		if err != nil {
+			writeContentError(w, err)
+			return
+		}
+		if err := WriteJSON(w, http.StatusOK, result); err != nil {
+			writeInternalError(w)
+		}
+	}
+}
+
 func applyNoteEnrichmentHandler(authentication *auth.Service, service *notes.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := authenticatedUser(w, r, authentication)

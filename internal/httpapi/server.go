@@ -27,13 +27,14 @@ type databasePinger interface {
 
 // HandlerOptions contains the Stage 6 LLM services registered by the server.
 type HandlerOptions struct {
-	LLMStore          *llmstore.Store
-	LLMService        *llmservice.Service
-	AskService        *llmservice.AskService
-	MnemonicService   *llmservice.MnemonicService
-	SynonymService    *llmservice.SynonymService
-	DeckEnrichService *llmservice.DeckEnrichService
-	AdminService      *llmservice.AdminService
+	LLMStore           *llmstore.Store
+	LLMService         *llmservice.Service
+	AskService         *llmservice.AskService
+	MnemonicService    *llmservice.MnemonicService
+	SynonymService     *llmservice.SynonymService
+	DeckEnrichService  *llmservice.DeckEnrichService
+	AdminService       *llmservice.AdminService
+	JobWorkerAvailable func() bool
 }
 
 // NewHandler wires the health and account endpoints and the embedded frontend
@@ -80,7 +81,7 @@ func newHandler(publicOrigin string, database databasePinger, authService *auth.
 			RegisterLLMAskRoutes(mux, authService, options.AskService)
 			RegisterLLMMnemonicRoutes(mux, authService, options.MnemonicService)
 			RegisterLLMSynonymRoutes(mux, authService, options.SynonymService)
-			RegisterDeckEnrichRoutes(mux, authService, options.DeckEnrichService)
+			RegisterDeckEnrichRoutes(mux, authService, options.DeckEnrichService, options.JobWorkerAvailable)
 			RegisterLLMAdminRoutes(mux, authService, options.AdminService)
 		}
 	}

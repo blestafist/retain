@@ -67,10 +67,7 @@ describe('study LLM tools', () => {
     const fetchMock = vi.fn<typeof fetch>((input, init) => {
       const url = String(input);
       if (url === '/api/v1/llm/check-answer') return Promise.resolve(jsonResponse({ is_synonym: true, explanation: 'A natural equivalent.' }));
-      if (url === '/api/v1/decks/2/notes' && init?.method === undefined) {
-        return Promise.resolve(jsonResponse([{ id: 8, term: 'hello', translation: 'cześć', alternatives: ['hej'] }]));
-      }
-      if (url === '/api/v1/notes/8' && init?.method === 'PATCH') return Promise.resolve(jsonResponse({}));
+      if (url === '/api/v1/notes/8/alternatives' && init?.method === 'POST') return Promise.resolve(jsonResponse({ id: 8 }));
       throw new Error(`Unexpected request: ${init?.method ?? 'GET'} ${url}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -82,8 +79,8 @@ describe('study LLM tools', () => {
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(['/api/v1/llm/check-answer']);
     await user.click(screen.getByRole('button', { name: t('acceptSynonym') }));
     expect(await screen.findByText(t('synonymSaved'))).toBeTruthy();
-    const patchCall = fetchMock.mock.calls.find(([input, init]) => String(input) === '/api/v1/notes/8' && init?.method === 'PATCH');
-    expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({ alternatives: ['hej', 'witaj'] });
+    const appendCall = fetchMock.mock.calls.find(([input, init]) => String(input) === '/api/v1/notes/8/alternatives' && init?.method === 'POST');
+    expect(JSON.parse(String(appendCall?.[1]?.body))).toEqual({ alternative: 'witaj' });
     expect(onSynonymAccepted).toHaveBeenCalledOnce();
   });
 

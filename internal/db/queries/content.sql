@@ -248,6 +248,34 @@ WHERE notes.id = sqlc.arg(id)
   )
 RETURNING *;
 
+-- name: AddNoteAlternative :one
+UPDATE notes
+SET alternatives = CASE
+        WHEN EXISTS (
+            SELECT 1 FROM json_each(notes.alternatives) AS existing_alternative
+            WHERE existing_alternative.type = 'text'
+              AND existing_alternative.value = CAST(sqlc.arg(alternative) AS TEXT)
+        ) THEN notes.alternatives
+        ELSE json_insert(notes.alternatives, '$[#]', CAST(sqlc.arg(alternative) AS TEXT))
+    END,
+    updated_at = CASE
+        WHEN EXISTS (
+            SELECT 1 FROM json_each(notes.alternatives) AS existing_alternative
+            WHERE existing_alternative.type = 'text'
+              AND existing_alternative.value = CAST(sqlc.arg(alternative) AS TEXT)
+        ) THEN notes.updated_at
+        ELSE sqlc.arg(updated_at)
+    END
+WHERE notes.id = sqlc.arg(id)
+  AND notes.deleted_at IS NULL
+  AND EXISTS (
+      SELECT 1 FROM decks
+      WHERE decks.id = notes.deck_id
+        AND decks.owner_id = sqlc.arg(owner_id)
+        AND decks.deleted_at IS NULL
+  )
+RETURNING *;
+
 -- name: SoftDeleteNote :one
 UPDATE notes
 SET deleted_at = ?,

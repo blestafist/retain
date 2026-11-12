@@ -47,7 +47,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readJobs(ownerId: number): TrackedJob[] {
   try {
-    const parsed: unknown = JSON.parse(window.sessionStorage.getItem(`${storagePrefix}${ownerId}`) ?? '[]');
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(`${storagePrefix}${ownerId}`) ?? '[]');
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((item): item is TrackedJob => isRecord(item)
       && typeof item.jobId === 'string' && item.jobId.length > 0
@@ -127,6 +127,15 @@ export function DeckEnrichmentPanel({ ownerId, deckId, deckName, enabled }: {
   deckName: string;
   enabled: boolean;
 }) {
+  return <DeckEnrichmentPanelForOwner key={ownerId} ownerId={ownerId} deckId={deckId} deckName={deckName} enabled={enabled} />;
+}
+
+function DeckEnrichmentPanelForOwner({ ownerId, deckId, deckName, enabled }: {
+  ownerId: number;
+  deckId: DeckId;
+  deckName: string;
+  enabled: boolean;
+}) {
   const [jobs, setJobs] = useState<TrackedJob[]>(() => readJobs(ownerId));
   const [selectedJobId, setSelectedJobId] = useState<string | null>(() => readJobs(ownerId).at(-1)?.jobId ?? null);
   const [startError, setStartError] = useState(false);
@@ -143,9 +152,9 @@ export function DeckEnrichmentPanel({ ownerId, deckId, deckName, enabled }: {
 
   useEffect(() => {
     try {
-      window.sessionStorage.setItem(`${storagePrefix}${ownerId}`, JSON.stringify(jobs.slice(-20)));
+      window.localStorage.setItem(`${storagePrefix}${ownerId}`, JSON.stringify(jobs.slice(-20)));
     } catch {
-      // The job can still be used during this session if storage is unavailable.
+      // The job can still be used until this panel is unmounted if storage is unavailable.
     }
   }, [jobs, ownerId]);
 

@@ -16,6 +16,12 @@ import (
 	"modernc.org/sqlite"
 )
 
+const (
+	// These match the size bounds for learner answers sent to synonym checking.
+	maxAlternativeBytes = 512
+	maxAlternativeRunes = 200
+)
+
 var (
 	ErrInvalidInput = errors.New("invalid note input")
 	ErrNotFound     = errors.New("note or deck not found")
@@ -312,6 +318,37 @@ func (s *Service) Update(ctx context.Context, ownerID, id int64, patch PatchInpu
 		return Note{}, ErrInternal
 	}
 	item, err := publicNote(updated)
+	if err != nil {
+		return Note{}, ErrInternal
+	}
+	return item, nil
+}
+
+// AddAlternative appends an accepted answer without replacing concurrent
+// additions. Repeated additions of the same trimmed value are idempotent.
+func (s *Service) AddAlternative(ctx context.Context, ownerID, noteID int64, alternative string) (Note, error) {
+	if !s.ready() || ownerID <= 0 || noteID <= 0 {
+		return Note{}, ErrInternal
+	}
+	alternative = strings.TrimSpace(alternative)
+	if alternative == "" || !utf8.ValidString(alternative) || len(alternative) > maxAlternativeBytes ||
+		utf8.RuneCountInString(alternative) > maxAlternativeRunes {
+		return Note{}, ErrInvalidInput
+	}
+
+	row, err := s.database.Queries().AddNoteAlternative(ctx, gen.AddNoteAlternativeParams{
+		Alternative: alternative,
+		UpdatedAt:   s.now(),
+		ID:          noteID,
+		OwnerID:     ownerID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return Note{}, ErrNotFound
+	}
+	if err != nil {
+		return Note{}, ErrInternal
+	}
+	item, err := publicNote(row)
 	if err != nil {
 		return Note{}, ErrInternal
 	}
