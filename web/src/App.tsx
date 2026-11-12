@@ -7,6 +7,7 @@ import './app.css';
 import { t } from './i18n/en';
 import { Button } from './ui/Button';
 import { DecksWorkspace } from './content/DecksWorkspace';
+import { AdminPage } from './admin/AdminPage';
 import { SettingsPage } from './settings/SettingsPage';
 import { StudySession } from './study/StudySession';
 
@@ -106,6 +107,7 @@ function AuthenticatedApp() {
                 <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/">{t('decksWorkspace')}</a>
                 <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/study">{t('study')}</a>
                 <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/settings">{t('settings')}</a>
+                {meQuery.data.user.is_admin && <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/admin">{t('admin')}</a>}
               </nav>
               <Button
                 variant="tonal"
@@ -127,8 +129,10 @@ function AuthenticatedApp() {
               <StudySession ttsAuto={meQuery.data.settings.tts_auto} />
             ) : window.location.pathname === '/settings' ? (
               <SettingsPage settings={meQuery.data.settings} />
+            ) : window.location.pathname === '/admin' ? (
+              meQuery.data.user.is_admin ? <AdminPage /> : <section className="mx-auto max-w-3xl rounded-3xl bg-error-container p-6 text-on-error-container" role="alert">{t('adminAccessDenied')}</section>
             ) : (
-              <DecksWorkspace />
+              <DecksWorkspace ownerId={meQuery.data.user.id} />
             )}
           </>
         ) : (

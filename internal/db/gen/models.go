@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+type AppSetting struct {
+	Key       string
+	Value     string
+	UpdatedAt time.Time
+}
+
 type Card struct {
 	ID            int64
 	NoteID        int64
@@ -72,6 +78,40 @@ type Invite struct {
 	UsedBy    sql.NullInt64
 	ExpiresAt time.Time
 	CreatedAt time.Time
+}
+
+type Job struct {
+	ID        string
+	UserID    int64
+	Kind      string
+	Payload   string
+	Status    string
+	Progress  int64
+	Total     int64
+	Error     sql.NullString
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Result    sql.NullString
+	Attempt   int64
+}
+
+type LlmCache struct {
+	Key           []byte
+	Model         string
+	PromptVersion int64
+	Response      string
+	CreatedAt     time.Time
+}
+
+type LlmUsage struct {
+	ID               int64
+	UserID           int64
+	Kind             string
+	Model            string
+	PromptTokens     int64
+	CompletionTokens int64
+	Cached           bool
+	CreatedAt        time.Time
 }
 
 type Note struct {

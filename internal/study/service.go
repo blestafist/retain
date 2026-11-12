@@ -82,6 +82,12 @@ type QueueCard struct {
 	Previews map[srs.Rating]Preview `json:"previews"`
 }
 
+// AnswerCard contains the owner-scoped note and direction for an active card.
+type AnswerCard struct {
+	NoteID    int64
+	Direction string
+}
+
 // CheckAnswerInput contains the card identifier and learner-entered response.
 // Expected answers and language metadata are always resolved by the server.
 type CheckAnswerInput struct {
@@ -413,6 +419,29 @@ func (s *Service) CheckAnswer(ctx context.Context, userID int64, input CheckAnsw
 }
 
 const choiceDistractorPageSize int64 = 128
+
+// ResolveAnswerCard looks up an active card owned by userID and returns its
+// note and actual direction. Missing, deleted, and other users' cards are
+// reported uniformly as ErrNotFound.
+func (s *Service) ResolveAnswerCard(ctx context.Context, userID, cardID int64) (AnswerCard, error) {
+	if !s.ready() || userID <= 0 {
+		return AnswerCard{}, ErrInternal
+	}
+	if cardID <= 0 || ctx == nil {
+		return AnswerCard{}, ErrInvalidInput
+	}
+	row, err := s.database.Queries().GetStudyAnswerCard(ctx, gen.GetStudyAnswerCardParams{
+		CardID: cardID,
+		UserID: userID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return AnswerCard{}, ErrNotFound
+	}
+	if err != nil {
+		return AnswerCard{}, ErrInternal
+	}
+	return AnswerCard{NoteID: row.NoteID, Direction: row.Direction}, nil
+}
 
 // ChoiceOptions returns one correct answer and three distinct distractors from
 // the note's actual deck and card direction. Only active New cards can use it.

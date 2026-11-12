@@ -48,6 +48,7 @@ describe('study session', () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>((input) => {
       const url = String(input);
+      if (url === '/api/v1/llm/status') return Promise.resolve(jsonResponse({ enabled: false }));
       if (url === '/api/v1/study/queue?deck_id=&limit=50') return Promise.resolve(jsonResponse([queueCard]));
       if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([]));
       if (url === '/api/v1/study/review' || url === '/api/v1/study/undo') return Promise.resolve(jsonResponse({ ...queueCard }));
@@ -73,6 +74,7 @@ describe('study session', () => {
     const requestBodies: string[] = [];
     const fetchMock = vi.fn<typeof fetch>((input, init) => {
       const url = String(input);
+      if (url === '/api/v1/llm/status') return Promise.resolve(jsonResponse({ enabled: false }));
       if (url === '/api/v1/study/queue?deck_id=&limit=50') return Promise.resolve(jsonResponse([queueCard]));
       if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([]));
       if (url === '/api/v1/study/review') {
@@ -103,6 +105,7 @@ describe('study session', () => {
     let attempts = 0;
     const fetchMock = vi.fn<typeof fetch>((input, init) => {
       const url = String(input);
+      if (url === '/api/v1/llm/status') return Promise.resolve(jsonResponse({ enabled: false }));
       if (url === '/api/v1/study/queue?deck_id=&limit=50') return Promise.resolve(jsonResponse([queueCard]));
       if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([]));
       if (url === '/api/v1/study/review') {
@@ -133,6 +136,7 @@ describe('study session', () => {
     let attempts = 0;
     const fetchMock = vi.fn<typeof fetch>((input) => {
       const url = String(input);
+      if (url === '/api/v1/llm/status') return Promise.resolve(jsonResponse({ enabled: false }));
       if (url === '/api/v1/study/queue?deck_id=&limit=50') return Promise.resolve(jsonResponse([queueCard, secondCard]));
       if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([]));
       if (url === '/api/v1/study/review') {
@@ -165,6 +169,7 @@ describe('study session', () => {
     let queueRequests = 0;
     const fetchMock = vi.fn<typeof fetch>((input) => {
       const url = String(input);
+      if (url === '/api/v1/llm/status') return Promise.resolve(jsonResponse({ enabled: false }));
       if (url === '/api/v1/study/queue?deck_id=&limit=50') {
         queueRequests += 1;
         return Promise.resolve(jsonResponse(queueRequests === 1 ? [queueCard, secondCard, thirdCard] : [secondCard, thirdCard]));
@@ -193,6 +198,7 @@ describe('study session', () => {
     let queueRequests = 0;
     const fetchMock = vi.fn<typeof fetch>((input) => {
       const url = String(input);
+      if (url === '/api/v1/llm/status') return Promise.resolve(jsonResponse({ enabled: false }));
       if (url === '/api/v1/study/queue?deck_id=&limit=50') {
         queueRequests += 1;
         return Promise.resolve(queueRequests === 1
@@ -229,6 +235,7 @@ describe('study session', () => {
     let nextQueueBody: unknown;
     const fetchMock = vi.fn<typeof fetch>((input, init) => {
       const url = String(input);
+      if (url === '/api/v1/llm/status') return Promise.resolve(jsonResponse({ enabled: false }));
       if (url === '/api/v1/study/queue?deck_id=&limit=50') {
         queueRequests += 1;
         return Promise.resolve(jsonResponse(firstBatch));
@@ -263,6 +270,7 @@ describe('study session', () => {
     let reviewBody: unknown;
     const fetchMock = vi.fn<typeof fetch>((input, init) => {
       const url = String(input);
+      if (url === '/api/v1/llm/status') return Promise.resolve(jsonResponse({ enabled: false }));
       if (url === '/api/v1/study/queue?deck_id=&limit=50') return Promise.resolve(jsonResponse([queueCard]));
       if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([]));
       if (url === '/api/v1/study/review') {
@@ -288,6 +296,7 @@ describe('study session', () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>((input) => {
       const url = String(input);
+      if (url === '/api/v1/llm/status') return Promise.resolve(jsonResponse({ enabled: false }));
       if (url === '/api/v1/study/queue?deck_id=&limit=50') return Promise.resolve(jsonResponse([queueCard]));
       if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([{ id: 2, name: 'German', lang_target: 'de', lang_native: 'pl' }]));
       if (url === '/api/v1/study/check-answer') return Promise.resolve(jsonResponse({ match: 'exact', suggested_rating: 3 }));
@@ -320,10 +329,36 @@ describe('study session', () => {
     expect(JSON.parse(String(reviewRequest?.[1]?.body))).toMatchObject({ card_id: 5, rating: 2, mode: 'typing' });
   });
 
+  it('offers synonym checking for a rejected typed answer when LLM is enabled', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = String(input);
+      if (url === '/api/v1/llm/status') return Promise.resolve(jsonResponse({ enabled: true }));
+      if (url === '/api/v1/study/queue?deck_id=&limit=50') return Promise.resolve(jsonResponse([queueCard]));
+      if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([{ id: 2, name: 'German', lang_target: 'de', lang_native: 'pl' }]));
+      if (url === '/api/v1/study/check-answer') return Promise.resolve(jsonResponse({ match: 'wrong', suggested_rating: 1 }));
+      if (url === '/api/v1/llm/check-answer') return Promise.resolve(jsonResponse({ is_synonym: true, explanation: 'A natural equivalent.' }));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSession();
+    await screen.findByRole('heading', { name: 'hello' });
+    await user.click(screen.getByRole('button', { name: t('typingMode') }));
+    await user.type(screen.getByRole('textbox', { name: t('typeYourAnswer') }), 'bonjour');
+    await user.click(screen.getByRole('button', { name: t('checkAnswer') }));
+    expect(await screen.findByText(t('answerWrong'))).toBeTruthy();
+    await user.click(await screen.findByRole('button', { name: t('checkSynonym') }));
+    expect(await screen.findByText(t('synonymYes'))).toBeTruthy();
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/v1/llm/check-answer')?.[1]?.body)))
+      .toEqual({ card_id: 5, answer: 'bonjour' });
+  });
+
   it('loads server choices, checks the selection, and records choice mode', async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>((input) => {
       const url = String(input);
+      if (url === '/api/v1/llm/status') return Promise.resolve(jsonResponse({ enabled: false }));
       if (url === '/api/v1/study/queue?deck_id=&limit=50') return Promise.resolve(jsonResponse([queueCard]));
       if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([]));
       if (url === '/api/v1/study/choice-options') return Promise.resolve(jsonResponse({ choices: ['hallo', 'ciao', 'bonjour', 'adios'] }));
@@ -355,6 +390,7 @@ describe('study session', () => {
     const nextCard = { ...queueCard, id: 6, note_id: 9, front: 'world', back: 'Welt' };
     const fetchMock = vi.fn<typeof fetch>((input) => {
       const url = String(input);
+      if (url === '/api/v1/llm/status') return Promise.resolve(jsonResponse({ enabled: false }));
       if (url === '/api/v1/study/queue?deck_id=&limit=50') return Promise.resolve(jsonResponse([queueCard, nextCard]));
       if (url === '/api/v1/decks') return Promise.resolve(jsonResponse([]));
       if (url === '/api/v1/study/check-answer') return new Promise((resolve) => { resolveCheck = resolve; });

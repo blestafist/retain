@@ -65,6 +65,19 @@ export interface PatchNoteRequest {
   external_id?: string | null;
 }
 
+export interface ApplyEnrichmentRequest {
+  transcription?: string;
+  example?: string;
+  example_translation?: string;
+  alternatives?: string[];
+  fields?: Record<string, unknown>;
+}
+
+export interface ApplyEnrichmentResponse {
+  note: Note;
+  applied_fields: string[];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -249,6 +262,23 @@ export function createDeckNote(id: DeckId, input: CreateNoteRequest): Promise<un
 
 export function patchNote(id: DeckId, input: PatchNoteRequest): Promise<unknown> {
   return request(`/notes/${encodeURIComponent(String(id))}`, { method: 'PATCH', body: input });
+}
+
+export async function applyNoteEnrichment(id: DeckId, input: ApplyEnrichmentRequest): Promise<ApplyEnrichmentResponse> {
+  const value = await request(`/notes/${encodeURIComponent(String(id))}/apply-enrichment`, { method: 'POST', body: input });
+  if (!isRecord(value) || !Array.isArray(value.applied_fields)
+    || !value.applied_fields.every((field) => typeof field === 'string')) {
+    throw invalidResponseError();
+  }
+  return { note: decodeNote(value.note), applied_fields: value.applied_fields as string[] };
+}
+
+export async function startDeckEnrichment(id: DeckId): Promise<{ job_id: string }> {
+  const value = await request(`/decks/${encodeURIComponent(String(id))}/enrich`, { method: 'POST' });
+  if (!isRecord(value) || typeof value.job_id !== 'string' || value.job_id.length === 0) {
+    throw invalidResponseError();
+  }
+  return { job_id: value.job_id };
 }
 
 export async function deleteNote(id: DeckId): Promise<void> {

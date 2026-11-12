@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ApiError } from '../api/client';
 import {
   type CreateNoteRequest,
@@ -11,7 +11,9 @@ import {
 } from '../api/content';
 import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
+import { DeckEnrichmentPanel } from './DeckEnrichmentPanel';
 import { ImportPanel } from './ImportPanel';
+import { WordAutoFill, type SuggestionKey } from './WordAutoFill';
 import {
   useCreateDeck,
   useCreateDeckNote,
@@ -21,6 +23,7 @@ import {
   useDeleteNote,
   usePatchDeck,
   usePatchNote,
+  useLlmStatus,
 } from './hooks';
 
 type CreateMode = 'root' | 'child' | null;
@@ -118,7 +121,7 @@ function optionalValue(value: string): string | undefined {
   return clean || undefined;
 }
 
-function noteInput(form: HTMLFormElement): CreateNoteRequest {
+function noteInput(form: HTMLFormElement, fields?: Record<string, unknown>): CreateNoteRequest {
   const data = new FormData(form);
   const input: CreateNoteRequest = {
     term: String(data.get('term') ?? '').trim(),
@@ -136,17 +139,18 @@ function noteInput(form: HTMLFormElement): CreateNoteRequest {
   const alternatives = String(data.get('alternatives') ?? '').split(',').map((value) => value.trim()).filter(Boolean);
   if (tags.length > 0) input.tags = tags;
   if (alternatives.length > 0) input.alternatives = alternatives;
+  if (fields && Object.keys(fields).length > 0) input.fields = fields;
   return input;
 }
 
-function NoteFields({ note, prefix }: { note?: Note; prefix: string }) {
+function NoteFields({ note, prefix, onTermChange }: { note?: Note; prefix: string; onTermChange?: (term: string) => void }) {
   const fieldId = (name: string) => `${prefix}-${name}`;
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="grid gap-2 text-sm font-medium text-on-surface" htmlFor={fieldId('term')}>
           {t('term')}
-          <input id={fieldId('term')} name="term" required defaultValue={note?.term ?? ''} className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" />
+          <input id={fieldId('term')} name="term" required defaultValue={note?.term ?? ''} onChange={onTermChange ? (event) => onTermChange(event.target.value) : undefined} className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" />
         </label>
         <label className="grid gap-2 text-sm font-medium text-on-surface" htmlFor={fieldId('translation')}>
           {t('translation')}
@@ -183,8 +187,9 @@ function NoteFields({ note, prefix }: { note?: Note; prefix: string }) {
   );
 }
 
-export function DecksWorkspace() {
+export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
   const decksQuery = useDecks();
+  const llmStatusQuery = useLlmStatus();
   const decks = decksQuery.data ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createMode, setCreateMode] = useState<CreateMode>(null);
@@ -192,6 +197,9 @@ export function DecksWorkspace() {
   const [nativeLanguage, setNativeLanguage] = useState<NativeLanguage>('pl');
   const [reverseCards, setReverseCards] = useState(false);
   const [editingNote, setEditingNote] = useState<DeckId | null>(null);
+  const [newNoteTerm, setNewNoteTerm] = useState('');
+  const [newNoteFields, setNewNoteFields] = useState<Record<string, unknown>>({});
+  const newNoteForm = useRef<HTMLFormElement>(null);
   const selectedDeck = findDeck(decks, selectedId);
   const notesQuery = useDeckNotes(selectedDeck?.id ?? null);
   const createDeckMutation = useCreateDeck();
@@ -254,11 +262,27 @@ export function DecksWorkspace() {
     event.preventDefault();
     if (!selectedDeck) return;
     const form = event.currentTarget;
-    const input = noteInput(form);
+    const input = noteInput(form, newNoteFields);
     if (!input.term || !input.translation) return;
     createNoteMutation.mutate({ deckId: selectedDeck.id, input }, {
-      onSuccess: () => form.reset(),
+      onSuccess: () => {
+        form.reset();
+        setNewNoteTerm('');
+        setNewNoteFields({});
+      },
     });
+  }
+
+  function useWordSuggestion(key: SuggestionKey, value: string | string[]) {
+    if (key.startsWith('fields.')) {
+      setNewNoteFields((previous) => ({ ...previous, [key.slice('fields.'.length)]: value }));
+      return;
+    }
+    const elementName = key;
+    const input = newNoteForm.current?.elements.namedItem(elementName);
+    if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+      input.value = Array.isArray(value) ? value.join(', ') : value;
+    }
   }
 
   function submitNoteUpdate(event: FormEvent<HTMLFormElement>, note: Note) {
@@ -413,14 +437,25 @@ export function DecksWorkspace() {
 
                   <details className="rounded-2xl bg-surface-container p-4">
                     <summary className="min-h-12 cursor-pointer content-center font-semibold text-on-surface">{t('addNote')}</summary>
-                    <form onSubmit={submitNote} className="space-y-4 pt-4" aria-label={t('addNote')}>
-                      <NoteFields prefix="new-note" />
+                    <form ref={newNoteForm} onSubmit={submitNote} className="space-y-4 pt-4" aria-label={t('addNote')}>
+                      <NoteFields prefix="new-note" onTermChange={setNewNoteTerm} />
+                      {llmStatusQuery.data?.enabled && typeof selectedDeck.id === 'number' && (
+                        <WordAutoFill deckId={selectedDeck.id} word={newNoteTerm} enabled onUse={useWordSuggestion} />
+                      )}
                       <Button type="submit" disabled={createNoteMutation.isPending}>{t(createNoteMutation.isPending ? 'addingNote' : 'addNote')}</Button>
                     </form>
                   </details>
                 </div>
 
                 <ImportPanel decks={decks} selectedDeck={selectedDeck} />
+                {ownerId > 0 && (
+                  <DeckEnrichmentPanel
+                    ownerId={ownerId}
+                    deckId={selectedDeck.id}
+                    deckName={selectedDeck.name}
+                    enabled={llmStatusQuery.data?.enabled === true}
+                  />
+                )}
               </section>
             ) : (
               !createMode && <section className="rounded-3xl bg-surface-container-low p-6"><h2 className="m-0 text-xl font-semibold text-on-surface">{t('selectOrCreateDeck')}</h2></section>

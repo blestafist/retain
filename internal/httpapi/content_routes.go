@@ -18,5 +18,6 @@ func RegisterContentRoutes(mux *http.ServeMux, authentication *auth.Service, dec
 	mux.HandleFunc("GET /api/v1/decks/{id}/notes", listNotesHandler(authentication, noteService))
 	mux.HandleFunc("POST /api/v1/decks/{id}/notes", createNoteHandler(authentication, noteService))
 	mux.HandleFunc("PATCH /api/v1/notes/{id}", updateNoteHandler(authentication, noteService))
+	mux.HandleFunc("POST /api/v1/notes/{id}/apply-enrichment", applyNoteEnrichmentHandler(authentication, noteService))
 	mux.HandleFunc("DELETE /api/v1/notes/{id}", deleteNoteHandler(authentication, noteService))
 }

@@ -71,6 +71,23 @@ type PatchInput struct {
 	ExternalID         OptionalString
 }
 
+// EnrichmentInput contains only selected enrichment suggestions. Nil fields
+// are omitted; supplied values are applied only when the current note is empty.
+type EnrichmentInput struct {
+	Transcription      *string         `json:"transcription"`
+	Example            *string         `json:"example"`
+	ExampleTranslation *string         `json:"example_translation"`
+	Alternatives       *[]string       `json:"alternatives"`
+	Fields             *map[string]any `json:"fields"`
+}
+
+// ApplyEnrichmentResult reports the current note and the top-level suggestion
+// fields that were applied.
+type ApplyEnrichmentResult struct {
+	Note          Note     `json:"note"`
+	AppliedFields []string `json:"applied_fields"`
+}
+
 // Note is the public note representation; import bookkeeping and term_key stay private.
 type Note struct {
 	ID                 int64          `json:"id"`
@@ -301,6 +318,108 @@ func (s *Service) Update(ctx context.Context, ownerID, id int64, patch PatchInpu
 	return item, nil
 }
 
+// ApplyEnrichment fills selected empty enrichment fields on an active,
+// owner-visible note. The current note is read and updated in one transaction
+// so stale suggestions cannot replace values that were already saved.
+func (s *Service) ApplyEnrichment(ctx context.Context, ownerID, noteID int64, input EnrichmentInput) (ApplyEnrichmentResult, error) {
+	if !s.ready() || ownerID <= 0 || noteID <= 0 {
+		return ApplyEnrichmentResult{}, ErrInternal
+	}
+	input, err := normalizeEnrichment(input)
+	if err != nil {
+		return ApplyEnrichmentResult{}, err
+	}
+
+	tx, err := s.database.SQL.BeginTx(ctx, nil)
+	if err != nil {
+		return ApplyEnrichmentResult{}, ErrInternal
+	}
+	defer func() { _ = tx.Rollback() }()
+	queries := s.database.Queries().WithTx(tx)
+	current, err := queries.GetNote(ctx, gen.GetNoteParams{ID: noteID, OwnerID: ownerID})
+	if errors.Is(err, sql.ErrNoRows) {
+		return ApplyEnrichmentResult{}, ErrNotFound
+	}
+	if err != nil {
+		return ApplyEnrichmentResult{}, ErrInternal
+	}
+	item, err := publicNote(current)
+	if err != nil {
+		return ApplyEnrichmentResult{}, ErrInternal
+	}
+
+	applied := make([]string, 0, 5)
+	if isEmptyText(item.Transcription) && input.Transcription != nil {
+		item.Transcription = input.Transcription
+		applied = append(applied, "transcription")
+	}
+	if isEmptyText(item.Example) && input.Example != nil {
+		item.Example = input.Example
+		applied = append(applied, "example")
+	}
+	if isEmptyText(item.ExampleTranslation) && input.ExampleTranslation != nil {
+		item.ExampleTranslation = input.ExampleTranslation
+		applied = append(applied, "example_translation")
+	}
+	if len(item.Alternatives) == 0 && input.Alternatives != nil {
+		item.Alternatives = *input.Alternatives
+		applied = append(applied, "alternatives")
+	}
+	if input.Fields != nil {
+		for key, value := range *input.Fields {
+			if isEmptyMetadataValue(item.Fields[key]) {
+				item.Fields[key] = value
+				if !containsString(applied, "fields") {
+					applied = append(applied, "fields")
+				}
+			}
+		}
+	}
+
+	if len(applied) == 0 {
+		if err := tx.Commit(); err != nil {
+			return ApplyEnrichmentResult{}, ErrInternal
+		}
+		return ApplyEnrichmentResult{Note: item, AppliedFields: applied}, nil
+	}
+
+	_, alternativesJSON, fieldsJSON, err := encodeJSONFields(item.Tags, item.Alternatives, item.Fields)
+	if err != nil {
+		return ApplyEnrichmentResult{}, ErrInternal
+	}
+	updated, err := queries.UpdateNote(ctx, gen.UpdateNoteParams{
+		Term:               current.Term,
+		TermKey:            current.TermKey,
+		Translation:        current.Translation,
+		Transcription:      nullableString(item.Transcription),
+		Example:            nullableString(item.Example),
+		ExampleTranslation: nullableString(item.ExampleTranslation),
+		Notes:              current.Notes,
+		Tags:               current.Tags,
+		Alternatives:       alternativesJSON,
+		Fields:             fieldsJSON,
+		ExternalID:         current.ExternalID,
+		ImportBatchID:      current.ImportBatchID,
+		UpdatedAt:          s.now(),
+		ID:                 noteID,
+		OwnerID:            ownerID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return ApplyEnrichmentResult{}, ErrNotFound
+	}
+	if err != nil {
+		return ApplyEnrichmentResult{}, ErrInternal
+	}
+	item, err = publicNote(updated)
+	if err != nil {
+		return ApplyEnrichmentResult{}, ErrInternal
+	}
+	if err := tx.Commit(); err != nil {
+		return ApplyEnrichmentResult{}, ErrInternal
+	}
+	return ApplyEnrichmentResult{Note: item, AppliedFields: applied}, nil
+}
+
 // Delete soft-deletes a note and its cards for the owner.
 func (s *Service) Delete(ctx context.Context, ownerID, id int64) error {
 	if !s.ready() || ownerID <= 0 || id <= 0 {
@@ -393,6 +512,122 @@ func normalizeOptionalString(value *string) *string {
 		return nil
 	}
 	return &copy
+}
+
+func normalizeEnrichment(input EnrichmentInput) (EnrichmentInput, error) {
+	for _, value := range []*string{input.Transcription, input.Example, input.ExampleTranslation} {
+		if value != nil && (!utf8.ValidString(*value) || strings.TrimSpace(*value) == "") {
+			return EnrichmentInput{}, ErrInvalidInput
+		}
+	}
+	input.Transcription = normalizeOptionalString(input.Transcription)
+	input.Example = normalizeOptionalString(input.Example)
+	input.ExampleTranslation = normalizeOptionalString(input.ExampleTranslation)
+	if input.Alternatives != nil {
+		if len(*input.Alternatives) == 0 {
+			return EnrichmentInput{}, ErrInvalidInput
+		}
+		alternatives := make([]string, len(*input.Alternatives))
+		for i, value := range *input.Alternatives {
+			value = strings.TrimSpace(value)
+			if !utf8.ValidString(value) || value == "" {
+				return EnrichmentInput{}, ErrInvalidInput
+			}
+			alternatives[i] = value
+		}
+		input.Alternatives = &alternatives
+	}
+	if input.Fields != nil {
+		fields := make(map[string]any, len(*input.Fields))
+		for key, value := range *input.Fields {
+			if !utf8.ValidString(key) || !isEnrichmentMetadataField(key) {
+				return EnrichmentInput{}, ErrInvalidInput
+			}
+			if key == "verb_forms" {
+				verbForms, ok := normalizeVerbForms(value)
+				if !ok {
+					return EnrichmentInput{}, ErrInvalidInput
+				}
+				fields[key] = verbForms
+				continue
+			}
+			text, ok := value.(string)
+			if !ok || !utf8.ValidString(text) || strings.TrimSpace(text) == "" {
+				return EnrichmentInput{}, ErrInvalidInput
+			}
+			fields[key] = strings.TrimSpace(text)
+		}
+		input.Fields = &fields
+	}
+	return input, nil
+}
+
+func isEnrichmentMetadataField(key string) bool {
+	switch key {
+	case "pos", "article", "plural", "verb_forms", "cefr":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeVerbForms(value any) ([]string, bool) {
+	var forms []string
+	switch value := value.(type) {
+	case []string:
+		forms = value
+	case []any:
+		forms = make([]string, len(value))
+		for i, form := range value {
+			text, ok := form.(string)
+			if !ok {
+				return nil, false
+			}
+			forms[i] = text
+		}
+	default:
+		return nil, false
+	}
+	if len(forms) == 0 {
+		return nil, false
+	}
+	normalized := make([]string, len(forms))
+	for i, form := range forms {
+		form = strings.TrimSpace(form)
+		if !utf8.ValidString(form) || form == "" {
+			return nil, false
+		}
+		normalized[i] = form
+	}
+	return normalized, true
+}
+
+func isEmptyMetadataValue(value any) bool {
+	switch value := value.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(value) == ""
+	case []any:
+		return len(value) == 0
+	case map[string]any:
+		return len(value) == 0
+	default:
+		return false
+	}
+}
+
+func isEmptyText(value *string) bool {
+	return value == nil || strings.TrimSpace(*value) == ""
+}
+
+func containsString(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
 }
 
 func nullableString(value *string) sql.NullString {

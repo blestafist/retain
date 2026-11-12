@@ -32,13 +32,18 @@ afterEach(() => {
 });
 
 describe('DecksWorkspace', () => {
-  it('creates, edits, and deletes words and renames a deck using only Stage 3 APIs', async () => {
+  it('uses explicit AI suggestions when adding words and manages deck content', async () => {
     const user = userEvent.setup();
     let deckName = 'German course';
     let notes: Array<Record<string, unknown>> = [];
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method ?? 'GET';
+      if (url === '/api/v1/llm/status' && method === 'GET') return jsonResponse({ enabled: true });
+      if (url === '/api/v1/llm/enrich' && method === 'POST') return jsonResponse({
+        translation: 'Cześć', alternatives: ['Witaj'], transcription: 'ˈhalo', example: 'Hallo!',
+        example_translation: 'Cześć!', fields: { pos: 'interjection', article: '', plural: '', verb_forms: [], cefr: '' },
+      });
       if (url === '/api/v1/decks' && method === 'GET') {
         return jsonResponse([{
           id: 42, name: deckName, parent_id: null, lang_target: 'de', lang_native: 'pl', reverse_cards: false,
@@ -79,13 +84,19 @@ describe('DecksWorkspace', () => {
     await user.click(screen.getByText(t('addNote'), { selector: 'summary' }));
     const addForm = screen.getByRole('form', { name: t('addNote') });
     await user.type(within(addForm).getByLabelText(t('term')), 'Hallo');
-    await user.type(within(addForm).getByLabelText(t('translation')), 'Cześć');
+    await user.click(await within(addForm).findByRole('button', { name: t('fillWord') }));
+    await within(addForm).findByText(t('suggestionsNotSaved'));
+    await user.click(within(addForm).getByRole('button', { name: t('useSuggestion').replace('{field}', t('translation')) }));
+    await user.click(within(addForm).getByRole('button', { name: t('useSuggestion').replace('{field}', t('partOfSpeech')) }));
+    expect(within(addForm).getByLabelText(t('translation'))).toHaveProperty('value', 'Cześć');
     await user.type(within(addForm).getByLabelText(t('tags'), { exact: false }), 'greeting, common');
     await user.click(within(addForm).getByRole('button', { name: t('addNote') }));
     expect(await screen.findByText('Hallo')).toBeTruthy();
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith('/notes') && init?.method === 'POST')).toBe(true));
     const createCall = fetchMock.mock.calls.find(([url, init]) => String(url) === '/api/v1/decks/42/notes' && init?.method === 'POST');
-    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({ term: 'Hallo', translation: 'Cześć', tags: ['greeting', 'common'] });
+    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
+      term: 'Hallo', translation: 'Cześć', tags: ['greeting', 'common'], fields: { pos: 'interjection' },
+    });
 
     const noteRow = screen.getByText('Hallo').closest('li');
     expect(noteRow).not.toBeNull();
@@ -103,7 +114,8 @@ describe('DecksWorkspace', () => {
     expect(fetchMock.mock.calls.some(([url, init]) => String(url) === '/api/v1/notes/501' && init?.method === 'DELETE')).toBe(true);
 
     const requestedURLs = fetchMock.mock.calls.map(([url]) => String(url));
-    expect(requestedURLs).not.toContain('/api/v1/llm/status');
+    expect(requestedURLs).toContain('/api/v1/llm/status');
+    expect(requestedURLs).toContain('/api/v1/llm/enrich');
     expect(requestedURLs.some((url) => /\/(study|stats|settings|jobs|admin|sync)(\/|\?|$)/.test(url))).toBe(false);
   });
 });

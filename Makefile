@@ -3,7 +3,7 @@ SHELL := /bin/bash
 .ONESHELL:
 
 .DEFAULT_GOAL := help
-.PHONY: help dev web-deps gen test lint build
+.PHONY: help dev web-deps gen test lint build llm-smoke
 
 help: ## Show available targets
 	@awk 'BEGIN { FS = ":.*##"; print "Available targets:" } /^[a-zA-Z0-9_-]+:.*##/ { printf "  %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -48,3 +48,6 @@ build: web/node_modules ## Build the frontend and a static Go binary with embedd
 	npm --prefix web run build
 	mkdir -p bin
 	CGO_ENABLED=0 go build -trimpath -buildvcs=false -o bin/retain ./cmd/retain
+
+llm-smoke: ## Manually verify the configured real LLM provider
+	go run ./cmd/llm-smoke
