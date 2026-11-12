@@ -17,6 +17,7 @@ export interface ChoiceOptions {
 
 export interface StudyCard {
   id: number;
+  sync_seq?: number;
   note_id: number;
   deck_id?: number;
   direction: string;

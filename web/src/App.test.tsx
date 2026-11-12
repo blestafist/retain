@@ -39,7 +39,7 @@ function unauthorized() {
 }
 
 const signedInResponse = {
-  user: { id: 1, email: 'friend@example.com', name: 'Morgan', is_admin: false },
+  user: { id: 1, sync_scope: 1, email: 'friend@example.com', name: 'Morgan', is_admin: false },
   settings: {
     new_per_day: 20,
     max_reviews_per_day: 200,
@@ -192,7 +192,7 @@ describe('account screens', () => {
         meCalls += 1;
         return meCalls === 1
           ? response(signedInResponse)
-          : response({ ...signedInResponse, user: { ...signedInResponse.user, id: 2, name: 'Alex' } });
+          : response({ ...signedInResponse, user: { ...signedInResponse.user, id: 2, sync_scope: 2, name: 'Alex' } });
       }
       if (url === '/api/v1/llm/status') return response({ enabled: false });
       if (url === '/api/v1/decks') return response(meCalls === 1 ? [deck] : []);

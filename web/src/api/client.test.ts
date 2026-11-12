@@ -52,12 +52,12 @@ describe('auth API client', () => {
 
   it('returns a valid current-user response', async () => {
     fetchMock.mockResolvedValue(response({
-      user: { id: 7, email: 'friend@example.com', name: 'Friend', is_admin: false },
+      user: { id: 7, sync_scope: 3, email: 'friend@example.com', name: 'Friend', is_admin: false },
       settings: validSettings,
     }));
 
     await expect(getMe()).resolves.toEqual({
-      user: { id: 7, email: 'friend@example.com', name: 'Friend', is_admin: false },
+      user: { id: 7, sync_scope: 3, email: 'friend@example.com', name: 'Friend', is_admin: false },
       settings: validSettings,
     });
   });
