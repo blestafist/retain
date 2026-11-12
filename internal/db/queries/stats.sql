@@ -192,26 +192,57 @@ WHERE cards.id = sqlc.arg(card_id)
   AND decks.deleted_at IS NULL
   AND decks.owner_id = cards.user_id
    AND logs.undone = 0
-    AND logs.reviewed_at <= CAST(sqlc.arg(now_at) AS TEXT)
 ORDER BY logs.reviewed_at, logs.id;
 
 -- name: GetStatsRetrievabilityCards :many
-SELECT cards.id, cards.state, cards.stability, cards.difficulty, cards.due,
-       cards.elapsed_days, cards.scheduled_days, cards.step, cards.reps, cards.lapses,
-       cards.last_review
-FROM cards
-JOIN notes ON notes.id = cards.note_id
-JOIN decks ON decks.id = notes.deck_id
-WHERE cards.user_id = sqlc.arg(user_id)
-  AND cards.state = 2
-  AND cards.stability IS NOT NULL
-  AND cards.difficulty IS NOT NULL
-   AND cards.last_review IS NOT NULL
-    AND cards.last_review <= CAST(sqlc.arg(now_at) AS TEXT)
-  AND cards.deleted_at IS NULL
-  AND notes.deleted_at IS NULL
-  AND decks.deleted_at IS NULL
-  AND decks.owner_id = cards.user_id;
+WITH RECURSIVE ranked_past_reviews AS (
+    SELECT logs.card_id, logs.id, logs.reviewed_at,
+           projection.stability_after, projection.difficulty_after, projection.scheduled_days,
+           ROW_NUMBER() OVER (PARTITION BY logs.card_id ORDER BY logs.reviewed_at DESC, logs.id DESC) AS position
+    FROM review_logs AS logs
+    JOIN review_log_projection AS projection ON projection.review_id = logs.id
+    WHERE logs.user_id = sqlc.arg(user_id)
+      AND logs.undone = 0
+      AND logs.reviewed_at <= CAST(sqlc.arg(now_at) AS TEXT)
+), card_snapshot AS (
+    SELECT cards.id,
+           COALESCE(next_projection.state_before, cards.state) AS state,
+           COALESCE(past.stability_after, cards.stability) AS stability,
+           COALESCE(past.difficulty_after, cards.difficulty) AS difficulty,
+           cards.due, cards.elapsed_days,
+           COALESCE(past.scheduled_days, cards.scheduled_days) AS scheduled_days,
+           cards.step, cards.reps, cards.lapses,
+           CAST(COALESCE(past.reviewed_at, cards.last_review) AS TEXT) AS last_review_text
+    FROM cards
+    JOIN notes ON notes.id = cards.note_id
+    JOIN decks ON decks.id = notes.deck_id
+    LEFT JOIN ranked_past_reviews AS past ON past.card_id = cards.id AND past.position = 1
+    LEFT JOIN review_log_projection AS next_projection ON next_projection.review_id = (
+        SELECT next.id
+        FROM review_logs AS next
+        WHERE next.card_id = cards.id
+          AND next.user_id = cards.user_id
+          AND next.undone = 0
+          AND past.id IS NOT NULL
+          AND (next.reviewed_at > past.reviewed_at OR (next.reviewed_at = past.reviewed_at AND next.id > past.id))
+        ORDER BY next.reviewed_at, next.id
+        LIMIT 1
+    )
+    WHERE cards.user_id = sqlc.arg(user_id)
+      AND cards.deleted_at IS NULL
+      AND notes.deleted_at IS NULL
+      AND decks.deleted_at IS NULL
+      AND decks.owner_id = cards.user_id
+)
+SELECT id, state, stability, difficulty,
+       due, elapsed_days, scheduled_days,
+       step, reps, lapses, last_review_text
+FROM card_snapshot
+WHERE state = 2
+  AND stability IS NOT NULL
+  AND difficulty IS NOT NULL
+  AND last_review_text IS NOT NULL
+  AND last_review_text <= CAST(sqlc.arg(now_at) AS TEXT);
 
 -- name: GetStatsStateDistribution :many
 SELECT cards.state,

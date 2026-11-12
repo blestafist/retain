@@ -389,29 +389,20 @@ func (s *Service) Curve(ctx context.Context, userID, cardID int64) (Curve, error
 		queries := s.database.Queries()
 		now := s.now()
 		logs, err := queries.ListStatsCardCurveLogs(ctx, gen.ListStatsCardCurveLogsParams{
-			CardID: cardID, UserID: userID, NowAt: now.UTC().String(),
+			CardID: cardID, UserID: userID,
 		})
 		if err != nil {
 			return nil, ErrInternal
 		}
-		cardState := srs.Card{State: srs.State(card.State)}
-		if card.Stability.Valid {
-			cardState.Stability = card.Stability.Float64
-		}
-		if card.Difficulty.Valid {
-			cardState.Difficulty = card.Difficulty.Float64
-		}
-		if card.LastReview.Valid {
-			cardState.LastReview = card.LastReview.Time
-		}
+		cardState, state, stability, difficulty, lastReview, scheduledDays, pastCount := curveCardSnapshot(card, logs, now)
 		curve := Curve{
-			CardID: cardID, Term: card.Term, Direction: card.Direction, State: card.State,
-			Stability: nullableFloatPointer(card.Stability), Difficulty: nullableFloatPointer(card.Difficulty),
-			LastReview: nullableTimePointer(card.LastReview), Reviews: make([]CurveReview, 0, len(logs)),
-			Curve: make([]CurvePoint, 0),
+			CardID: cardID, Term: card.Term, Direction: card.Direction, State: state,
+			Stability: stability, Difficulty: difficulty, LastReview: lastReview,
+			Reviews: make([]CurveReview, 0, pastCount),
+			Curve:   make([]CurvePoint, 0),
 		}
 		curve.Retrievability = env.scheduler.Retrievability(cardState, now)
-		for index, log := range logs {
+		for index, log := range logs[:pastCount] {
 			retrievabilityBefore := 0.0
 			if log.StateBefore == int64(srs.Review) && index > 0 {
 				previous := logs[index-1]
@@ -429,7 +420,6 @@ func (s *Service) Curve(ctx context.Context, userID, cardID int64) (Curve, error
 		}
 		if cardState.State == srs.Review && cardState.Stability > 0 && !cardState.LastReview.IsZero() {
 			end := now
-			scheduledDays := max64(card.ScheduledDays, 0)
 			if scheduledEnd := cardState.LastReview.Add(time.Duration(scheduledDays) * 24 * time.Hour); scheduledEnd.After(end) {
 				end = scheduledEnd
 			}
@@ -466,6 +456,62 @@ func (s *Service) Curve(ctx context.Context, userID, cardID int64) (Curve, error
 		return curve, nil
 	})
 	return result, err
+}
+
+func curveCardSnapshot(
+	card gen.GetStatsCardCurveCardRow,
+	logs []gen.ListStatsCardCurveLogsRow,
+	now time.Time,
+) (srs.Card, int64, *float64, *float64, *time.Time, int64, int) {
+	pastCount := 0
+	for pastCount < len(logs) && !logs[pastCount].ReviewedAt.After(now) {
+		pastCount++
+	}
+
+	state := card.State
+	stability := nullableFloatPointer(card.Stability)
+	difficulty := nullableFloatPointer(card.Difficulty)
+	lastReview := nullableTimePointer(card.LastReview)
+	scheduledDays := max64(card.ScheduledDays, 0)
+	if pastCount > 0 {
+		latest := logs[pastCount-1]
+		if pastCount < len(logs) {
+			// Projection state_before of the next chronological event is the
+			// exact state after the latest event at or before now.
+			state = logs[pastCount].StateBefore
+		}
+		stabilityValue := latest.StabilityAfter
+		difficultyValue := latest.DifficultyAfter
+		stability = &stabilityValue
+		difficulty = &difficultyValue
+		last := latest.ReviewedAt.UTC()
+		lastReview = &last
+		scheduledDays = max64(latest.ScheduledDays, 0)
+	} else if len(logs) > 0 {
+		// With no review yet at now, the first future event still stores its
+		// replay-derived before-state. Do not use its future last_review.
+		state = logs[0].StateBefore
+		stability = nullableFloatPointer(logs[0].StabilityBefore)
+		difficulty = nullableFloatPointer(logs[0].DifficultyBefore)
+		if lastReview != nil && lastReview.After(now) {
+			lastReview = nil
+		}
+		scheduledDays = 0
+	} else if lastReview != nil && lastReview.After(now) {
+		lastReview = nil
+	}
+
+	cardState := srs.Card{State: srs.State(state), ScheduledDays: uint64(scheduledDays)}
+	if stability != nil {
+		cardState.Stability = *stability
+	}
+	if difficulty != nil {
+		cardState.Difficulty = *difficulty
+	}
+	if lastReview != nil {
+		cardState.LastReview = *lastReview
+	}
+	return cardState, state, stability, difficulty, lastReview, scheduledDays, pastCount
 }
 
 func (s *Service) Distribution(ctx context.Context, userID int64) (Distribution, error) {
@@ -579,12 +625,16 @@ func (s *Service) knownRightNow(ctx context.Context, userID int64, scheduler srs
 	}
 	known := 0.0
 	for _, row := range rows {
-		if !row.Stability.Valid || !row.Difficulty.Valid || !row.LastReview.Valid || row.State != int64(srs.Review) {
+		if row.State != int64(srs.Review) {
 			continue
 		}
+		lastReview, err := parseDatabaseTime(row.LastReviewText)
+		if err != nil {
+			return 0, ErrInternal
+		}
 		known += scheduler.Retrievability(srs.Card{
-			State: srs.Review, Stability: row.Stability.Float64, Difficulty: row.Difficulty.Float64,
-			LastReview: row.LastReview.Time, Due: row.Due,
+			State: srs.Review, Stability: row.Stability, Difficulty: row.Difficulty,
+			LastReview: lastReview, Due: row.Due,
 			ElapsedDays: uint64(max64(row.ElapsedDays, 0)), ScheduledDays: uint64(max64(row.ScheduledDays, 0)),
 			Step: uint64(max64(row.Step, 0)), Reps: uint64(max64(row.Reps, 0)), Lapses: uint64(max64(row.Lapses, 0)),
 		}, now)
@@ -812,6 +862,10 @@ func addCalendarMonths(date time.Time, months int) time.Time {
 
 func databaseTimeBoundary(value time.Time) string {
 	return value.UTC().String()
+}
+
+func parseDatabaseTime(value string) (time.Time, error) {
+	return time.Parse("2006-01-02 15:04:05.999999999 -0700 MST", value)
 }
 
 func groupActivityRows(rows []gen.ListStatsActivityRangeRow, buckets []dateBucket) []ActivityDay {

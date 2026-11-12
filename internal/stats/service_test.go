@@ -220,7 +220,21 @@ func TestOverviewUsesUserDayBoundsExcludesUndoneAndScopesOwners(t *testing.T) {
 
 func TestFutureReviewTimestampsAreExcludedFromAnalytics(t *testing.T) {
 	f := newStatsFixture(t)
-	f.clock.now = time.Date(2026, time.April, 3, 10, 0, 0, 0, time.UTC)
+	f.clock.now = time.Date(2026, time.April, 3, 10, 0, 0, 300_000_000, time.UTC)
+	if _, err := f.database.SQL.Exec(`UPDATE review_logs SET undone = 1 WHERE id = ?`, testLogID(2)); err != nil {
+		t.Fatalf("undo fixture review to test fractional timestamp: %v", err)
+	}
+	f.addLog(t, f.cards[0], f.userID, 8, 3, int64(srs.Review), 32, 5,
+		time.Date(2026, time.April, 3, 10, 0, 0, 100_000_000, time.UTC), 1000)
+	f.addLog(t, f.cards[0], f.userID, 7, 3, int64(srs.Review), 33, 5,
+		time.Date(2026, time.April, 3, 10, 0, 0, 500_000_000, time.UTC), 4000)
+	futureReview := time.Date(2026, time.April, 3, 10, 45, 0, 0, time.UTC)
+	if _, err := f.database.SQL.Exec(`
+		UPDATE cards SET state = ?, stability = ?, difficulty = ?, last_review = ?, scheduled_days = ?
+		WHERE id = ?
+	`, int64(srs.Learning), 0.5, 5.0, futureReview, 1, f.cards[0]); err != nil {
+		t.Fatalf("simulate card projection after future review: %v", err)
+	}
 
 	overview, err := f.service.Overview(context.Background(), f.userID)
 	if err != nil {
@@ -228,6 +242,9 @@ func TestFutureReviewTimestampsAreExcludedFromAnalytics(t *testing.T) {
 	}
 	if overview.Today.Reviews != 1 || overview.Today.DurationMs != 1000 || overview.Reviews.Total != 2 || overview.Reviews.TotalDurationMs != 1700 {
 		t.Errorf("overview counted future review timestamps: today=%+v totals=%+v", overview.Today, overview.Reviews)
+	}
+	if overview.KnownRightNow <= 0 || overview.KnownRightNow > 1 {
+		t.Errorf("known-right-now did not use the last pre-now review state: %v", overview.KnownRightNow)
 	}
 
 	retention, err := f.service.Retention(context.Background(), f.userID, "week")
@@ -256,6 +273,35 @@ func TestFutureReviewTimestampsAreExcludedFromAnalytics(t *testing.T) {
 	}
 	if len(curve.Reviews) != 2 {
 		t.Errorf("curve reviews = %d, want future events excluded", len(curve.Reviews))
+	}
+	wantLastReview := time.Date(2026, time.April, 3, 10, 0, 0, 100_000_000, time.UTC)
+	if curve.State != int64(srs.Review) || curve.Stability == nil || *curve.Stability != 32 || curve.LastReview == nil || !curve.LastReview.Equal(wantLastReview) {
+		var stability float64
+		var lastReview time.Time
+		if curve.Stability != nil {
+			stability = *curve.Stability
+		}
+		if curve.LastReview != nil {
+			lastReview = *curve.LastReview
+		}
+		t.Errorf("curve current state used future card projection: state=%d stability=%v last_review=%v", curve.State, stability, lastReview)
+	}
+}
+
+func TestKnownRightNowIncludesReviewCardWithoutReviewLogHistory(t *testing.T) {
+	f := newStatsFixture(t)
+	cardID := f.addCard(t, f.userID, 50, "bekannt", "known", "forward", int64(srs.Review),
+		f.clock.now.Add(24*time.Hour), 40, 5, f.clock.now.Add(-48*time.Hour), 0, false, false)
+	scheduler, err := srs.NewScheduler(srs.DefaultParameters())
+	if err != nil {
+		t.Fatalf("NewScheduler() error = %v", err)
+	}
+	known, err := f.service.knownRightNow(context.Background(), f.userID, scheduler, f.clock.now)
+	if err != nil {
+		t.Fatalf("knownRightNow() error = %v", err)
+	}
+	if known <= 0 {
+		t.Errorf("knownRightNow() = %v, want positive contribution from card %d without logs", known, cardID)
 	}
 }
 
@@ -715,6 +761,9 @@ func TestCurveIncludesScheduledEndAndCurrentTimeWithBoundedSampling(t *testing.T
 			scheduledDays := tt.scheduledDays
 			if scheduledDays == 0 {
 				scheduledDays = 365
+			}
+			if _, err := f.database.SQL.Exec(`UPDATE review_logs SET undone = 1 WHERE card_id = ? AND undone = 0`, f.cards[0]); err != nil {
+				t.Fatalf("undo fixture reviews: %v", err)
 			}
 			if _, err := f.database.SQL.Exec(`
 				UPDATE cards SET last_review = ?, stability = 30, difficulty = 5, scheduled_days = ?
