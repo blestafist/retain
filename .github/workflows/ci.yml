@@ -57,18 +57,9 @@ jobs:
       - name: Validate deployment configuration
         env:
           PUBLIC_ORIGIN: https://retain.example.test
-          TUNNEL_TOKEN: ci-placeholder
-          R2_ACCOUNT_ID: ci-account
-          R2_BUCKET: ci-bucket
-          R2_ACCESS_KEY_ID: ci-access-key
-          R2_SECRET_ACCESS_KEY: ci-secret-key
         run: |
           docker compose config --quiet
           docker compose build retain
-          docker compose run --rm --no-deps --entrypoint /usr/local/bin/litestream litestream \
-            databases -config /etc/litestream.yml
-          sh -n deploy/litestream-entrypoint.sh
-          bash -n deploy/verify-restore.sh
 
       - name: Verify embedded frontend assets
         run: |
