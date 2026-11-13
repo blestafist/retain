@@ -2,7 +2,7 @@ package push
 
 import (
 	"context"
-	"crypto/elliptic"
+	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -99,11 +99,11 @@ func newReminderFixture(t *testing.T, timezone, reminderTime string, now time.Ti
 
 func (f *reminderFixture) addSubscription(t *testing.T, endpoint string) {
 	t.Helper()
-	_, x, y, err := elliptic.GenerateKey(elliptic.P256(), rand.Reader)
+	publicKey, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("generate subscription public key: %v", err)
 	}
-	p256dh := base64.RawURLEncoding.EncodeToString(elliptic.Marshal(elliptic.P256(), x, y))
+	p256dh := base64.RawURLEncoding.EncodeToString(publicKey.PublicKey().Bytes())
 	authKey := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef"))
 	input := SubscriptionInput{Endpoint: endpoint}
 	input.Keys.P256dh, input.Keys.Auth = p256dh, authKey

@@ -2,7 +2,7 @@ package push
 
 import (
 	"context"
-	"crypto/elliptic"
+	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -25,11 +25,11 @@ func TestWebPushSenderEncryptsPayloadAndUsesVAPID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateVAPIDKeys(): %v", err)
 	}
-	_, x, y, err := elliptic.GenerateKey(elliptic.P256(), rand.Reader)
+	subscriptionKey, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("generate subscription public key: %v", err)
 	}
-	p256dh := base64.RawURLEncoding.EncodeToString(elliptic.Marshal(elliptic.P256(), x, y))
+	p256dh := base64.RawURLEncoding.EncodeToString(subscriptionKey.PublicKey().Bytes())
 	authKey := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef"))
 	payload := []byte(`{"title":"Retain","body":"You have 2 cards to review."}`)
 	config := Config{VAPIDPublicKey: publicKey, VAPIDPrivateKey: privateKey, VAPIDSubject: "admin@example.test"}

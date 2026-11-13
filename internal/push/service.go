@@ -3,7 +3,7 @@ package push
 
 import (
 	"context"
-	"crypto/elliptic"
+	"crypto/ecdh"
 	"database/sql"
 	"encoding/base64"
 	"errors"
@@ -122,7 +122,7 @@ func validSubscriptionKeys(p256dh, auth string) bool {
 	if !ok || len(publicKey) != 65 {
 		return false
 	}
-	if x, y := elliptic.Unmarshal(elliptic.P256(), publicKey); x == nil || y == nil {
+	if _, err := ecdh.P256().NewPublicKey(publicKey); err != nil {
 		return false
 	}
 	secret, ok := decodeBase64URL(auth)

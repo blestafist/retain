@@ -1,10 +1,10 @@
 package config
 
 import (
-	"crypto/elliptic"
+	"bytes"
+	"crypto/ecdh"
 	"encoding/base64"
 	"fmt"
-	"math/big"
 	"net/mail"
 	"net/url"
 	"os"
@@ -103,14 +103,13 @@ func validatePushConfig(cfg *Config) error {
 	if publicErr != nil || privateErr != nil || len(publicKey) != 65 || len(privateKey) != 32 {
 		return fmt.Errorf("validate configuration: VAPID keys must be base64url encoded P-256 public and private keys")
 	}
-	curve := elliptic.P256()
-	privateScalar := new(big.Int).SetBytes(privateKey)
-	if privateScalar.Sign() <= 0 || privateScalar.Cmp(curve.Params().N) >= 0 {
-		return fmt.Errorf("validate configuration: VAPID private key scalar is outside the P-256 range")
+	curve := ecdh.P256()
+	parsedPublic, publicErr := curve.NewPublicKey(publicKey)
+	private, privateErr := curve.NewPrivateKey(privateKey)
+	if publicErr != nil || privateErr != nil {
+		return fmt.Errorf("validate configuration: VAPID keys must be valid P-256 keys")
 	}
-	publicX, publicY := elliptic.Unmarshal(curve, publicKey)
-	privateX, privateY := curve.ScalarBaseMult(privateKey)
-	if publicX == nil || privateX == nil || publicX.Cmp(privateX) != 0 || publicY.Cmp(privateY) != 0 {
+	if !bytes.Equal(parsedPublic.Bytes(), private.PublicKey().Bytes()) {
 		return fmt.Errorf("validate configuration: VAPID public and private keys do not form a valid pair")
 	}
 	subject := strings.TrimSpace(cfg.VAPIDSubject)
