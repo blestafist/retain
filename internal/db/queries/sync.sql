@@ -36,4 +36,12 @@ WHERE cards.id = sqlc.arg(card_id)
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
-  AND decks.owner_id = cards.user_id;
+  AND (
+      decks.owner_id = cards.user_id
+      OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = cards.user_id
+            AND access.deck_id = decks.id
+            AND access.share_status = 'active'
+      )
+  );

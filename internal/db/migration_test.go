@@ -67,7 +67,7 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 			t.Errorf("close migrated database: %v", err)
 		}
 	})
-	assertMigrationVersion(t, ctx, database.SQL, 9)
+	assertMigrationVersion(t, ctx, database.SQL, 10)
 	assertOriginalContentRowsEqual(t, ctx, database.SQL, wantRows)
 	assertInitialSyncSnapshot(t, ctx, database.SQL, ids)
 	assertMigrationDeletionBatch(t, ctx, database.SQL, "decks", ids.archivedDeck,
@@ -133,8 +133,12 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 		t.Fatal("down migration with legacy tombstones succeeded, want safe refusal")
 	}
 	assertMigrationVersion(t, ctx, database.SQL, 4)
+	if _, err := migrations.Up(ctx); err != nil {
+		t.Fatalf("reapply later migrations after safe down refusal: %v", err)
+	}
+	assertMigrationVersion(t, ctx, database.SQL, 10)
 	assertOriginalContentRowsEqual(t, ctx, database.SQL, wantRows)
-	assertLatestMigrationSchema(t, ctx, database.SQL)
+	assertStudyMigrationSchema(t, ctx, database.SQL)
 	assertMigrationDeletionBatch(t, ctx, database.SQL, "decks", ids.archivedDeck,
 		fmt.Sprintf("migration-00004-deck-%d", ids.archivedDeck))
 	assertMigrationDeletionBatch(t, ctx, database.SQL, "notes", ids.archivedNote,
@@ -634,8 +638,8 @@ func assertLatestMigrationSchema(t *testing.T, ctx context.Context, database *sq
 func assertStudyMigrationSchema(t *testing.T, ctx context.Context, database *sql.DB) {
 	t.Helper()
 	objects := readMigrationSchemaObjects(t, ctx, database)
-	if len(objects) != 43 {
-		t.Errorf("latest schema has %d explicit indexes/triggers, want 43: %#v", len(objects), objects)
+	if len(objects) != 60 {
+		t.Errorf("latest schema has %d explicit indexes/triggers, want 60: %#v", len(objects), objects)
 	}
 	for _, name := range []string{
 		"index.cards_id_user_id_idx",
@@ -663,6 +667,23 @@ func assertStudyMigrationSchema(t *testing.T, ctx context.Context, database *sql
 		"trigger.sync_cards_update",
 		"trigger.sync_cards_owner_update",
 		"trigger.sync_cards_delete",
+		"index.friend_requests_pending_pair_idx",
+		"index.friend_requests_recipient_status_idx",
+		"index.friend_requests_sender_status_idx",
+		"index.deck_shares_source_recipient_idx",
+		"index.deck_shares_recipient_status_idx",
+		"index.deck_shares_source_status_idx",
+		"trigger.social_settings_user_insert",
+		"trigger.social_friendship_delete",
+		"trigger.social_subscription_insert",
+		"trigger.social_subscription_revoke",
+		"trigger.sync_shared_deck_parent_update",
+		"trigger.sync_shared_notes_insert",
+		"trigger.sync_shared_notes_update",
+		"trigger.sync_shared_notes_delete",
+		"trigger.sync_shared_cards_insert",
+		"trigger.sync_shared_cards_update",
+		"trigger.sync_shared_cards_delete",
 	} {
 		if _, ok := objects[name]; !ok {
 			t.Errorf("study migration schema is missing %s", name)

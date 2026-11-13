@@ -208,3 +208,112 @@ export function getMe(): Promise<MeResponse> {
 export function patchMeSettings(settings: UserSettingsPatch): Promise<UserSettings> {
   return request('/me/settings', { method: 'PATCH', body: settings });
 }
+
+export interface Friend {
+  id: number;
+  email: string;
+  name: string;
+  friends_at: string;
+}
+
+export interface FriendRequest {
+  id: number;
+  user_id: number;
+  name: string;
+  email: string;
+  direction: 'incoming' | 'outgoing';
+  created_at: string;
+}
+
+export interface SocialSettings {
+  visible: boolean;
+  updated_at: string;
+}
+
+export interface SocialActivityDay {
+  user_id: number;
+  name: string;
+  day: string;
+  review_count: number;
+  streak_days: number;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  user_id: number;
+  name: string;
+  review_count: number;
+  learned_count: number;
+  streak_days: number;
+}
+
+export interface DeckShare {
+  id: number;
+  source_deck_id: number;
+  source_deck_name?: string;
+  source_owner_id?: number;
+  source_owner_name?: string;
+  recipient_id: number;
+  recipient_name?: string;
+  recipient_email?: string;
+  mode: 'copy' | 'subscribe';
+  status: 'active' | 'revoked' | 'unsubscribed' | 'complete';
+  copied_deck_id?: number;
+  role?: 'owner' | 'recipient';
+}
+
+export function getFriends(): Promise<Friend[]> {
+  return request('/friends');
+}
+
+export function getFriendRequests(): Promise<FriendRequest[]> {
+  return request('/friends/requests');
+}
+
+export function createFriendRequest(email: string): Promise<{ accepted: boolean }> {
+  return request('/friends/requests', { method: 'POST', body: { email } });
+}
+
+export function acceptFriendRequest(id: number): Promise<void> {
+  return request(`/friends/requests/${id}/accept`, { method: 'POST' });
+}
+
+export function declineFriendRequest(id: number): Promise<void> {
+  return request(`/friends/requests/${id}/decline`, { method: 'POST' });
+}
+
+export function cancelFriendRequest(id: number): Promise<void> {
+  return request(`/friends/requests/${id}/cancel`, { method: 'POST' });
+}
+
+export function removeFriend(id: number): Promise<void> {
+  return request(`/friends/${id}`, { method: 'DELETE' });
+}
+
+export function getSocialSettings(): Promise<SocialSettings> {
+  return request('/social/settings');
+}
+
+export function patchSocialSettings(visible: boolean): Promise<SocialSettings> {
+  return request('/social/settings', { method: 'PATCH', body: { visible } });
+}
+
+export function getSocialActivity(): Promise<SocialActivityDay[]> {
+  return request('/friends/activity');
+}
+
+export function getWeeklyLeaderboard(): Promise<LeaderboardEntry[]> {
+  return request('/friends/leaderboard?period=week');
+}
+
+export function getMyDeckShares(): Promise<DeckShare[]> {
+  return request('/friends/shares');
+}
+
+export function createDeckShare(deckId: number | string, recipientId: number, mode: DeckShare['mode']): Promise<DeckShare> {
+  return request(`/decks/${deckId}/shares`, { method: 'POST', body: { recipient_id: recipientId, mode } });
+}
+
+export function endDeckShare(deckId: number, shareId: number): Promise<void> {
+  return request(`/decks/${deckId}/shares/${shareId}`, { method: 'DELETE' });
+}

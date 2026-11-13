@@ -59,6 +59,32 @@ type Deck struct {
 	DeletionBatch      sql.NullString
 }
 
+type DeckShare struct {
+	ID           int64
+	SourceDeckID int64
+	RecipientID  int64
+	Mode         string
+	Status       string
+	CopiedDeckID sql.NullInt64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+type FriendRequest struct {
+	ID          int64
+	SenderID    int64
+	RecipientID int64
+	Status      string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type Friendship struct {
+	UserAID   int64
+	UserBID   int64
+	CreatedAt time.Time
+}
+
 type ImportBatch struct {
 	ID        string
 	UserID    int64
@@ -172,6 +198,20 @@ type Session struct {
 	ExpiresAt time.Time
 	UserAgent sql.NullString
 	CreatedAt time.Time
+}
+
+type SocialSetting struct {
+	UserID    int64
+	Visible   bool
+	UpdatedAt time.Time
+}
+
+type SocialSubscriptionTree struct {
+	ShareID       int64
+	RecipientID   int64
+	SourceOwnerID int64
+	DeckID        int64
+	ShareStatus   string
 }
 
 type SyncEvent struct {

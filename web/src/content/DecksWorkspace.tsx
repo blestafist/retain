@@ -98,7 +98,7 @@ function DeckTree({
                 <span className="block truncate">{deck.name}</span>
                 {counts && <span className="block truncate text-sm opacity-75">{t('deckCounts').replace('{notes}', String(counts.notes)).replace('{new}', String(counts.new)).replace('{learning}', String(counts.learning)).replace('{due}', String(counts.due))}</span>}
               </button>
-              <button
+              {deck.canEdit !== false && <button
                 type="button"
                 aria-label={`${t('deleteDeck')} ${deck.name}`}
                 title={t('deleteDeck')}
@@ -106,7 +106,7 @@ function DeckTree({
                 className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full text-on-surface-variant hover:bg-error-container hover:text-on-error-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >
                 <DeleteIcon />
-              </button>
+              </button>}
             </div>
             <DeckTree decks={deck.children} selectedId={selectedId} onSelect={onSelect} onDelete={onDelete} depth={depth + 1} />
           </li>
@@ -334,7 +334,7 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
           <aside className="space-y-4 rounded-3xl bg-surface-container-low p-4 expanded:p-5" aria-labelledby="deck-list-heading">
             <div className="flex items-center justify-between gap-3">
               <h2 id="deck-list-heading" className="m-0 text-xl font-semibold text-on-surface">{t('yourDecks')}</h2>
-              {decks.length > 0 && <Button type="button" variant="tonal" onClick={() => beginCreate('child')} disabled={!selectedDeck}>{t('addChildDeck')}</Button>}
+              {decks.length > 0 && <Button type="button" variant="tonal" onClick={() => beginCreate('child')} disabled={!selectedDeck || selectedDeck.canEdit === false}>{t('addChildDeck')}</Button>}
             </div>
             {decks.length === 0 ? <p className="m-0 py-3 text-on-surface-variant">{t('noDecks')}</p> : (
               <DeckTree decks={decks} selectedId={selectedId} onSelect={(deck) => { setSelectedId(String(deck.id)); setEditingNote(null); }} onDelete={removeDeck} />
@@ -386,17 +386,18 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                   <p className="m-0 text-sm text-on-surface-variant">{t('selectedDeck')}</p>
                   <h2 id="selected-deck-heading" className="m-0 break-words text-2xl font-semibold text-on-surface">{selectedDeck.name}</h2>
                   <p className="m-0 text-sm text-on-surface-variant">{pair ?? t('languagePairNotSet')}</p>
+                  {selectedDeck.canEdit === false && <p className="m-0 rounded-2xl bg-secondary-container p-3 text-sm text-on-secondary-container">{t('readOnlySubscription')}</p>}
                 </header>
 
-                <form onSubmit={submitDeckRename} className="grid gap-3 border-t border-outline-variant pt-4 sm:grid-cols-[minmax(0,1fr)_auto]" aria-label={t('renameDeck')}>
+                {selectedDeck.canEdit !== false && <form onSubmit={submitDeckRename} className="grid gap-3 border-t border-outline-variant pt-4 sm:grid-cols-[minmax(0,1fr)_auto]" aria-label={t('renameDeck')}>
                   <label className="grid gap-2 text-sm font-medium text-on-surface" htmlFor="rename-deck">
                     {t('deckName')}
                     <input id="rename-deck" name="name" required defaultValue={selectedDeck.name} key={String(selectedDeck.id) + selectedDeck.name} className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" />
                   </label>
                   <Button type="submit" className="self-end" disabled={patchDeckMutation.isPending}>{t(patchDeckMutation.isPending ? 'savingDeck' : 'saveDeck')}</Button>
-                </form>
-                {patchDeckMutation.isError && <p role="alert" className="m-0 text-error">{errorMessage(patchDeckMutation.error)}</p>}
-                {patchDeckMutation.isSuccess && <p role="status" className="m-0 text-on-surface-variant">{t('deckSaved')}</p>}
+                </form>}
+                {selectedDeck.canEdit !== false && patchDeckMutation.isError && <p role="alert" className="m-0 text-error">{errorMessage(patchDeckMutation.error)}</p>}
+                {selectedDeck.canEdit !== false && patchDeckMutation.isSuccess && <p role="status" className="m-0 text-on-surface-variant">{t('deckSaved')}</p>}
 
                 <div className="space-y-4 border-t border-outline-variant pt-5">
                   <h3 className="m-0 text-lg font-semibold text-on-surface">{t('notes')}</h3>
@@ -423,10 +424,10 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                                 {note.example && <p className="m-0 mt-2 break-words text-sm text-on-surface-variant">{note.example}</p>}
                                 {note.tags && note.tags.length > 0 && <p className="m-0 mt-2 break-words text-sm text-on-surface-variant">{t('tags')}: {note.tags.join(', ')}</p>}
                               </div>
-                              <div className="flex gap-2">
+                              {selectedDeck.canEdit !== false && <div className="flex gap-2">
                                 <Button type="button" variant="tonal" onClick={() => setEditingNote(note.id)}>{t('edit')}</Button>
                                 <button type="button" aria-label={`${t('deleteNote')} ${note.term}`} title={t('deleteNote')} onClick={() => removeNote(note)} className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full text-on-surface-variant hover:bg-error-container hover:text-on-error-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"><DeleteIcon /></button>
-                              </div>
+                              </div>}
                             </div>
                           )}
                         </li>
@@ -435,7 +436,7 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                   ) : <p className="m-0 text-on-surface-variant">{t('noNotes')}</p>)}
                   {(createNoteMutation.isError || deleteNoteMutation.isError) && <p role="alert" className="m-0 text-error">{errorMessage(createNoteMutation.error ?? deleteNoteMutation.error)}</p>}
 
-                  <details className="rounded-2xl bg-surface-container p-4">
+                  {selectedDeck.canEdit !== false && <details className="rounded-2xl bg-surface-container p-4">
                     <summary className="min-h-12 cursor-pointer content-center font-semibold text-on-surface">{t('addNote')}</summary>
                     <form ref={newNoteForm} onSubmit={submitNote} className="space-y-4 pt-4" aria-label={t('addNote')}>
                       <NoteFields prefix="new-note" onTermChange={setNewNoteTerm} />
@@ -444,11 +445,11 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                       )}
                       <Button type="submit" disabled={createNoteMutation.isPending}>{t(createNoteMutation.isPending ? 'addingNote' : 'addNote')}</Button>
                     </form>
-                  </details>
+                  </details>}
                 </div>
 
-                <ImportPanel decks={decks} selectedDeck={selectedDeck} />
-                {ownerId > 0 && (
+                {selectedDeck.canEdit !== false && <ImportPanel decks={decks} selectedDeck={selectedDeck} />}
+                {selectedDeck.canEdit !== false && ownerId > 0 && (
                   <DeckEnrichmentPanel
                     ownerId={ownerId}
                     deckId={selectedDeck.id}

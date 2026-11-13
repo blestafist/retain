@@ -32,6 +32,29 @@ afterEach(() => {
 });
 
 describe('DecksWorkspace', () => {
+  it('does not expose edit or delete controls for subscribed source decks', async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/v1/decks') return jsonResponse([{
+        id: 77, owner_id: 8, can_edit: false, name: 'A friend’s deck', parent_id: null,
+        lang_target: 'de', lang_native: 'pl', reverse_cards: false, children: [],
+      }]);
+      if (url === '/api/v1/decks/77/notes') return jsonResponse([{ id: 770, term: 'Wort', translation: 'word' }]);
+      if (url === '/api/v1/llm/status') return jsonResponse({ enabled: false });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    renderWorkspace();
+
+    await screen.findByRole('heading', { name: 'A friend’s deck' });
+    await screen.findByText(t('readOnlySubscription'));
+    await screen.findByText('Wort');
+    expect(screen.queryByRole('form', { name: t('renameDeck') })).toBeNull();
+    expect(screen.queryByText(t('addNote'), { selector: 'summary' })).toBeNull();
+    expect(screen.queryByRole('button', { name: t('edit') })).toBeNull();
+    expect(screen.queryByRole('button', { name: `${t('deleteNote')} Wort` })).toBeNull();
+    expect(screen.queryByRole('button', { name: `${t('deleteDeck')} A friend’s deck` })).toBeNull();
+  });
+
   it('uses explicit AI suggestions when adding words and manages deck content', async () => {
     const user = userEvent.setup();
     let deckName = 'German course';

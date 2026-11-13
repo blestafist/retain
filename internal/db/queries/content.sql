@@ -30,9 +30,32 @@ RETURNING *;
 SELECT * FROM decks
 WHERE id = ? AND owner_id = ? AND deleted_at IS NULL;
 
+-- name: GetReadableDeck :one
+SELECT decks.* FROM decks
+WHERE decks.id = sqlc.arg(deck_id)
+  AND decks.deleted_at IS NULL
+  AND (
+      decks.owner_id = sqlc.arg(user_id)
+      OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = sqlc.arg(user_id)
+            AND access.deck_id = decks.id
+            AND access.share_status = 'active'
+      )
+  );
+
 -- name: ListDecksByOwner :many
 SELECT * FROM decks
-WHERE owner_id = ? AND deleted_at IS NULL
+WHERE decks.deleted_at IS NULL
+  AND (
+      decks.owner_id = sqlc.arg(owner_id)
+      OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = sqlc.arg(owner_id)
+            AND access.deck_id = decks.id
+            AND access.share_status = 'active'
+      )
+  )
 ORDER BY parent_id, position, id;
 
 -- name: ListChildDecks :many
@@ -203,17 +226,33 @@ RETURNING *;
 SELECT notes.* FROM notes
 JOIN decks ON decks.id = notes.deck_id
 WHERE notes.id = ?
-  AND decks.owner_id = ?
   AND notes.deleted_at IS NULL
-  AND decks.deleted_at IS NULL;
+  AND decks.deleted_at IS NULL
+  AND (
+      decks.owner_id = sqlc.arg(owner_id)
+      OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = sqlc.arg(owner_id)
+            AND access.deck_id = decks.id
+            AND access.share_status = 'active'
+      )
+  );
 
 -- name: ListNotesByDeck :many
 SELECT notes.* FROM notes
 JOIN decks ON decks.id = notes.deck_id
 WHERE notes.deck_id = ?
-  AND decks.owner_id = ?
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
+  AND (
+      decks.owner_id = sqlc.arg(owner_id)
+      OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = sqlc.arg(owner_id)
+            AND access.deck_id = decks.id
+            AND access.share_status = 'active'
+      )
+  )
 ORDER BY notes.id;
 
 -- name: UpdateNote :one

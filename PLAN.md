@@ -83,7 +83,7 @@ The frontend is built into `web/dist` and embedded into the Go binary via `embed
 - **Full analytics** (section 5).
 - **Offline PWA**: review without a connection, sync when back online.
 - **Push reminders**: "You have 34 cards to review" at a chosen time.
-- **Shared decks**: only owners can share, and only with accepted friends; sharing a deck includes its descendant subtree. `copy` makes an independent, editable copy with fresh per-user progress. `subscribe` gives read-only access to the source notes, live content updates, and separate per-user cards/progress; subscribers cannot re-share. The owner can revoke a subscription and the recipient can unsubscribe. Revocation/removing a friendship removes live subscription access and syncs tombstones to the recipient; progress remains private on the server and is available again only if access is re-granted. Independent copies remain unaffected.
+- **Shared decks**: only owners can share, and only with accepted friends; sharing a deck includes its descendant subtree. A source deck can be shared with each friend only once. `copy` makes an independent, editable copy with fresh per-user progress. `subscribe` gives read-only access to the source notes, live content updates, and separate per-user cards/progress; subscribers cannot re-share. The owner can revoke a subscription and the recipient can unsubscribe. Revocation/removing a friendship removes live subscription access and syncs tombstones to the recipient; progress remains private on the server, and an ended subscription cannot be reactivated. Independent copies remain unaffected.
 - **Friends**: explicit friend requests by email with acceptance/decline and removal. Do not reveal whether an arbitrary email has an account. Activity and leaderboard stats are visible only to accepted friends when the user opts in; show aggregate counts only, never terms, examples, deck names, or individual review details. Weekly leaderboards use Monday 00:00–Monday 00:00 UTC, count active reviews and newly matured forward notes (first stability ≥ 21 days), show current streak, and rank by reviews then learned notes then streak.
 - **Leeches**: cards with 8+ lapses are flagged; the LLM suggests a mnemonic and an extra example.
 - **Search and filters** by term, tag, card state.
@@ -534,6 +534,7 @@ GET    /social/settings
 PATCH  /social/settings          {visible}
 GET    /decks/{id}/shares
 DELETE /decks/{id}/shares/{share_id}  revoke (owner) or unsubscribe (recipient)
+GET    /friends/shares          shares where the user is owner or recipient
 
 GET    /push/vapid-key
 POST   /push/subscribe | DELETE /push/subscribe

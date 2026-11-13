@@ -85,6 +85,8 @@ type Counts struct {
 // Deck is the public deck representation. Children is always a JSON array.
 type Deck struct {
 	ID                 int64     `json:"id"`
+	OwnerID            int64     `json:"owner_id"`
+	CanEdit            bool      `json:"can_edit"`
 	ParentID           *int64    `json:"parent_id"`
 	Name               string    `json:"name"`
 	Description        *string   `json:"description"`
@@ -166,6 +168,7 @@ func (s *Service) List(ctx context.Context, ownerID int64) ([]Deck, error) {
 	children := make(map[int64][]int64, len(rows))
 	for _, row := range rows {
 		deck := publicDeck(row)
+		deck.CanEdit = row.OwnerID == ownerID
 		deck.Counts = &Counts{}
 		deck.Children = []Deck{}
 		nodes[deck.ID] = &deck
@@ -230,7 +233,7 @@ func (s *Service) List(ctx context.Context, ownerID int64) ([]Deck, error) {
 
 	rootIDs := make([]int64, 0, len(rows))
 	for _, row := range rows {
-		if !row.ParentID.Valid {
+		if !row.ParentID.Valid || nodes[row.ParentID.Int64] == nil {
 			rootIDs = append(rootIDs, row.ID)
 		}
 	}
@@ -463,6 +466,8 @@ func nullableString(value *string) sql.NullString {
 func publicDeck(deck gen.Deck) Deck {
 	return Deck{
 		ID:                 deck.ID,
+		OwnerID:            deck.OwnerID,
+		CanEdit:            true,
 		ParentID:           int64Pointer(deck.ParentID),
 		Name:               deck.Name,
 		Description:        stringPointer(deck.Description),

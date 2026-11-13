@@ -6,6 +6,8 @@ export type NativeLanguage = 'pl' | 'ru';
 
 export interface DeckNode {
   id: DeckId;
+  ownerId?: number;
+  canEdit?: boolean;
   name: string;
   parentId: DeckId | null;
   langTarget?: TargetLanguage;
@@ -169,6 +171,8 @@ export function decodeDeckTree(value: unknown): DeckNode[] {
         id: item.id,
         name: item.name,
         parentId,
+        ...(typeof item.owner_id === 'number' ? { ownerId: item.owner_id } : {}),
+        ...(typeof item.can_edit === 'boolean' ? { canEdit: item.can_edit } : {}),
         langTarget: optionalTargetLanguage(item.lang_target ?? item.langTarget),
         langNative: optionalNativeLanguage(item.lang_native ?? item.langNative),
         reverseCards: typeof item.reverse_cards === 'boolean' ? item.reverse_cards : false,

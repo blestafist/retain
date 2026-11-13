@@ -83,8 +83,8 @@ func (q *Queries) GetReviewLog(ctx context.Context, id string) (ReviewLog, error
 }
 
 const getStudyAnswerCard = `-- name: GetStudyAnswerCard :one
-WITH RECURSIVE card_deck_path(depth, id, parent_id, lang_target, lang_native, visited) AS (
-    SELECT 0, deck.id, deck.parent_id, deck.lang_target, deck.lang_native, printf(',%d,', deck.id)
+WITH RECURSIVE card_deck_path(depth, id, parent_id, lang_target, lang_native, visited, owner_id) AS (
+    SELECT 0, deck.id, deck.parent_id, deck.lang_target, deck.lang_native, printf(',%d,', deck.id), deck.owner_id
     FROM cards
     JOIN notes ON notes.id = cards.note_id
     JOIN decks AS deck ON deck.id = notes.deck_id
@@ -93,13 +93,21 @@ WITH RECURSIVE card_deck_path(depth, id, parent_id, lang_target, lang_native, vi
       AND cards.deleted_at IS NULL
       AND notes.deleted_at IS NULL
       AND deck.deleted_at IS NULL
-      AND deck.owner_id = cards.user_id
+      AND (
+          deck.owner_id = cards.user_id
+          OR EXISTS (
+              SELECT 1 FROM social_subscription_tree AS access
+              WHERE access.recipient_id = cards.user_id
+                AND access.deck_id = deck.id
+                AND access.share_status = 'active'
+          )
+      )
     UNION ALL
     SELECT child.depth + 1, parent.id, parent.parent_id, parent.lang_target, parent.lang_native,
-           child.visited || printf('%d,', parent.id)
+           child.visited || printf('%d,', parent.id), parent.owner_id
     FROM card_deck_path AS child
     JOIN decks AS parent ON parent.id = child.parent_id
-    WHERE parent.owner_id = ?2
+    WHERE parent.owner_id = child.owner_id
       AND parent.deleted_at IS NULL
       AND instr(child.visited, printf(',%d,', parent.id)) = 0
 )
@@ -132,7 +140,15 @@ WHERE cards.id = ?1
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND deck.deleted_at IS NULL
-  AND deck.owner_id = cards.user_id
+   AND (
+       deck.owner_id = cards.user_id
+       OR EXISTS (
+           SELECT 1 FROM social_subscription_tree AS access
+           WHERE access.recipient_id = cards.user_id
+             AND access.deck_id = deck.id
+             AND access.share_status = 'active'
+       )
+   )
 `
 
 type GetStudyAnswerCardParams struct {
@@ -186,7 +202,15 @@ WHERE cards.id = ?1
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
-  AND decks.owner_id = cards.user_id
+  AND (
+      decks.owner_id = cards.user_id
+      OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = cards.user_id
+            AND access.deck_id = decks.id
+            AND access.share_status = 'active'
+      )
+  )
 `
 
 type GetStudyCardParams struct {
@@ -222,8 +246,17 @@ func (q *Queries) GetStudyCard(ctx context.Context, arg GetStudyCardParams) (Car
 }
 
 const getStudyDeck = `-- name: GetStudyDeck :one
-SELECT id FROM decks
-WHERE id = ?1 AND owner_id = ?2 AND deleted_at IS NULL
+SELECT decks.id FROM decks
+WHERE decks.id = ?1 AND decks.deleted_at IS NULL
+  AND (
+      decks.owner_id = ?2
+      OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = ?2
+            AND access.deck_id = decks.id
+            AND access.share_status = 'active'
+      )
+  )
 `
 
 type GetStudyDeckParams struct {
@@ -364,15 +397,20 @@ func (q *Queries) ListActiveReviewLogs(ctx context.Context, arg ListActiveReview
 }
 
 const listStudyCards = `-- name: ListStudyCards :many
-WITH RECURSIVE selected_decks(id) AS (
-    SELECT id FROM decks
-    WHERE owner_id = ?1
-      AND deleted_at IS NULL
-      AND (?3 IS NULL OR id = ?3)
+WITH RECURSIVE selected_decks(id, owner_id) AS (
+    SELECT decks.id, decks.owner_id FROM decks
+      WHERE decks.deleted_at IS NULL
+      AND (decks.owner_id = ?1 OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = ?1
+            AND access.deck_id = decks.id
+            AND access.share_status = 'active'
+      ))
+      AND (?3 IS NULL OR decks.id = ?3)
     UNION
-    SELECT child.id FROM decks AS child
+    SELECT child.id, child.owner_id FROM decks AS child
     JOIN selected_decks AS parent ON child.parent_id = parent.id
-    WHERE child.owner_id = ?1 AND child.deleted_at IS NULL
+    WHERE child.owner_id = parent.owner_id AND child.deleted_at IS NULL
 )
 SELECT cards.id AS card_id,
        cards.note_id,
@@ -399,7 +437,15 @@ WHERE cards.user_id = ?1
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
-  AND decks.owner_id = cards.user_id
+   AND (
+       decks.owner_id = cards.user_id
+       OR EXISTS (
+           SELECT 1 FROM social_subscription_tree AS access
+           WHERE access.recipient_id = cards.user_id
+             AND access.deck_id = decks.id
+             AND access.share_status = 'active'
+       )
+   )
   AND (cards.state = 0 OR cards.due <= ?2)
   AND (?3 IS NULL OR decks.id IN (SELECT id FROM selected_decks))
 ORDER BY CASE cards.state
@@ -499,7 +545,15 @@ WHERE cards.user_id = ?1
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
-  AND decks.owner_id = cards.user_id
+   AND (
+       decks.owner_id = cards.user_id
+       OR EXISTS (
+           SELECT 1 FROM social_subscription_tree AS access
+           WHERE access.recipient_id = cards.user_id
+             AND access.deck_id = decks.id
+             AND access.share_status = 'active'
+       )
+   )
   AND trim(CASE
       WHEN cards.direction = 'reverse' THEN notes.term
       ELSE notes.translation
@@ -611,7 +665,15 @@ WHERE cards.id = ?12
       WHERE notes.id = cards.note_id
         AND notes.deleted_at IS NULL
         AND decks.deleted_at IS NULL
-        AND decks.owner_id = cards.user_id
+        AND (
+            decks.owner_id = cards.user_id
+            OR EXISTS (
+                SELECT 1 FROM social_subscription_tree AS access
+                WHERE access.recipient_id = cards.user_id
+                  AND access.deck_id = decks.id
+                  AND access.share_status = 'active'
+            )
+        )
   )
 RETURNING id, note_id, user_id, direction, state, due, stability, difficulty, elapsed_days, scheduled_days, step, reps, lapses, last_review, suspended, is_leech, updated_at, deleted_at, deletion_batch
 `
