@@ -75,7 +75,10 @@ WHERE cards.id = ?1
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
-  AND decks.owner_id = cards.user_id
+  AND (decks.owner_id = cards.user_id OR EXISTS (
+      SELECT 1 FROM social_subscription_tree AS access
+      WHERE access.recipient_id = cards.user_id AND access.deck_id = decks.id AND access.share_status = 'active'
+  ))
 `
 
 type GetStatsCardCurveCardParams struct {
@@ -138,7 +141,10 @@ WHERE cards.user_id = ?1
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
-  AND decks.owner_id = cards.user_id
+  AND (decks.owner_id = cards.user_id OR EXISTS (
+      SELECT 1 FROM social_subscription_tree AS access
+      WHERE access.recipient_id = cards.user_id AND access.deck_id = decks.id AND access.share_status = 'active'
+  ))
 GROUP BY bucket, sort_order
 ORDER BY sort_order
 `
@@ -184,7 +190,10 @@ WHERE cards.user_id = ?2
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
-  AND decks.owner_id = cards.user_id
+  AND (decks.owner_id = cards.user_id OR EXISTS (
+      SELECT 1 FROM social_subscription_tree AS access
+      WHERE access.recipient_id = cards.user_id AND access.deck_id = decks.id AND access.share_status = 'active'
+  ))
   AND CAST(strftime('%s', substr(cards.due, 1, 19)) AS INTEGER) >= CAST(?3 AS INTEGER)
   AND CAST(strftime('%s', substr(cards.due, 1, 19)) AS INTEGER) < CAST(?4 AS INTEGER)
 `
@@ -231,7 +240,10 @@ WITH card_metrics AS (
       AND cards.deleted_at IS NULL
       AND notes.deleted_at IS NULL
       AND decks.deleted_at IS NULL
-      AND decks.owner_id = cards.user_id
+      AND (decks.owner_id = cards.user_id OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = cards.user_id AND access.deck_id = decks.id AND access.share_status = 'active'
+      ))
 ), log_metrics AS (
      SELECT CAST(COUNT(*) AS INTEGER) AS total_reviews,
             CAST(COALESCE(SUM(logs.duration_ms), 0) AS INTEGER) AS total_duration_ms,
@@ -362,7 +374,10 @@ WITH RECURSIVE ranked_past_reviews AS (
       AND cards.deleted_at IS NULL
       AND notes.deleted_at IS NULL
       AND decks.deleted_at IS NULL
-      AND decks.owner_id = cards.user_id
+      AND (decks.owner_id = cards.user_id OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = cards.user_id AND access.deck_id = decks.id AND access.share_status = 'active'
+      ))
 )
 SELECT id, state, stability, difficulty,
        due, elapsed_days, scheduled_days,
@@ -485,7 +500,10 @@ WHERE cards.user_id = ?1
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
-  AND decks.owner_id = cards.user_id
+  AND (decks.owner_id = cards.user_id OR EXISTS (
+      SELECT 1 FROM social_subscription_tree AS access
+      WHERE access.recipient_id = cards.user_id AND access.deck_id = decks.id AND access.share_status = 'active'
+  ))
 GROUP BY bucket, sort_order
 ORDER BY sort_order
 `
@@ -531,7 +549,10 @@ WHERE cards.user_id = ?1
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
-  AND decks.owner_id = cards.user_id
+  AND (decks.owner_id = cards.user_id OR EXISTS (
+      SELECT 1 FROM social_subscription_tree AS access
+      WHERE access.recipient_id = cards.user_id AND access.deck_id = decks.id AND access.share_status = 'active'
+  ))
 GROUP BY cards.state
 ORDER BY cards.state
 `
@@ -573,15 +594,21 @@ func (q *Queries) GetStatsStateDistribution(ctx context.Context, userID int64) (
 
 const getStatsVocabularyGrowth = `-- name: GetStatsVocabularyGrowth :many
 WITH RECURSIVE deck_path AS (
-    SELECT id AS deck_id, id AS current_id, parent_id, lang_target
+    SELECT decks.id AS deck_id, decks.id AS current_id, decks.parent_id,
+           decks.lang_target, decks.owner_id AS owner_id
     FROM decks
-    WHERE owner_id = ?1 AND deleted_at IS NULL
+    WHERE decks.deleted_at IS NULL
+      AND (decks.owner_id = ?1 OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = ?1
+            AND access.deck_id = decks.id AND access.share_status = 'active'
+      ))
     UNION
     SELECT deck_path.deck_id AS deck_id, parent.id AS current_id, parent.parent_id AS parent_id,
-           parent.lang_target AS lang_target
+           parent.lang_target AS lang_target, parent.owner_id AS owner_id
     FROM deck_path
     JOIN decks AS parent ON parent.id = deck_path.parent_id
-    WHERE parent.owner_id = ?1
+    WHERE parent.owner_id = deck_path.owner_id
       AND parent.deleted_at IS NULL
       AND deck_path.lang_target IS NULL
 ), deck_language AS (
@@ -603,7 +630,10 @@ WHERE cards.user_id = ?1
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
-  AND decks.owner_id = cards.user_id
+  AND (decks.owner_id = cards.user_id OR EXISTS (
+      SELECT 1 FROM social_subscription_tree AS access
+      WHERE access.recipient_id = cards.user_id AND access.deck_id = decks.id AND access.share_status = 'active'
+  ))
    AND logs.undone = 0
   AND projection.stability_after >= 21
    AND logs.reviewed_at <= CAST(?2 AS TEXT)
@@ -739,7 +769,10 @@ WHERE cards.id = ?1
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
-  AND decks.owner_id = cards.user_id
+  AND (decks.owner_id = cards.user_id OR EXISTS (
+      SELECT 1 FROM social_subscription_tree AS access
+      WHERE access.recipient_id = cards.user_id AND access.deck_id = decks.id AND access.share_status = 'active'
+  ))
    AND logs.undone = 0
 ORDER BY logs.reviewed_at, logs.id
 `
@@ -808,7 +841,10 @@ WITH ranked AS (
       AND cards.deleted_at IS NULL
       AND notes.deleted_at IS NULL
       AND decks.deleted_at IS NULL
-      AND decks.owner_id = cards.user_id
+  AND (decks.owner_id = cards.user_id OR EXISTS (
+      SELECT 1 FROM social_subscription_tree AS access
+      WHERE access.recipient_id = cards.user_id AND access.deck_id = decks.id AND access.share_status = 'active'
+  ))
 )
 SELECT deck_id, deck_name, AVG(stability) AS median_stability
 FROM ranked
@@ -856,7 +892,10 @@ WHERE cards.user_id = ?1
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
-  AND decks.owner_id = cards.user_id
+  AND (decks.owner_id = cards.user_id OR EXISTS (
+      SELECT 1 FROM social_subscription_tree AS access
+      WHERE access.recipient_id = cards.user_id AND access.deck_id = decks.id AND access.share_status = 'active'
+  ))
 ORDER BY cards.lapses DESC, cards.id
 LIMIT 20
 `

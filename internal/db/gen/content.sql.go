@@ -631,9 +631,17 @@ const getNote = `-- name: GetNote :one
 SELECT notes.id, notes.deck_id, notes.term, notes.term_key, notes.translation, notes.transcription, notes.example, notes.example_translation, notes.notes, notes.tags, notes.alternatives, notes.fields, notes.external_id, notes.import_batch_id, notes.created_at, notes.updated_at, notes.deleted_at, notes.deletion_batch FROM notes
 JOIN decks ON decks.id = notes.deck_id
 WHERE notes.id = ?
-  AND decks.owner_id = ?
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
+  AND (
+      decks.owner_id = ?2
+      OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = ?2
+            AND access.deck_id = decks.id
+            AND access.share_status = 'active'
+      )
+  )
 `
 
 type GetNoteParams struct {
@@ -743,6 +751,53 @@ func (q *Queries) GetNoteByTermKey(ctx context.Context, arg GetNoteByTermKeyPara
 		&i.Fields,
 		&i.ExternalID,
 		&i.ImportBatchID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletionBatch,
+	)
+	return i, err
+}
+
+const getReadableDeck = `-- name: GetReadableDeck :one
+SELECT decks.id, decks.owner_id, decks.parent_id, decks.name, decks.description, decks.position, decks.lang_target, decks.lang_native, decks.reverse_cards, decks.wrong_article_rating, decks.color_seed, decks.source, decks.external_id, decks.expected_count, decks.source_deck_id, decks.created_at, decks.updated_at, decks.deleted_at, decks.deletion_batch FROM decks
+WHERE decks.id = ?1
+  AND decks.deleted_at IS NULL
+  AND (
+      decks.owner_id = ?2
+      OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = ?2
+            AND access.deck_id = decks.id
+            AND access.share_status = 'active'
+      )
+  )
+`
+
+type GetReadableDeckParams struct {
+	DeckID int64
+	UserID int64
+}
+
+func (q *Queries) GetReadableDeck(ctx context.Context, arg GetReadableDeckParams) (Deck, error) {
+	row := q.db.QueryRowContext(ctx, getReadableDeck, arg.DeckID, arg.UserID)
+	var i Deck
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerID,
+		&i.ParentID,
+		&i.Name,
+		&i.Description,
+		&i.Position,
+		&i.LangTarget,
+		&i.LangNative,
+		&i.ReverseCards,
+		&i.WrongArticleRating,
+		&i.ColorSeed,
+		&i.Source,
+		&i.ExternalID,
+		&i.ExpectedCount,
+		&i.SourceDeckID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -929,7 +984,16 @@ func (q *Queries) ListChildDecks(ctx context.Context, arg ListChildDecksParams) 
 
 const listDecksByOwner = `-- name: ListDecksByOwner :many
 SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch FROM decks
-WHERE owner_id = ? AND deleted_at IS NULL
+WHERE decks.deleted_at IS NULL
+  AND (
+      decks.owner_id = ?1
+      OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = ?1
+            AND access.deck_id = decks.id
+            AND access.share_status = 'active'
+      )
+  )
 ORDER BY parent_id, position, id
 `
 
@@ -1032,9 +1096,17 @@ const listNotesByDeck = `-- name: ListNotesByDeck :many
 SELECT notes.id, notes.deck_id, notes.term, notes.term_key, notes.translation, notes.transcription, notes.example, notes.example_translation, notes.notes, notes.tags, notes.alternatives, notes.fields, notes.external_id, notes.import_batch_id, notes.created_at, notes.updated_at, notes.deleted_at, notes.deletion_batch FROM notes
 JOIN decks ON decks.id = notes.deck_id
 WHERE notes.deck_id = ?
-  AND decks.owner_id = ?
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL
+  AND (
+      decks.owner_id = ?2
+      OR EXISTS (
+          SELECT 1 FROM social_subscription_tree AS access
+          WHERE access.recipient_id = ?2
+            AND access.deck_id = decks.id
+            AND access.share_status = 'active'
+      )
+  )
 ORDER BY notes.id
 `
 

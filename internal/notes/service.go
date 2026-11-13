@@ -137,7 +137,7 @@ func (s *Service) List(ctx context.Context, ownerID, deckID int64) ([]Note, erro
 		return nil, ErrInternal
 	}
 	queries := s.database.Queries()
-	if _, err := queries.GetDeck(ctx, gen.GetDeckParams{ID: deckID, OwnerID: ownerID}); errors.Is(err, sql.ErrNoRows) {
+	if _, err := queries.GetReadableDeck(ctx, gen.GetReadableDeckParams{DeckID: deckID, UserID: ownerID}); errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	} else if err != nil {
 		return nil, ErrInternal

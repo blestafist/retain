@@ -83,8 +83,8 @@ The frontend is built into `web/dist` and embedded into the Go binary via `embed
 - **Full analytics** (section 5).
 - **Offline PWA**: review without a connection, sync when back online.
 - **Push reminders**: "You have 34 cards to review" at a chosen time.
-- **Shared decks**: share a deck with a friend (copy or subscribe to updates).
-- **Friends**: activity feed and weekly leaderboard (reviews, words learned, streak).
+- **Shared decks**: only owners can share, and only with accepted friends; sharing a deck includes its descendant subtree. A source deck can be shared with each friend only once. `copy` makes an independent, editable copy with fresh per-user progress. `subscribe` gives read-only access to the source notes, live content updates, and separate per-user cards/progress; subscribers cannot re-share. The owner can revoke a subscription and the recipient can unsubscribe. Revocation/removing a friendship removes live subscription access and syncs tombstones to the recipient; progress remains private on the server, and an ended subscription cannot be reactivated. Independent copies remain unaffected.
+- **Friends**: explicit friend requests by email with acceptance/decline and removal. Do not reveal whether an arbitrary email has an account. Activity and leaderboard stats are visible only to accepted friends when the user opts in; show aggregate counts only, never terms, examples, deck names, or individual review details. Weekly leaderboards use Monday 00:00–Monday 00:00 UTC, count active reviews and newly matured forward notes (first stability ≥ 21 days), show current streak, and rank by reviews then learned notes then streak.
 - **Leeches**: cards with 8+ lapses are flagged; the LLM suggests a mnemonic and an extra example.
 - **Search and filters** by term, tag, card state.
 
@@ -336,7 +336,13 @@ decks(
   created_at, updated_at, deleted_at NULL, deletion_batch TEXT NULL)
    UNIQUE(owner_id, source, external_id), INDEX(parent_id)
 
-deck_shares(deck_id → decks, user_id → users, mode TEXT /* copy|subscribe */)
+friend_requests(id PK, sender_id → users, recipient_id → users,
+  status TEXT /* pending|accepted|declined|cancelled */, created_at, updated_at)
+friendships(user_a_id → users, user_b_id → users, created_at) -- canonical user_a_id < user_b_id
+social_settings(user_id PK → users, visible BOOL DEFAULT 0)
+deck_shares(id PK, source_deck_id → decks, recipient_id → users,
+  mode TEXT /* copy|subscribe */, status TEXT /* active|revoked|unsubscribed|complete */,
+  copied_deck_id → decks NULL, created_at, updated_at)
 
 notes(                               -- a word or phrase
   id INTEGER PK, deck_id → decks,
@@ -519,6 +525,16 @@ GET    /stats/distribution
 
 GET    /friends/activity
 GET    /friends/leaderboard?period=week
+GET    /friends
+POST   /friends/requests         {email}
+GET    /friends/requests         incoming and outgoing requests
+POST   /friends/requests/{id}/accept | /decline
+DELETE /friends/{user_id}
+GET    /social/settings
+PATCH  /social/settings          {visible}
+GET    /decks/{id}/shares
+DELETE /decks/{id}/shares/{share_id}  revoke (owner) or unsubscribe (recipient)
+GET    /friends/shares          shares where the user is owner or recipient
 
 GET    /push/vapid-key
 POST   /push/subscribe | DELETE /push/subscribe
@@ -669,7 +685,7 @@ Each stage is a complete, verifiable chunk; the next one starts once the previou
 | **6. LLM** | Client, prompts, auto-fill, deck enrichment (jobs), "ask", mnemonics, synonym check, cache and limits |
 | **7. Analytics** | Stats endpoints + charts |
 | **8. PWA and offline** | Service worker, IndexedDB, ts-fsrs, `/sync`, sync tests |
-| **9. Social** | Deck sharing, activity, leaderboard |
+| **9. Social** | Accepted-friend management, copy/live read-only deck sharing, opt-in aggregate activity and UTC weekly leaderboard |
 | **10. Reminders** | Web Push, worker |
 | **11. Deployment** | Docker, cloudflared, Litestream → R2, backup restore check |
 

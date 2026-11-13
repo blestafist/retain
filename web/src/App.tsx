@@ -15,6 +15,7 @@ import { synchronizeOfflineData } from './offline/sync';
 
 const DevShowcase = import.meta.env.DEV ? lazy(() => import('./dev/Showcase')) : null;
 const StatsPage = lazy(async () => ({ default: (await import('./stats/StatsPage')).StatsPage }));
+const FriendsPage = lazy(async () => ({ default: (await import('./social/FriendsPage')).FriendsPage }));
 
 export function isDevShowcase(dev: boolean, pathname: string) {
   return dev && pathname === '/dev/ui';
@@ -146,6 +147,7 @@ function AuthenticatedApp() {
                 <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/">{t('decksWorkspace')}</a>
                 <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/study">{t('study')}</a>
                 <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/stats" aria-current={window.location.pathname === '/stats' ? 'page' : undefined}>{t('stats')}</a>
+                <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/friends" aria-current={window.location.pathname === '/friends' ? 'page' : undefined}>{t('friends')}</a>
                 <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/settings">{t('settings')}</a>
                 {meQuery.data.user.is_admin && <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/admin">{t('admin')}</a>}
               </nav>
@@ -179,6 +181,10 @@ function AuthenticatedApp() {
             ) : window.location.pathname === '/stats' ? (
               <Suspense fallback={<p role="status" className="auth-loading">{t('statsLoading')}</p>}>
                 <StatsPage timezone={meQuery.data.settings.timezone} />
+              </Suspense>
+            ) : window.location.pathname === '/friends' ? (
+              <Suspense fallback={<p role="status" className="auth-loading">{t('socialLoading')}</p>}>
+                <FriendsPage userId={meQuery.data.user.id} />
               </Suspense>
             ) : (
               <DecksWorkspace ownerId={meQuery.data.user.id} />

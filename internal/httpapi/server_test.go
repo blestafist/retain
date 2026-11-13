@@ -173,7 +173,8 @@ func TestNewHandlerServesInviteSignupShellAndNotFoundForUnknownPaths(t *testing.
 		{name: "study shell", path: "/study", wantStatus: http.StatusOK, wantBody: "<main>Retain</main>", wantContentTy: "text/html; charset=utf-8"},
 		{name: "settings shell", path: "/settings", wantStatus: http.StatusOK, wantBody: "<main>Retain</main>", wantContentTy: "text/html; charset=utf-8"},
 		{name: "stats shell", path: "/stats", wantStatus: http.StatusOK, wantBody: "<main>Retain</main>", wantContentTy: "text/html; charset=utf-8"},
-		{name: "unknown route", path: "/friends", wantStatus: http.StatusNotFound},
+		{name: "friends shell", path: "/friends", wantStatus: http.StatusOK, wantBody: "<main>Retain</main>", wantContentTy: "text/html; charset=utf-8"},
+		{name: "unknown route", path: "/unknown-route", wantStatus: http.StatusNotFound},
 		{name: "missing asset", path: "/assets/missing-a1b2c3d4.js", wantStatus: http.StatusNotFound},
 	}
 

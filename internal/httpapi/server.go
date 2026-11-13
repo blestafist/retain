@@ -16,6 +16,7 @@ import (
 	"github.com/pestit/retain/internal/llmservice"
 	"github.com/pestit/retain/internal/llmstore"
 	"github.com/pestit/retain/internal/notes"
+	"github.com/pestit/retain/internal/social"
 	"github.com/pestit/retain/internal/stats"
 	"github.com/pestit/retain/internal/study"
 	syncservice "github.com/pestit/retain/internal/sync"
@@ -86,6 +87,7 @@ func newHandler(publicOrigin string, database databasePinger, authService *auth.
 			statsService = stats.NewService(contentDB, appClock)
 		}
 		RegisterStatsRoutes(mux, authService, statsService)
+		RegisterSocialRoutes(mux, authService, social.NewService(contentDB, appClock))
 		if registerLLMRoutes {
 			llmStore := options.LLMStore
 			if llmStore == nil {
@@ -132,7 +134,7 @@ func frontendHandler(frontend fs.FS) http.Handler {
 	files := http.FileServer(http.FS(generated))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/")
-		if r.URL.Path == "/" || r.URL.Path == "/signup" || r.URL.Path == "/study" || r.URL.Path == "/settings" || r.URL.Path == "/admin" || r.URL.Path == "/stats" {
+		if r.URL.Path == "/" || r.URL.Path == "/signup" || r.URL.Path == "/study" || r.URL.Path == "/settings" || r.URL.Path == "/admin" || r.URL.Path == "/stats" || r.URL.Path == "/friends" {
 			name = "index.html"
 		}
 		if name == ".gitkeep" || !fs.ValidPath(name) {
