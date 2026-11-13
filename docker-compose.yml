@@ -1,0 +1,116 @@
+name: retain
+
+services:
+  retain:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: retain:local
+    restart: unless-stopped
+    init: true
+    user: "65532:65532"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    environment:
+      DATABASE_PATH: /data/retain.db
+      HTTP_ADDR: :8080
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN in .env}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-cx/gpt-6-luna}
+      LLM_MODEL_FAST: ${LLM_MODEL_FAST:-}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-30s}
+      LLM_DAILY_LIMIT_PER_USER: ${LLM_DAILY_LIMIT_PER_USER:-300}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+    volumes:
+      - type: bind
+        source: "${DATA_DIR:-./data}"
+        target: /data
+    expose:
+      - "8080"
+    depends_on:
+      litestream:
+        condition: service_healthy
+    networks:
+      - backend
+      - egress
+    stop_grace_period: 20s
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.11.0
+    restart: unless-stopped
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${TUNNEL_TOKEN:?Set TUNNEL_TOKEN in .env}
+    depends_on:
+      retain:
+        condition: service_started
+    networks:
+      - backend
+      - egress
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  litestream:
+    image: litestream/litestream:0.5.18
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - /etc/litestream-entrypoint.sh
+    user: "65532:65532"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    environment:
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?Set R2_ACCOUNT_ID in .env}
+      R2_BUCKET: ${R2_BUCKET:?Set R2_BUCKET in .env}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?Set R2_ACCESS_KEY_ID in .env}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?Set R2_SECRET_ACCESS_KEY in .env}
+    volumes:
+      - type: bind
+        source: "${DATA_DIR:-./data}"
+        target: /data
+      - ./deploy/litestream.yml:/etc/litestream.yml:ro
+      - ./deploy/litestream-entrypoint.sh:/etc/litestream-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /data/retain.db"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 40s
+    networks:
+      - backend
+      - egress
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  backend:
+    internal: true
+  egress: {}

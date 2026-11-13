@@ -3,6 +3,7 @@ module github.com/pestit/retain
 go 1.23.0
 
 require (
+	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/caarlos0/env/v11 v11.3.1
 	github.com/google/uuid v1.6.0
 	github.com/open-spaced-repetition/go-fsrs/v3 v3.3.1
@@ -15,7 +16,6 @@ require (
 )
 
 require (
-	github.com/SherClockHolmes/webpush-go v1.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
