@@ -610,31 +610,6 @@ func readMigrationSchemaObjects(t *testing.T, ctx context.Context, database *sql
 	return objects
 }
 
-func assertLatestMigrationSchema(t *testing.T, ctx context.Context, database *sql.DB) {
-	t.Helper()
-	objects := readMigrationSchemaObjects(t, ctx, database)
-	wantNames := []string{
-		"index.sessions_expires_at_idx",
-		"index.decks_owner_parent_idx", "index.decks_parent_id_idx",
-		"index.import_batches_user_created_idx", "index.notes_deck_id_idx",
-		"index.cards_user_due_idx", "index.cards_note_id_idx",
-		"trigger.decks_deletion_markers_insert", "trigger.decks_deletion_markers_update",
-		"trigger.notes_deletion_markers_insert", "trigger.notes_deletion_markers_update",
-		"trigger.cards_deletion_markers_insert", "trigger.cards_deletion_markers_update",
-		"trigger.decks_soft_delete_cascade", "trigger.decks_restore_cascade",
-		"trigger.notes_soft_delete_cards", "trigger.notes_restore_cards",
-		"trigger.decks_hard_delete_descendants",
-	}
-	if len(objects) != len(wantNames) {
-		t.Errorf("latest schema has %d explicit indexes/triggers, want %d: %#v", len(objects), len(wantNames), objects)
-	}
-	for _, name := range wantNames {
-		if _, ok := objects[name]; !ok {
-			t.Errorf("latest schema is missing %s", name)
-		}
-	}
-}
-
 func assertStudyMigrationSchema(t *testing.T, ctx context.Context, database *sql.DB) {
 	t.Helper()
 	objects := readMigrationSchemaObjects(t, ctx, database)
