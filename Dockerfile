@@ -1,19 +1,23 @@
-# Build the PWA into the directory embedded by web/embed.go.
-FROM node:22-alpine AS web-build
+# syntax=docker/dockerfile:1
+
+# Frontend assets are platform-independent; build them on the native builder.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web-build
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-# Build a static Linux binary so the runtime image needs no libc or shell.
-FROM golang:1.26-alpine AS go-build
+# Cross-compile the static binary for each published image architecture.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS go-build
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . ./
 COPY --from=web-build /src/web/dist ./web/dist
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -buildvcs=false -ldflags="-s -w" -o /out/retain ./cmd/retain
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -buildvcs=false -ldflags="-s -w" -o /out/retain ./cmd/retain
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=go-build /out/retain /app/retain
