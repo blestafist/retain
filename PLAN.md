@@ -654,7 +654,7 @@ Mobile-first; swipe left = Again, right = Good.
 
 ## 15. Deployment (home server + Cloudflare Tunnel)
 
-- **Build/release**: GitHub Actions builds the multi-stage Docker image (`node` builds `web/dist` → `golang` builds the static binary → `distroless/static`) and publishes version + `latest` tags to GHCR when a stable GitHub Release is published. A merged PR whose head commit has a `vMAJOR.MINOR.PATCH` Git tag automatically gets a draft Release.
+- **Build/release**: GitHub Actions builds the multi-stage Docker image (`node` builds `web/dist` → `golang` builds the static binary → `distroless/static`) and publishes version + `latest` tags to GHCR when a stable GitHub Release is published. Manually run `Draft release` from `main` with a `MAJOR.MINOR.PATCH` version. It snapshots the current `main` commit, requires its latest push CI run to have succeeded, rejects existing tags/releases, and creates a `vMAJOR.MINOR.PATCH` tag and draft Release with generated notes. Release preparation is serialized. Review and publish the draft manually to trigger image publication; no extra token is needed. A failed draft creation may leave its tag behind; inspect it before manually removing it or choosing another version.
 - **docker-compose**:
   - `retain` — pull `ghcr.io/blestafist/retain:latest` (no local build); persist SQLite under `/data` on the host; publish `127.0.0.1:8080:8080` only, so the existing host-managed Cloudflare Tunnel can reach it without exposing a public host port.
 - **Cloudflare Tunnel**: use the existing host `cloudflared` systemd service; configure its Public Hostname route `https://retain.<domain>` → `http://127.0.0.1:8080`. Do not run a second connector in Compose.

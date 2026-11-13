@@ -51,16 +51,14 @@ Verify `https://retain.<your-domain>/healthz`. The Tunnel hostname must match `P
 
 ## Updates and local data
 
-The release process is tag-driven:
+Prepare releases manually after merging changes:
 
-1. Put a `vMAJOR.MINOR.PATCH` Git tag on the PR head commit and push the tag before merging the PR:
+1. Wait for the latest push CI run on `main` to succeed.
+2. Open **Actions → Draft release → Run workflow**, select `main`, and enter a version such as `1.2.3` (without `v`).
+3. The workflow snapshots the current `main` commit, checks its CI result and that the version is unused, then creates the `v1.2.3` tag and a draft GitHub Release with generated notes. Its run summary links to the draft. If `main` advanced and its CI is still running, wait and run again.
+4. Review the notes and **publish the draft manually** on GitHub. This triggers the release workflow, which builds the image for `linux/amd64` and `linux/arm64` and pushes both `v1.2.3` and `latest` to GHCR. Creating a draft alone does not publish an image. No additional token is required.
 
-   ```sh
-   git tag -a v1.2.3 "$(git rev-parse HEAD)" -m "Release v1.2.3"
-   git push origin v1.2.3
-   ```
-2. After that tagged PR is merged to `main`, GitHub Actions automatically creates a draft GitHub Release.
-3. Publish the draft when ready. The release workflow builds the image for `linux/amd64` and `linux/arm64` and pushes both `v1.2.3` and `latest` to GHCR.
+Existing versions are rejected, not overwritten. If tag creation succeeded but draft creation failed, the tag remains: inspect it before manually removing it or choosing another version. Running this workflow on a branch other than `main` skips release preparation.
 
 No release image is built on the home server. After publishing a release, roll it out with:
 
