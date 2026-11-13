@@ -23,6 +23,7 @@ export default defineConfig({
       workbox: {
         cleanupOutdatedCaches: true,
         navigateFallback: '/index.html',
+        importScripts: ['/push-sw.js'],
         globPatterns: ['**/*.css', '**/*.html', '**/*.js', '**/*.svg', '**/*.woff2'],
         runtimeCaching: [{
           urlPattern: ({ url, request }) => request.method === 'GET' && url.pathname === '/schema/retain-v1.json',

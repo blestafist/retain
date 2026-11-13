@@ -161,6 +161,21 @@ type Note struct {
 	DeletionBatch      sql.NullString
 }
 
+type PushReminderSend struct {
+	UserID      int64
+	ReminderDay string
+	AttemptedAt time.Time
+}
+
+type PushSubscription struct {
+	ID        int64
+	UserID    int64
+	Endpoint  string
+	P256dh    string
+	Auth      string
+	CreatedAt time.Time
+}
+
 type ReviewLog struct {
 	ID                  string
 	CardID              int64

@@ -3,6 +3,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	webpush "github.com/SherClockHolmes/webpush-go"
 )
 
 func TestLoad(t *testing.T) {
@@ -133,6 +135,53 @@ func TestLoad(t *testing.T) {
 			}
 			if got.PublicOrigin != tt.wantOrigin {
 				t.Errorf("PublicOrigin = %q, want %q", got.PublicOrigin, tt.wantOrigin)
+			}
+		})
+	}
+}
+
+func TestLoadPushConfiguration(t *testing.T) {
+	privateKey, publicKey, err := webpush.GenerateVAPIDKeys()
+	if err != nil {
+		t.Fatalf("GenerateVAPIDKeys(): %v", err)
+	}
+	environment := map[string]string{
+		"VAPID_PUBLIC_KEY": publicKey, "VAPID_PRIVATE_KEY": privateKey,
+		"VAPID_SUBJECT": "mailto:admin@example.test",
+	}
+	cfg, err := load(environment)
+	if err != nil {
+		t.Fatalf("load valid push config: %v", err)
+	}
+	if !cfg.PushEnabled || cfg.VAPIDSubject != "mailto:admin@example.test" {
+		t.Fatalf("push enabled = %t, subject = %q; want enabled and normalized subject", cfg.PushEnabled, cfg.VAPIDSubject)
+	}
+
+	tests := []struct {
+		name string
+		edit func(map[string]string)
+		want string
+	}{
+		{name: "partial key set", edit: func(env map[string]string) { delete(env, "VAPID_PRIVATE_KEY") }, want: "must be set together"},
+		{name: "invalid public key", edit: func(env map[string]string) { env["VAPID_PUBLIC_KEY"] = "not-a-key" }, want: "base64url encoded"},
+		{name: "mismatched key pair", edit: func(env map[string]string) {
+			otherPrivate, _, keyErr := webpush.GenerateVAPIDKeys()
+			if keyErr != nil {
+				t.Fatalf("GenerateVAPIDKeys(): %v", keyErr)
+			}
+			env["VAPID_PRIVATE_KEY"] = otherPrivate
+		}, want: "do not form a valid pair"},
+		{name: "invalid subject", edit: func(env map[string]string) { env["VAPID_SUBJECT"] = "file:///secret" }, want: "VAPID_SUBJECT"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := make(map[string]string, len(environment))
+			for key, value := range environment {
+				input[key] = value
+			}
+			test.edit(input)
+			if _, err := load(input); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("load() error = %v; want substring %q", err, test.want)
 			}
 		})
 	}

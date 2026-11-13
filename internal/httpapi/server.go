@@ -16,6 +16,7 @@ import (
 	"github.com/pestit/retain/internal/llmservice"
 	"github.com/pestit/retain/internal/llmstore"
 	"github.com/pestit/retain/internal/notes"
+	"github.com/pestit/retain/internal/push"
 	"github.com/pestit/retain/internal/social"
 	"github.com/pestit/retain/internal/stats"
 	"github.com/pestit/retain/internal/study"
@@ -35,6 +36,7 @@ type HandlerOptions struct {
 	LLMStore           *llmstore.Store
 	LLMService         *llmservice.Service
 	AskService         *llmservice.AskService
+	PushService        *push.Service
 	MnemonicService    *llmservice.MnemonicService
 	SynonymService     *llmservice.SynonymService
 	DeckEnrichService  *llmservice.DeckEnrichService
@@ -88,6 +90,11 @@ func newHandler(publicOrigin string, database databasePinger, authService *auth.
 		}
 		RegisterStatsRoutes(mux, authService, statsService)
 		RegisterSocialRoutes(mux, authService, social.NewService(contentDB, appClock))
+		pushService := options.PushService
+		if pushService == nil {
+			pushService = push.NewService(contentDB, push.Config{})
+		}
+		RegisterPushRoutes(mux, authService, pushService)
 		if registerLLMRoutes {
 			llmStore := options.LLMStore
 			if llmStore == nil {

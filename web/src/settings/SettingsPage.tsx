@@ -5,6 +5,7 @@ import { meQueryKey } from '../auth/session';
 import { updateCachedSettings } from '../offline/database';
 import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
+import { PushSubscriptionControl } from './PushSubscriptionControl';
 
 interface SettingsDraft {
   newPerDay: string;
@@ -391,6 +392,7 @@ export function SettingsPage({ settings }: { settings: UserSettings }) {
                 {showValidation && errors.reminderTime && <span id="reminder-time-error" className="text-sm text-error">{errors.reminderTime}</span>}
               </div>
             )}
+            <PushSubscriptionControl reminderConfigured={settings.reminder_time !== null} />
           </div>
         </section>
 

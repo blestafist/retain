@@ -25,6 +25,7 @@ import (
 	"github.com/pestit/retain/internal/llmservice"
 	"github.com/pestit/retain/internal/llmstore"
 	"github.com/pestit/retain/internal/notes"
+	"github.com/pestit/retain/internal/push"
 	"github.com/pestit/retain/internal/stats"
 	"github.com/pestit/retain/internal/study"
 	"github.com/pestit/retain/web"
@@ -109,6 +110,11 @@ func run(logger *slog.Logger) error {
 	noteService := notes.NewService(database, appClock)
 	studyService := study.NewService(database, appClock)
 	statsService := stats.NewService(database, appClock)
+	pushConfig := push.Config{
+		VAPIDPublicKey: cfg.VAPIDPublicKey, VAPIDPrivateKey: cfg.VAPIDPrivateKey,
+		VAPIDSubject: cfg.VAPIDSubject,
+	}
+	pushService := push.NewService(database, pushConfig)
 	llmStore := llmstore.New(database.Queries())
 
 	var generator interface {
@@ -169,12 +175,32 @@ func run(logger *slog.Logger) error {
 
 	handlerOptions := httpapi.HandlerOptions{
 		StatsService: statsService,
+		PushService:  pushService,
 		LLMStore:     llmStore, LLMService: llmService, AskService: askService,
 		MnemonicService: mnemonicService, SynonymService: synonymService,
 		DeckEnrichService: deckEnrichService, AdminService: adminService,
 	}
 	if worker != nil {
 		handlerOptions.JobWorkerAvailable = workerAvailable.Load
+	}
+	var reminderWorkerDone chan struct{}
+	if cfg.PushEnabled {
+		reminderWorker := push.NewReminderWorker(database, appClock, push.NewWebPushSender(pushConfig), logger)
+		reminderWorkerDone = make(chan struct{})
+		go func() {
+			defer close(reminderWorkerDone)
+			reminderWorker.Run(ctx)
+		}()
+		defer func() {
+			if reminderWorkerDone == nil {
+				return
+			}
+			select {
+			case <-reminderWorkerDone:
+			case <-time.After(shutdownTimeout):
+				logger.Warn("push reminder worker did not shut down before timeout", "component", "push")
+			}
+		}()
 	}
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,

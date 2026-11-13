@@ -317,3 +317,28 @@ export function createDeckShare(deckId: number | string, recipientId: number, mo
 export function endDeckShare(deckId: number, shareId: number): Promise<void> {
   return request(`/decks/${deckId}/shares/${shareId}`, { method: 'DELETE' });
 }
+
+export interface PushVapidKey {
+  public_key: string;
+}
+
+export interface PushSubscriptionInput {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
+function isPushVapidKey(value: unknown): value is PushVapidKey {
+  return isRecord(value) && typeof value.public_key === 'string' && value.public_key.length > 0;
+}
+
+export function getPushVapidKey(): Promise<PushVapidKey> {
+  return request('/push/vapid-key', {}, isPushVapidKey);
+}
+
+export function createPushSubscription(subscription: PushSubscriptionInput): Promise<void> {
+  return request('/push/subscribe', { method: 'POST', body: subscription });
+}
+
+export function deletePushSubscription(endpoint: string): Promise<void> {
+  return request('/push/subscribe', { method: 'DELETE', body: { endpoint } });
+}

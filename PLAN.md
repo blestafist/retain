@@ -391,6 +391,8 @@ jobs(id TEXT PK, user_id → users, kind TEXT /* deck_enrich */, payload TEXT,
   error TEXT NULL, created_at, updated_at)
 
 push_subscriptions(id PK, user_id → users, endpoint UNIQUE, p256dh, auth, created_at)
+push_reminder_sends(user_id → users, reminder_day DATE, attempted_at,
+  PRIMARY KEY(user_id, reminder_day)) -- one reminder batch per user's local calendar day
 ```
 
 Cards are tied to `user_id`: when subscribed to a friend's deck, notes are shared but progress is per user.
@@ -537,7 +539,8 @@ DELETE /decks/{id}/shares/{share_id}  revoke (owner) or unsubscribe (recipient)
 GET    /friends/shares          shares where the user is owner or recipient
 
 GET    /push/vapid-key
-POST   /push/subscribe | DELETE /push/subscribe
+POST   /push/subscribe          {endpoint, keys: {p256dh, auth}}
+DELETE /push/subscribe          {endpoint}
 ```
 
 After registration, the user logs in. The invite URL is a same-origin relative URL.
@@ -564,7 +567,9 @@ The initial sync must also deliver currently active notes and cards that existed
 ## 11. Reminders
 
 - A background goroutine (`time.Ticker` once a minute) finds users whose `reminder_time` has arrived in their time zone and who have cards due → Web Push.
-- At most one push per day; subscriptions for which the push service returns 410 Gone are deleted.
+- The reminder is a generic notification such as “You have 34 cards to review”; it never contains words, examples, or deck names. Send it to all of the user's active browser/device subscriptions in one daily batch.
+- At most one batch is attempted per user's **local calendar day**. Atomically insert `(user_id, reminder_day)` into `push_reminder_sends` before sending; a network/provider failure still consumes that day's attempt, preventing duplicate notifications after retries or restart. Skip users with no subscriptions or no due cards.
+- Subscriptions for which the push service returns 410 Gone are deleted; other delivery failures are logged without secrets or subscription payloads and do not delete the subscription.
 - Push requests are outbound, so Cloudflare Tunnel doesn't interfere.
 - On iOS, Web Push works only for a PWA added to the home screen (iOS 16.4+) — the UI says so.
 
