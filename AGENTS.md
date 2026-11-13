@@ -20,7 +20,7 @@ Only the plan exists so far. Next step: stage 0 "Skeleton" (`PLAN.md`, section 1
 
 - **Backend**: Go 1.23+, `net/http`, SQLite (`modernc.org/sqlite`, no CGO, WAL), sqlc, goose, `go-fsrs/v3`, `openai-go`, `log/slog`.
 - **Frontend**: TypeScript, React, Vite, TanStack Query, Dexie, `ts-fsrs`, Tailwind, Radix Primitives, Motion, `@material/material-color-utilities`, `vite-plugin-pwa`.
-- **Deployment**: a single binary with the embedded frontend (`embed.FS`); Docker Compose: `retain` + `cloudflared` + `litestream` → Cloudflare R2.
+- **Deployment**: a single binary with the embedded frontend (`embed.FS`); Docker Compose runs `retain` with local persistent SQLite, while the existing host `cloudflared` systemd service reaches it through a loopback-only port binding.
 
 ## Structure
 
@@ -93,7 +93,7 @@ Run `make lint test` before saying "done". If something fails, say so — don't 
 - Passwords: argon2id. Sessions: cookie `HttpOnly; Secure; SameSite=Lax`; the DB stores a hash of the token.
 - State-changing requests verify the `Origin` header.
 - Every data query is filtered by `user_id` / deck permissions. A test for accessing someone else's resource is required.
-- Secrets (`LLM_API_KEY`, `TUNNEL_TOKEN`, VAPID, R2) live only in `.env` and never enter the repo. The config example is `.env.example`, without values.
+- App secrets (`LLM_API_KEY`, VAPID) live only in `.env` and never enter the repo. Existing Cloudflare Tunnel credentials are managed by the host service and never enter the repo. The config example is `.env.example`, without values.
 - The client IP comes from `CF-Connecting-IP`. Service ports are never exposed externally.
 
 ## Tests

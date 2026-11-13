@@ -50,8 +50,7 @@ A web app for learning foreign vocabulary with spaced repetition (FSRS), learnin
 | Charts | Recharts (or uPlot for heavy charts) | Curves, heatmap, forecast |
 | PWA | `vite-plugin-pwa` (Workbox) | Service worker, manifest, caching |
 | Text-to-speech | Web Speech API (`speechSynthesis`) | Free, no server needed |
-| Deployment | Docker Compose: app + **cloudflared** + **Litestream** | Home server with no open ports |
-| Backups | Litestream → **Cloudflare R2** | Off-site copy |
+| Deployment | Docker Compose: app; existing host **cloudflared** systemd service | Home server; local SQLite, app port bound to loopback only |
 | CI | GitHub Actions: `go test`, `golangci-lint`, `vitest`, image build | |
 
 The frontend is built into `web/dist` and embedded into the Go binary via `embed.FS`, so we deploy **a single binary**.
@@ -615,7 +614,7 @@ retain/
 │   └── import/                   # sample exports for adapter tests
 ├── sqlc.yaml
 ├── Dockerfile
-├── docker-compose.yml            # retain + cloudflared + litestream
+├── docker-compose.yml            # retain; loopback port and local data volume
 ├── Makefile                      # dev, gen, test, lint, build
 ├── AGENTS.md
 └── PLAN.md
@@ -657,9 +656,8 @@ Mobile-first; swipe left = Again, right = Good.
 
 - **Build**: multi-stage Dockerfile — `node` builds `web/dist` → `golang` builds the binary with `CGO_ENABLED=0` → `distroless/static`.
 - **docker-compose**:
-  - `retain` — listens only on the internal Docker network (`:8080`), **no ports exposed**; volume `/data/retain.db`.
-  - `cloudflared` — `tunnel run` with `TUNNEL_TOKEN`, ingress `https://retain.<domain>` → `http://retain:8080`.
-  - `litestream` — continuous DB replication to **Cloudflare R2** (must be off-site: disks die).
+  - `retain` — persist SQLite under `/data` on the host; publish `127.0.0.1:8080:8080` only, so the existing host-managed Cloudflare Tunnel can reach it without exposing a public host port.
+- **Cloudflare Tunnel**: use the existing host `cloudflared` systemd service; configure its Public Hostname route `https://retain.<domain>` → `http://127.0.0.1:8080`. Do not run a second connector in Compose.
 - **Cloudflare**:
   - TLS terminates at Cloudflare; `Secure` cookies work because the client sees HTTPS.
   - The real client IP comes from `CF-Connecting-IP` (trusted, since the tunnel is the only entry point).
@@ -668,9 +666,9 @@ Mobile-first; swipe left = Again, right = Good.
   - Limits: request body up to 100 MB (imports fit), 100 s response timeout (SSE uses heartbeats).
   - Do **not** enable Cloudflare Access on the app itself — it breaks PWA and push; we have our own invite-based auth.
 - **SQLite**: `journal_mode=WAL`, `busy_timeout=5000`, `foreign_keys=ON`, a single write connection.
-- **Operations**: `/healthz`, logs to stdout, optional `/metrics` (Prometheus). Litestream takes daily snapshots and retains snapshots plus their WAL history for 30 days. On startup, a missing local database is restored with a full integrity check; if no replica exists, startup fails closed rather than initializing an empty database. Run `make deploy-restore-check` manually after provisioning and periodically thereafter.
+- **Operations**: `/healthz`, logs to stdout, optional `/metrics` (Prometheus). SQLite stays on the host bind mount at `DATA_DIR`; there is no cloud replication or remote database restore.
 - **Memory target**: optimize the server Go process for approximately 50 MiB RSS during idle and ordinary operation. This is a goal, not a hard limit; build/browser memory is excluded, and temporary peaks during heavy operations (e.g. large imports) are acceptable.
-- **Secrets** (`TUNNEL_TOKEN`, `LLM_API_KEY`, VAPID keys, R2 keys) — in `.env`, never in the repo.
+- **Secrets** (`LLM_API_KEY`, VAPID keys) — in `.env`, never in the repo. The existing systemd-managed Tunnel keeps its own credentials outside this Compose stack.
 - First admin: `retain admin create --email ...`.
 
 ---
@@ -692,7 +690,7 @@ Each stage is a complete, verifiable chunk; the next one starts once the previou
 | **8. PWA and offline** | Service worker, IndexedDB, ts-fsrs, `/sync`, sync tests |
 | **9. Social** | Accepted-friend management, copy/live read-only deck sharing, opt-in aggregate activity and UTC weekly leaderboard |
 | **10. Reminders** | Web Push, worker |
-| **11. Deployment** | Docker, cloudflared, Litestream → R2, backup restore check |
+| **11. Deployment** | Docker, existing systemd Cloudflare Tunnel, local persistent SQLite |
 
 **MVP = stages 0–4 + 11.** **v1.0 = all stages.**
 
