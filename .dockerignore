@@ -1,0 +1,16 @@
+.git
+.github
+.idea
+.vscode
+.env
+.env.*
+!.env.example
+bin
+data
+dist
+**/node_modules
+web/dist
+coverage.*
+*.db
+*.db-shm
+*.db-wal

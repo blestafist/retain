@@ -668,7 +668,7 @@ Mobile-first; swipe left = Again, right = Good.
   - Limits: request body up to 100 MB (imports fit), 100 s response timeout (SSE uses heartbeats).
   - Do **not** enable Cloudflare Access on the app itself — it breaks PWA and push; we have our own invite-based auth.
 - **SQLite**: `journal_mode=WAL`, `busy_timeout=5000`, `foreign_keys=ON`, a single write connection.
-- **Operations**: `/healthz`, logs to stdout, optional `/metrics` (Prometheus). Restore: `litestream restore` — test it manually once.
+- **Operations**: `/healthz`, logs to stdout, optional `/metrics` (Prometheus). Litestream takes daily snapshots and retains snapshots plus their WAL history for 30 days. On startup, a missing local database is restored with a full integrity check; if no replica exists, startup fails closed rather than initializing an empty database. Run `make deploy-restore-check` manually after provisioning and periodically thereafter.
 - **Memory target**: optimize the server Go process for approximately 50 MiB RSS during idle and ordinary operation. This is a goal, not a hard limit; build/browser memory is excluded, and temporary peaks during heavy operations (e.g. large imports) are acceptable.
 - **Secrets** (`TUNNEL_TOKEN`, `LLM_API_KEY`, VAPID keys, R2 keys) — in `.env`, never in the repo.
 - First admin: `retain admin create --email ...`.
