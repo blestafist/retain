@@ -1,0 +1,64 @@
+name: Draft tagged release
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  draft-release:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout only trusted main; never execute code from the PR head.
+      - name: Check out main and tags
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Find a version tag on the merged PR head
+        id: version
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          matches=()
+          while IFS= read -r tag; do
+            [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+            if [[ "$(git rev-parse "$tag^{commit}")" == "$PR_HEAD_SHA" ]]; then
+              matches+=("$tag")
+            fi
+          done < <(git tag --list 'v*')
+
+          if (( ${#matches[@]} > 1 )); then
+            echo "Multiple release tags point to PR head $PR_HEAD_SHA: ${matches[*]}" >&2
+            exit 1
+          fi
+          if (( ${#matches[@]} == 1 )); then
+            echo "tag=${matches[0]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "No vMAJOR.MINOR.PATCH tag on the merged PR head; skipping draft release."
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create draft GitHub Release
+        if: steps.version.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; leaving it unchanged."
+            exit 0
+          fi
+          gh release create "$RELEASE_TAG" \
+            --draft \
+            --verify-tag \
+            --title "$RELEASE_TAG" \
+            --generate-notes

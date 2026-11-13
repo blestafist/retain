@@ -50,8 +50,8 @@ A web app for learning foreign vocabulary with spaced repetition (FSRS), learnin
 | Charts | Recharts (or uPlot for heavy charts) | Curves, heatmap, forecast |
 | PWA | `vite-plugin-pwa` (Workbox) | Service worker, manifest, caching |
 | Text-to-speech | Web Speech API (`speechSynthesis`) | Free, no server needed |
-| Deployment | Docker Compose: app; existing host **cloudflared** systemd service | Home server; local SQLite, app port bound to loopback only |
-| CI | GitHub Actions: `go test`, `golangci-lint`, `vitest`, image build | |
+| Deployment | Compose pulls release image from **GHCR**; existing host **cloudflared** systemd service | Home server; local SQLite, app port bound to loopback only |
+| CI | GitHub Actions: tests, lint, Docker image build; publish release image to GHCR | |
 
 The frontend is built into `web/dist` and embedded into the Go binary via `embed.FS`, so we deploy **a single binary**.
 
@@ -654,9 +654,9 @@ Mobile-first; swipe left = Again, right = Good.
 
 ## 15. Deployment (home server + Cloudflare Tunnel)
 
-- **Build**: multi-stage Dockerfile — `node` builds `web/dist` → `golang` builds the binary with `CGO_ENABLED=0` → `distroless/static`.
+- **Build/release**: GitHub Actions builds the multi-stage Docker image (`node` builds `web/dist` → `golang` builds the static binary → `distroless/static`) and publishes version + `latest` tags to GHCR when a stable GitHub Release is published. A merged PR whose head commit has a `vMAJOR.MINOR.PATCH` Git tag automatically gets a draft Release.
 - **docker-compose**:
-  - `retain` — persist SQLite under `/data` on the host; publish `127.0.0.1:8080:8080` only, so the existing host-managed Cloudflare Tunnel can reach it without exposing a public host port.
+  - `retain` — pull `ghcr.io/blestafist/retain:latest` (no local build); persist SQLite under `/data` on the host; publish `127.0.0.1:8080:8080` only, so the existing host-managed Cloudflare Tunnel can reach it without exposing a public host port.
 - **Cloudflare Tunnel**: use the existing host `cloudflared` systemd service; configure its Public Hostname route `https://retain.<domain>` → `http://127.0.0.1:8080`. Do not run a second connector in Compose.
 - **Cloudflare**:
   - TLS terminates at Cloudflare; `Secure` cookies work because the client sees HTTPS.
@@ -690,7 +690,7 @@ Each stage is a complete, verifiable chunk; the next one starts once the previou
 | **8. PWA and offline** | Service worker, IndexedDB, ts-fsrs, `/sync`, sync tests |
 | **9. Social** | Accepted-friend management, copy/live read-only deck sharing, opt-in aggregate activity and UTC weekly leaderboard |
 | **10. Reminders** | Web Push, worker |
-| **11. Deployment** | Docker, existing systemd Cloudflare Tunnel, local persistent SQLite |
+| **11. Deployment** | GHCR release image, existing systemd Cloudflare Tunnel, local persistent SQLite |
 
 **MVP = stages 0–4 + 11.** **v1.0 = all stages.**
 

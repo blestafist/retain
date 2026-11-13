@@ -59,7 +59,7 @@ jobs:
           PUBLIC_ORIGIN: https://retain.example.test
         run: |
           docker compose config --quiet
-          docker compose build retain
+          docker build --tag retain:ci .
 
       - name: Verify embedded frontend assets
         run: |

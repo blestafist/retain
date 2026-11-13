@@ -20,7 +20,7 @@ Only the plan exists so far. Next step: stage 0 "Skeleton" (`PLAN.md`, section 1
 
 - **Backend**: Go 1.23+, `net/http`, SQLite (`modernc.org/sqlite`, no CGO, WAL), sqlc, goose, `go-fsrs/v3`, `openai-go`, `log/slog`.
 - **Frontend**: TypeScript, React, Vite, TanStack Query, Dexie, `ts-fsrs`, Tailwind, Radix Primitives, Motion, `@material/material-color-utilities`, `vite-plugin-pwa`.
-- **Deployment**: a single binary with the embedded frontend (`embed.FS`); Docker Compose runs `retain` with local persistent SQLite, while the existing host `cloudflared` systemd service reaches it through a loopback-only port binding.
+- **Deployment**: GitHub Actions builds the binary and release image; Docker Compose pulls `ghcr.io/blestafist/retain:latest` and runs it with local persistent SQLite, while the existing host `cloudflared` systemd service reaches it through a loopback-only port binding.
 
 ## Structure
 

@@ -2,10 +2,8 @@ name: retain
 
 services:
   retain:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: retain:local
+    image: ghcr.io/blestafist/retain:latest
+    pull_policy: always
     restart: unless-stopped
     init: true
     user: "65532:65532"
