@@ -67,7 +67,7 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 			t.Errorf("close migrated database: %v", err)
 		}
 	})
-	assertMigrationVersion(t, ctx, database.SQL, 10)
+	assertMigrationVersion(t, ctx, database.SQL, 11)
 	assertOriginalContentRowsEqual(t, ctx, database.SQL, wantRows)
 	assertInitialSyncSnapshot(t, ctx, database.SQL, ids)
 	assertMigrationDeletionBatch(t, ctx, database.SQL, "decks", ids.archivedDeck,
@@ -136,7 +136,7 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 	if _, err := migrations.Up(ctx); err != nil {
 		t.Fatalf("reapply later migrations after safe down refusal: %v", err)
 	}
-	assertMigrationVersion(t, ctx, database.SQL, 10)
+	assertMigrationVersion(t, ctx, database.SQL, 11)
 	assertOriginalContentRowsEqual(t, ctx, database.SQL, wantRows)
 	assertStudyMigrationSchema(t, ctx, database.SQL)
 	assertMigrationDeletionBatch(t, ctx, database.SQL, "decks", ids.archivedDeck,
@@ -613,8 +613,8 @@ func readMigrationSchemaObjects(t *testing.T, ctx context.Context, database *sql
 func assertStudyMigrationSchema(t *testing.T, ctx context.Context, database *sql.DB) {
 	t.Helper()
 	objects := readMigrationSchemaObjects(t, ctx, database)
-	if len(objects) != 60 {
-		t.Errorf("latest schema has %d explicit indexes/triggers, want 60: %#v", len(objects), objects)
+	if len(objects) != 61 {
+		t.Errorf("latest schema has %d explicit indexes/triggers, want 61: %#v", len(objects), objects)
 	}
 	for _, name := range []string{
 		"index.cards_id_user_id_idx",
@@ -659,6 +659,7 @@ func assertStudyMigrationSchema(t *testing.T, ctx context.Context, database *sql
 		"trigger.sync_shared_cards_insert",
 		"trigger.sync_shared_cards_update",
 		"trigger.sync_shared_cards_delete",
+		"index.push_subscriptions_user_idx",
 	} {
 		if _, ok := objects[name]; !ok {
 			t.Errorf("study migration schema is missing %s", name)
@@ -669,6 +670,8 @@ func assertStudyMigrationSchema(t *testing.T, ctx context.Context, database *sql
 		"review_log_projection": {"review_id", "card_id", "user_id", "state_before", "stability_after", "difficulty_after", "scheduled_days"},
 		"sync_events":           {"seq", "owner_id", "owner_scope_id", "entity_type", "entity_id", "operation", "payload", "created_at"},
 		"sync_owner_scopes":     {"scope_id", "user_id"},
+		"push_subscriptions":    {"id", "user_id", "endpoint", "p256dh", "auth", "created_at"},
+		"push_reminder_sends":   {"user_id", "reminder_day", "attempted_at"},
 	} {
 		rows, err := database.QueryContext(ctx, "PRAGMA table_info("+table+")")
 		if err != nil {
