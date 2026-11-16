@@ -98,6 +98,11 @@ describe('DecksWorkspace', () => {
     renderWorkspace();
 
     await screen.findByRole('heading', { name: 'German course' });
+    const renameSummary = screen.getByText(t('renameDeck'), { selector: 'summary' });
+    const renameDetails = renameSummary.closest('details');
+    expect(renameDetails?.open).toBe(false);
+    await user.click(renameSummary);
+    expect(renameDetails?.open).toBe(true);
     const renameForm = screen.getByRole('form', { name: t('renameDeck') });
     await user.clear(within(renameForm).getByLabelText(t('deckName')));
     await user.type(within(renameForm).getByLabelText(t('deckName')), 'German lessons');

@@ -94,10 +94,10 @@ function DeckTree({
                 type="button"
                 aria-pressed={selected}
                 onClick={() => onSelect(deck)}
-                className={`min-h-12 min-w-0 flex-1 rounded-2xl px-4 text-start text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${selected ? 'bg-secondary-container text-on-secondary-container' : 'hover:bg-surface-container-high'}`}
+                className={`deck-tree-item min-h-12 min-w-0 flex-1 rounded-xl px-3 text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${selected ? 'is-selected' : ''}`}
               >
                 <span className="block truncate">{deck.name}</span>
-                {counts && <span className="block truncate text-sm opacity-75">{t('deckCounts').replace('{notes}', String(counts.notes)).replace('{new}', String(counts.new)).replace('{learning}', String(counts.learning)).replace('{due}', String(counts.due))}</span>}
+                {counts && <span className="block truncate text-sm">{t('deckCounts').replace('{notes}', String(counts.notes)).replace('{new}', String(counts.new)).replace('{learning}', String(counts.learning)).replace('{due}', String(counts.due))}</span>}
               </button>
               {deck.canEdit !== false && <button
                 type="button"
@@ -314,17 +314,14 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
 
   return (
     <section className="deck-workspace mx-auto w-full max-w-6xl space-y-6 py-8" aria-labelledby="decks-workspace-heading">
-      <header className="deck-hero">
-        <div className="deck-hero-copy">
-          <p className="deck-hero-kicker">{t('yourDecks')}</p>
+      <header className="deck-workspace-header">
+        <div>
           <h1 id="decks-workspace-heading">{t('decksWorkspace')}</h1>
-          <p className="deck-hero-description">{t('welcomeHeading')}</p>
-          <div className="deck-hero-actions">
-            <a className="deck-study-link" href="/study">{t('study')} <span aria-hidden="true">↗</span></a>
-            <Button type="button" variant="tonal" onClick={() => beginCreate('root')}>{t('newTopLevelDeck')}</Button>
-          </div>
         </div>
-        <div className="deck-hero-mark" aria-hidden="true"><span>✳</span></div>
+        <div className="deck-workspace-actions">
+          <a className="deck-study-link" href="/study">{t('study')} <span aria-hidden="true">↗</span></a>
+          <Button type="button" variant="tonal" onClick={() => beginCreate('root')}>{t('newTopLevelDeck')}</Button>
+        </div>
       </header>
 
       {decksQuery.isPending && <p role="status" className="text-on-surface-variant">{t('loadingDecks')}</p>}
@@ -336,7 +333,7 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
       )}
 
       {!decksQuery.isPending && !decksQuery.isError && (
-        <div className="grid gap-5 expanded:grid-cols-[minmax(16rem,0.85fr)_minmax(0,1.5fr)]">
+        <div className="grid items-start gap-5 expanded:grid-cols-[minmax(16rem,0.7fr)_minmax(0,1.6fr)]">
           <aside className="deck-sidebar space-y-4 rounded-3xl bg-surface-container-low p-4 expanded:p-5" aria-labelledby="deck-list-heading">
             <div className="flex items-center justify-between gap-3">
               <h2 id="deck-list-heading" className="m-0 text-xl font-semibold text-on-surface">{t('yourDecks')}</h2>
@@ -402,24 +399,27 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                   <div><span>{t('statsDueCards')}</span><strong>{new Intl.NumberFormat('en').format(selectedDeck.counts.due)}</strong></div>
                 </div>}
 
-                {selectedDeck.canEdit !== false && <form onSubmit={submitDeckRename} className="grid gap-3 border-t border-outline-variant pt-4 sm:grid-cols-[minmax(0,1fr)_auto]" aria-label={t('renameDeck')}>
+                {selectedDeck.canEdit !== false && <details className="deck-settings">
+                <summary>{t('renameDeck')}</summary>
+                <form onSubmit={submitDeckRename} className="grid gap-3 pt-3 sm:grid-cols-[minmax(0,1fr)_auto]" aria-label={t('renameDeck')}>
                   <label className="grid gap-2 text-sm font-medium text-on-surface" htmlFor="rename-deck">
                     {t('deckName')}
                     <input id="rename-deck" name="name" required defaultValue={selectedDeck.name} key={String(selectedDeck.id) + selectedDeck.name} className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" />
                   </label>
                   <Button type="submit" className="self-end" disabled={patchDeckMutation.isPending}>{t(patchDeckMutation.isPending ? 'savingDeck' : 'saveDeck')}</Button>
-                </form>}
-                {selectedDeck.canEdit !== false && patchDeckMutation.isError && <p role="alert" className="m-0 text-error">{errorMessage(patchDeckMutation.error)}</p>}
-                {selectedDeck.canEdit !== false && patchDeckMutation.isSuccess && <p role="status" className="m-0 text-on-surface-variant">{t('deckSaved')}</p>}
+                </form>
+                {patchDeckMutation.isError && <p role="alert" className="m-0 text-error">{errorMessage(patchDeckMutation.error)}</p>}
+                {patchDeckMutation.isSuccess && <p role="status" className="m-0 text-on-surface-variant">{t('deckSaved')}</p>}
+                </details>}
 
                 <div className="space-y-4 border-t border-outline-variant pt-5">
                   <h3 className="m-0 text-lg font-semibold text-on-surface">{t('notes')}</h3>
                   {notesQuery.isPending && <p role="status" className="m-0 text-on-surface-variant">{t('loadingNotes')}</p>}
                   {notesQuery.isError && <p role="alert" className="m-0 text-error">{errorMessage(notesQuery.error)}</p>}
                   {notesQuery.isSuccess && (notesQuery.data.length ? (
-                    <ul className="m-0 list-none space-y-2 p-0" aria-label={t('noteList')}>
+                    <ul className="deck-note-list m-0 list-none p-0" aria-label={t('noteList')}>
                       {notesQuery.data.map((note) => (
-                        <li key={String(note.id)} className="rounded-2xl bg-surface-container p-4">
+                        <li key={String(note.id)} className="deck-note">
                           {String(editingNote) === String(note.id) ? (
                             <form onSubmit={(event) => submitNoteUpdate(event, note)} className="space-y-4" aria-label={t('editNote')}>
                               <NoteFields note={note} prefix={`edit-${note.id}`} />
@@ -430,10 +430,10 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                               </div>
                             </form>
                           ) : (
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="m-0 break-words font-medium text-on-surface">{note.term}</p>
-                                <p className="m-0 break-words text-on-surface-variant">{note.translation}</p>
+                            <div className="deck-note-content">
+                              <div className="deck-note-words min-w-0">
+                                <p className="deck-note-term m-0 break-words text-on-surface">{note.term}</p>
+                                <p className="deck-note-translation m-0 break-words text-on-surface-variant">{note.translation}</p>
                                 {note.example && <p className="m-0 mt-2 break-words text-sm text-on-surface-variant">{note.example}</p>}
                                 {note.tags && note.tags.length > 0 && <p className="m-0 mt-2 break-words text-sm text-on-surface-variant">{t('tags')}: {note.tags.join(', ')}</p>}
                               </div>

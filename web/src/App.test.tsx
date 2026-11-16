@@ -157,6 +157,11 @@ describe('account screens', () => {
     expect(await screen.findByRole('heading', { name: t('decksWorkspace') })).toBeTruthy();
     expect(await screen.findByRole('heading', { name: 'German course' })).toBeTruthy();
     expect(screen.getByText('Morgan')).toBeTruthy();
+    const email = screen.getByText('friend@example.com');
+    const banner = email.closest('header');
+    expect(banner).not.toBeNull();
+    expect(screen.getAllByRole('banner')).toContain(banner);
+    expect(screen.getByRole('main').contains(banner)).toBe(false);
     expect(meCalls).toBe(2);
   });
 
