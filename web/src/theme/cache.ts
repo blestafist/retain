@@ -144,9 +144,15 @@ export function loadThemeCache(
     const serialized = storage?.getItem(THEME_CACHE_KEY) ?? null;
     const cache = parseCompatibleThemeCache(serialized);
     if (cache !== null) {
+      // Refresh only the previous default, never an explicitly customized pair.
+      // Restrict this to old cache revisions so Swamp + Fidelity stays selectable.
+      const settings = cache.revision < THEME_CACHE_REVISION &&
+        cache.settings.seed === '#3A4527' && cache.settings.variant === 'fidelity'
+        ? { ...cache.settings, seed: DEFAULT_THEME_SETTINGS.seed, variant: DEFAULT_THEME_SETTINGS.variant }
+        : cache.settings;
       return cache.revision === THEME_CACHE_REVISION
         ? { ...cache, revision: THEME_CACHE_REVISION }
-        : createThemeCache(cache.settings);
+        : createThemeCache(settings);
     }
   } catch {
     // Invalid or unavailable storage uses the default theme.

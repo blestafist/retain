@@ -67,7 +67,7 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 			t.Errorf("close migrated database: %v", err)
 		}
 	})
-	assertMigrationVersion(t, ctx, database.SQL, 11)
+	assertMigrationVersion(t, ctx, database.SQL, 12)
 	assertOriginalContentRowsEqual(t, ctx, database.SQL, wantRows)
 	assertInitialSyncSnapshot(t, ctx, database.SQL, ids)
 	assertMigrationDeletionBatch(t, ctx, database.SQL, "decks", ids.archivedDeck,
@@ -136,7 +136,7 @@ func TestOriginalContentMigrationPreservesExistingData(t *testing.T) {
 	if _, err := migrations.Up(ctx); err != nil {
 		t.Fatalf("reapply later migrations after safe down refusal: %v", err)
 	}
-	assertMigrationVersion(t, ctx, database.SQL, 11)
+	assertMigrationVersion(t, ctx, database.SQL, 12)
 	assertOriginalContentRowsEqual(t, ctx, database.SQL, wantRows)
 	assertStudyMigrationSchema(t, ctx, database.SQL)
 	assertMigrationDeletionBatch(t, ctx, database.SQL, "decks", ids.archivedDeck,

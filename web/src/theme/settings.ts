@@ -2,11 +2,11 @@ export const THEME_CACHE_KEY = 'retain.theme.cache.v1';
 // Bump the version when the cache format, settings, or role schema changes.
 export const THEME_CACHE_VERSION = 2;
 // Bump the revision when palette generation changes without changing the format.
-export const THEME_CACHE_REVISION = 2;
+export const THEME_CACHE_REVISION = 3;
 
 export const THEME_VARIANTS = [
-  'fidelity',
   'tonalSpot',
+  'fidelity',
   'vibrant',
   'expressive',
   'monochrome',
@@ -31,13 +31,14 @@ export interface ThemePreset {
 }
 
 export const DEFAULT_THEME_SETTINGS: Readonly<ThemeSettings> = {
-  seed: '#3A4527',
-  variant: 'fidelity',
+  seed: '#2563EB',
+  variant: 'tonalSpot',
   contrastLevel: 0,
   mode: 'system',
 };
 
 export const THEME_PRESETS: readonly ThemePreset[] = [
+  { id: 'blue', name: 'Blue', seed: '#2563EB' },
   { id: 'swamp', name: 'Swamp', seed: '#3A4527' },
   { id: 'ocean', name: 'Ocean', seed: '#006874' },
   { id: 'terracotta', name: 'Terracotta', seed: '#8C4A35' },

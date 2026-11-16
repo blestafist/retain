@@ -82,8 +82,8 @@ func TestAccountQueriesAndSettingsDefaults(t *testing.T) {
 		Timezone:         "UTC",
 		DayStartHour:     4,
 		ThemeMode:        "system",
-		ThemeSeed:        "#3A4527",
-		ThemeVariant:     "fidelity",
+		ThemeSeed:        "#2563EB",
+		ThemeVariant:     "tonal_spot",
 		ThemeContrast:    0,
 	}
 	if settings != wantDefaults {

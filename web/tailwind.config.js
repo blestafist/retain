@@ -12,6 +12,9 @@ export default {
   theme: {
     screens: { medium: '600px', expanded: '840px' },
     colors,
+    fontFamily: {
+      sans: ['var(--md-ref-typeface-plain)'],
+    },
   },
   plugins: [],
 };
