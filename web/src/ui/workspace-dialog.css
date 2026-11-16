@@ -1,0 +1,60 @@
+.workspace-dialog-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--md-sys-color-scrim);
+  opacity: 0.55;
+}
+
+.workspace-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 61;
+  width: min(44rem, calc(100% - 2rem));
+  max-height: calc(100dvh - 3rem);
+  overflow-y: auto;
+  translate: -50% -50%;
+  border-radius: var(--md-sys-shape-corner-extra-large);
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+  box-shadow: 0 1rem 4rem var(--md-sys-color-shadow);
+}
+
+.workspace-dialog-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1rem 1rem 1.5rem;
+  background: var(--md-sys-color-surface-container-high);
+}
+.workspace-dialog-header h2 { margin: 0; font: var(--md-sys-typescale-headline-small); }
+.workspace-dialog-body { padding: 0 1.5rem 1.5rem; }
+.workspace-dialog-body > section { border: 0; background: transparent; padding: 0; box-shadow: none; }
+.workspace-dialog-body > section > header { display: none; }
+
+.workspace-icon-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 3rem;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-full);
+  color: var(--md-sys-color-on-surface-variant);
+  background: transparent;
+  cursor: pointer;
+}
+.workspace-icon-button:hover { color: var(--md-sys-color-on-surface); background: var(--md-sys-color-surface-container-highest); }
+.workspace-icon-button:focus-visible,
+.workspace-dialog :where(button, a, input, select, textarea):focus-visible { outline: 3px solid var(--md-sys-color-primary); outline-offset: 3px; }
+
+@media (max-width: 37.4375rem) {
+  .workspace-dialog { top: auto; bottom: 0; left: 0; width: 100%; max-height: 92dvh; translate: none; border-radius: 1.75rem 1.75rem 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  .workspace-dialog-body { padding-inline: 1.25rem; }
+}

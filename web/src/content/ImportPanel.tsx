@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import { ApiError } from '../api/client';
 import { downloadExport, type ImportPreviewDeck } from '../api/import';
 import type { DeckNode, NativeLanguage, TargetLanguage } from '../api/content';
@@ -9,6 +9,8 @@ import { useApplyImport, useExportDeck, useImportHistory, usePreviewImport } fro
 interface ImportPanelProps {
   decks: DeckNode[];
   selectedDeck?: DeckNode;
+  onDirtyChange?: (dirty: boolean) => void;
+  onBusyChange?: (busy: boolean) => void;
 }
 
 function flattenDecks(decks: DeckNode[], depth = 0): Array<{ deck: DeckNode; depth: number }> {
@@ -64,7 +66,7 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
 
-export function ImportPanel({ decks, selectedDeck }: ImportPanelProps) {
+export function ImportPanel({ decks, selectedDeck, onDirtyChange, onBusyChange }: ImportPanelProps) {
   const [file, setFile] = useState<File | null>(null);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [fileError, setFileError] = useState<'required' | 'type' | null>(null);
@@ -80,6 +82,9 @@ export function ImportPanel({ decks, selectedDeck }: ImportPanelProps) {
   const exportMutation = useExportDeck();
   const preview = previewMutation.data;
   const deckOptions = flattenDecks(decks);
+
+  useEffect(() => { onDirtyChange?.(!applied && (file !== null || preview !== undefined)); }, [applied, file, preview, onDirtyChange]);
+  useEffect(() => { onBusyChange?.(previewMutation.isPending || applyMutation.isPending || exportMutation.isPending); }, [previewMutation.isPending, applyMutation.isPending, exportMutation.isPending, onBusyChange]);
 
   async function submitPreview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

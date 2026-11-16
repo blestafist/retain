@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { ApiError, logout, type MeResponse } from './api/client';
 import { AuthForms } from './auth/AuthForms';
 import { loadCurrentUser, meQueryKey } from './auth/session';
@@ -30,6 +31,59 @@ export function App() {
   return <AuthenticatedApp />;
 }
 
+function AppBrand() {
+  return (
+    <a className="app-brand" href="/" aria-label={t('appName')}>
+      <svg className="app-brand-mark" viewBox="0 0 36 36" aria-hidden="true" focusable="false">
+        <rect x="5" y="4" width="16" height="22" rx="4" transform="rotate(-12 13 15)" fill="currentColor" opacity="0.35" />
+        <rect x="13" y="10" width="16" height="22" rx="4" fill="currentColor" />
+        <path d="M17 17h8m-8 5h5" fill="none" strokeWidth="1.75" strokeLinecap="round" />
+      </svg>
+      <span className="app-name">{t('appName')}</span>
+    </a>
+  );
+}
+
+function AccountMenu({ user, signingOut, onSignOut }: {
+  user: MeResponse['user'];
+  signingOut: boolean;
+  onSignOut: () => void;
+}) {
+  const initial = Array.from(user.name.trim() || user.email)[0]?.toLocaleUpperCase('en');
+
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger
+        className="app-account-trigger"
+        aria-label={`${t('signedIn')}: ${user.name}`}
+        aria-busy={signingOut}
+      >
+        <span className="app-account-avatar" aria-hidden="true">{initial}</span>
+        <span className="app-account-trigger-name" aria-hidden="true">{user.name}</span>
+        <svg className="app-account-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+          <path d="m8 10 4 4 4-4" />
+        </svg>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content className="app-account-menu" align="end" sideOffset={8} collisionPadding={16}>
+          <DropdownMenu.Label className="app-account-identity">
+            <span className="app-account-caption">{t('signedIn')}</span>
+            <span className="app-user-name">{user.name}</span>
+            <span className="app-user-email">{user.email}</span>
+          </DropdownMenu.Label>
+          <DropdownMenu.Separator className="app-account-separator" />
+          <DropdownMenu.Item className="app-account-menu-item" disabled={signingOut} onSelect={onSignOut}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+              <path d="M10 4H5v16h5m5-12 4 4-4 4m-6-4h14" />
+            </svg>
+            {t(signingOut ? 'signingOut' : 'signOut')}
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
 function AppFrame({ children, signedIn = false }: { children: ReactNode; signedIn?: boolean }) {
   return (
     <div className={`app-shell${signedIn ? ' app-shell-signed-in' : ''}`}>
@@ -37,7 +91,7 @@ function AppFrame({ children, signedIn = false }: { children: ReactNode; signedI
         {t('skipToMain')}
       </a>
 
-      {!signedIn && <header className="app-header"><p className="app-name">{t('appName')}</p></header>}
+      {!signedIn && <header className="app-header" aria-label={t('appName')}><AppBrand /></header>}
 
       {children}
     </div>
@@ -132,23 +186,16 @@ function AuthenticatedApp() {
     <AppFrame signedIn={!!meQuery.data}>
       {meQuery.data && <AppNavigation isAdmin={!!meQuery.data.user.is_admin} pathname={window.location.pathname} />}
       {meQuery.data && (
-        <header className="app-user-bar">
-          <p className="app-name">{t('appName')}</p>
-          <div className="app-user-identity">
-            <p className="app-user-name">{meQuery.data.user.name}</p>
-            <p className="app-user-email">{meQuery.data.user.email}</p>
+        <header className="app-user-bar" aria-label={t('appName')}>
+          <AppBrand />
+          <div className="app-user-controls">
+            {!isOnline && (
+              <span className="app-connection-status" role="status" aria-live="polite">
+                {t('connectionOffline')}
+              </span>
+            )}
+            <AccountMenu user={meQuery.data.user} signingOut={logoutMutation.isPending} onSignOut={() => logoutMutation.mutate()} />
           </div>
-          <span className="app-connection-status" role="status" aria-live="polite">
-            {t(isOnline ? 'connectionOnline' : 'connectionOffline')}
-          </span>
-          <Button
-            variant="tonal"
-            type="button"
-            disabled={logoutMutation.isPending}
-            onClick={() => logoutMutation.mutate()}
-          >
-            {t(logoutMutation.isPending ? 'signingOut' : 'signOut')}
-          </Button>
         </header>
       )}
       <main className={`main-content ${meQuery.data ? 'app-content' : 'auth-content'}`} id="main-content" tabIndex={-1}>

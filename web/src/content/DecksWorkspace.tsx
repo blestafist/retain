@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { ApiError } from '../api/client';
 import {
   type CreateNoteRequest,
@@ -11,6 +12,7 @@ import {
 } from '../api/content';
 import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
+import { WorkspaceDialog } from '../ui/WorkspaceDialog';
 import { DeckEnrichmentPanel } from './DeckEnrichmentPanel';
 import { ImportPanel } from './ImportPanel';
 import { WordAutoFill, type SuggestionKey } from './WordAutoFill';
@@ -28,6 +30,7 @@ import {
 } from './hooks';
 
 type CreateMode = 'root' | 'child' | null;
+type DeckPanel = 'add' | 'rename' | 'transfer' | 'enrich' | null;
 
 function flattenDecks(decks: DeckNode[]): DeckNode[] {
   return decks.flatMap((deck) => [deck, ...flattenDecks(deck.children)]);
@@ -68,17 +71,27 @@ function DeleteIcon() {
   return <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 13h12l1-13M9 7V4h6v3" /></svg>;
 }
 
+function DeckIcon() {
+  return <svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3h10a3 3 0 0 1 3 3v11M4 7h10a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H4a3 3 0 0 1-3-3v-8a3 3 0 0 1 3-3Z" /><path d="M5 12h8M5 16h5" /></svg>;
+}
+
+function PlusIcon() {
+  return <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>;
+}
+
+function ImportIcon() {
+  return <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12m-4-4 4 4 4-4M4 15v5h16v-5" /></svg>;
+}
+
 function DeckTree({
   decks,
   selectedId,
   onSelect,
-  onDelete,
   depth = 0,
 }: {
   decks: DeckNode[];
   selectedId: string | null;
   onSelect: (deck: DeckNode) => void;
-  onDelete: (deck: DeckNode) => void;
   depth?: number;
 }) {
   if (decks.length === 0) return null;
@@ -89,27 +102,21 @@ function DeckTree({
         const counts = deck.counts;
         return (
           <li key={String(deck.id)}>
-            <div className="flex items-center gap-1" style={{ paddingInlineStart: `${Math.min(depth, 6) * 0.75}rem` }}>
+            <div style={{ paddingInlineStart: `${Math.min(depth, 6) * 0.75}rem` }}>
               <button
                 type="button"
                 aria-pressed={selected}
                 onClick={() => onSelect(deck)}
-                className={`deck-tree-item min-h-12 min-w-0 flex-1 rounded-xl px-3 text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${selected ? 'is-selected' : ''}`}
+                className={`deck-tree-item ${selected ? 'is-selected' : ''}`}
               >
-                <span className="block truncate">{deck.name}</span>
-                {counts && <span className="block truncate text-sm">{t('deckCounts').replace('{notes}', String(counts.notes)).replace('{new}', String(counts.new)).replace('{learning}', String(counts.learning)).replace('{due}', String(counts.due))}</span>}
+                <span className="deck-tree-icon"><DeckIcon /></span>
+                <span className="deck-tree-copy"><span className="deck-tree-name">{deck.name}</span>
+                  {counts && <span className="deck-tree-count">{t('deckWordCount').replace('{count}', new Intl.NumberFormat('en').format(counts.notes))}</span>}
+                </span>
+                {selected && <svg className="deck-tree-check" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m5 12 4 4 10-10" /></svg>}
               </button>
-              {deck.canEdit !== false && <button
-                type="button"
-                aria-label={`${t('deleteDeck')} ${deck.name}`}
-                title={t('deleteDeck')}
-                onClick={() => onDelete(deck)}
-                className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full text-on-surface-variant hover:bg-error-container hover:text-on-error-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-              >
-                <DeleteIcon />
-              </button>}
             </div>
-            <DeckTree decks={deck.children} selectedId={selectedId} onSelect={onSelect} onDelete={onDelete} depth={depth + 1} />
+            <DeckTree decks={deck.children} selectedId={selectedId} onSelect={onSelect} depth={depth + 1} />
           </li>
         );
       })}
@@ -148,7 +155,7 @@ function NoteFields({ note, prefix, onTermChange }: { note?: Note; prefix: strin
   const fieldId = (name: string) => `${prefix}-${name}`;
   return (
     <>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 medium:grid-cols-2">
         <label className="grid gap-2 text-sm font-medium text-on-surface" htmlFor={fieldId('term')}>
           {t('term')}
           <input id={fieldId('term')} name="term" required defaultValue={note?.term ?? ''} onChange={onTermChange ? (event) => onTermChange(event.target.value) : undefined} className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" />
@@ -157,6 +164,10 @@ function NoteFields({ note, prefix, onTermChange }: { note?: Note; prefix: strin
           {t('translation')}
           <input id={fieldId('translation')} name="translation" required defaultValue={note?.translation ?? ''} className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" />
         </label>
+      </div>
+      <details className="note-optional-fields">
+        <summary>{t('moreWordFields')}</summary>
+        <div className="grid gap-4 medium:grid-cols-2">
         <label className="grid gap-2 text-sm font-medium text-on-surface" htmlFor={fieldId('transcription')}>
           {t('transcription')}
           <input id={fieldId('transcription')} name="transcription" defaultValue={note?.transcription ?? ''} className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" />
@@ -174,16 +185,17 @@ function NoteFields({ note, prefix, onTermChange }: { note?: Note; prefix: strin
           <input id={fieldId('tags')} name="tags" defaultValue={note?.tags?.join(', ') ?? ''} aria-describedby={fieldId('tags-hint')} className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" />
           <span id={fieldId('tags-hint')} className="font-normal text-on-surface-variant">{t('commaSeparatedHint')}</span>
         </label>
-        <label className="grid gap-2 text-sm font-medium text-on-surface sm:col-span-2" htmlFor={fieldId('alternatives')}>
+        <label className="grid gap-2 text-sm font-medium text-on-surface medium:col-span-2" htmlFor={fieldId('alternatives')}>
           {t('alternatives')}
           <input id={fieldId('alternatives')} name="alternatives" defaultValue={note?.alternatives?.join(', ') ?? ''} aria-describedby={fieldId('alternatives-hint')} className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" />
           <span id={fieldId('alternatives-hint')} className="font-normal text-on-surface-variant">{t('commaSeparatedHint')}</span>
         </label>
       </div>
-      <label className="grid gap-2 text-sm font-medium text-on-surface" htmlFor={fieldId('notes')}>
-        {t('notes')}
+      <label className="mt-4 grid gap-2 text-sm font-medium text-on-surface" htmlFor={fieldId('notes')}>
+        {t('wordNotes')}
         <textarea id={fieldId('notes')} name="notes" rows={3} defaultValue={note?.notes ?? ''} className="rounded-xl border border-outline bg-surface-container-lowest px-4 py-3 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" />
       </label>
+      </details>
     </>
   );
 }
@@ -194,6 +206,9 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
   const decks = decksQuery.data ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createMode, setCreateMode] = useState<CreateMode>(null);
+  const [panel, setPanel] = useState<DeckPanel>(null);
+  const [panelDirty, setPanelDirty] = useState(false);
+  const [panelBusy, setPanelBusy] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState<TargetLanguage>('de');
   const [nativeLanguage, setNativeLanguage] = useState<NativeLanguage>('pl');
   const [reverseCards, setReverseCards] = useState(false);
@@ -201,6 +216,8 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
   const [newNoteTerm, setNewNoteTerm] = useState('');
   const [newNoteFields, setNewNoteFields] = useState<Record<string, unknown>>({});
   const newNoteForm = useRef<HTMLFormElement>(null);
+  const taskOpener = useRef<HTMLElement | null>(null);
+  const deckActionsTrigger = useRef<HTMLButtonElement>(null);
   const selectedDeck = findDeck(decks, selectedId);
   const notesQuery = useDeckNotes(selectedDeck?.id ?? null);
   const createDeckMutation = useCreateDeck();
@@ -214,14 +231,52 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
     if (selectedId && !findDeck(decks, selectedId)) {
       setSelectedId(null);
       setEditingNote(null);
+      setPanel(null);
+      setPanelDirty(false);
+      setPanelBusy(false);
+      setCreateMode(null);
     }
     if (!selectedId && decks[0]) setSelectedId(String(decks[0].id));
   }, [decks, selectedId]);
 
   function beginCreate(mode: Exclude<CreateMode, null>) {
+    rememberTaskOpener();
     createDeckMutation.reset();
     setReverseCards(false);
     setCreateMode(mode);
+  }
+
+  function openPanel(next: Exclude<DeckPanel, null>) {
+    rememberTaskOpener();
+    patchDeckMutation.reset();
+    createNoteMutation.reset();
+    if (next === 'add') {
+      setNewNoteTerm('');
+      setNewNoteFields({});
+    }
+    setPanel(next);
+    setPanelDirty(false);
+    setPanelBusy(false);
+  }
+
+  function closePanel(open: boolean) {
+    if (open || panelBusy) return;
+    if (panelDirty && !window.confirm(t('discardTaskChanges'))) return;
+    setPanel(null);
+  }
+
+  function rememberTaskOpener() {
+    const active = document.activeElement;
+    taskOpener.current = active instanceof HTMLElement
+      ? active.getAttribute('role') === 'menuitem' ? deckActionsTrigger.current : active
+      : null;
+  }
+
+  function selectDeck(deck: DeckNode) {
+    setSelectedId(String(deck.id));
+    setEditingNote(null);
+    setPanel(null);
+    patchDeckMutation.reset();
   }
 
   function submitDeck(event: FormEvent<HTMLFormElement>) {
@@ -242,7 +297,7 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
     event.preventDefault();
     if (!selectedDeck) return;
     const name = String(new FormData(event.currentTarget).get('name') ?? '').trim();
-    if (name) patchDeckMutation.mutate({ id: selectedDeck.id, input: { name } });
+    if (name) patchDeckMutation.mutate({ id: selectedDeck.id, input: { name } }, { onSuccess: () => setPanel(null) });
   }
 
   function removeDeck(deck: DeckNode) {
@@ -270,6 +325,7 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
         form.reset();
         setNewNoteTerm('');
         setNewNoteFields({});
+        setPanel(null);
       },
     });
   }
@@ -283,6 +339,8 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
     const input = newNoteForm.current?.elements.namedItem(elementName);
     if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
       input.value = Array.isArray(value) ? value.join(', ') : value;
+      const details = input.closest('details');
+      if (details) details.open = true;
     }
   }
 
@@ -313,17 +371,7 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
   const pair = selectedDeck ? languagePair(decks, selectedDeck) : undefined;
 
   return (
-    <section className="deck-workspace mx-auto w-full max-w-6xl space-y-6 py-8" aria-labelledby="decks-workspace-heading">
-      <header className="deck-workspace-header">
-        <div>
-          <h1 id="decks-workspace-heading">{t('decksWorkspace')}</h1>
-        </div>
-        <div className="deck-workspace-actions">
-          <a className="deck-study-link" href="/study">{t('study')} <span aria-hidden="true">↗</span></a>
-          <Button type="button" variant="tonal" onClick={() => beginCreate('root')}>{t('newTopLevelDeck')}</Button>
-        </div>
-      </header>
-
+    <section className="deck-workspace" aria-label={t('decksWorkspace')}>
       {decksQuery.isPending && <p role="status" className="text-on-surface-variant">{t('loadingDecks')}</p>}
       {decksQuery.isError && (
         <div role="alert" className="space-y-3 rounded-2xl bg-error-container p-4 text-on-error-container">
@@ -333,28 +381,36 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
       )}
 
       {!decksQuery.isPending && !decksQuery.isError && (
-        <div className="grid items-start gap-5 expanded:grid-cols-[minmax(16rem,0.7fr)_minmax(0,1.6fr)]">
-          <aside className="deck-sidebar space-y-4 rounded-3xl bg-surface-container-low p-4 expanded:p-5" aria-labelledby="deck-list-heading">
-            <div className="flex items-center justify-between gap-3">
-              <h2 id="deck-list-heading" className="m-0 text-xl font-semibold text-on-surface">{t('yourDecks')}</h2>
-              {decks.length > 0 && <Button type="button" variant="tonal" onClick={() => beginCreate('child')} disabled={!selectedDeck || selectedDeck.canEdit === false}>{t('addChildDeck')}</Button>}
+        <div className="deck-workspace-layout">
+          <aside className="deck-sidebar" aria-labelledby="deck-list-heading">
+            <div className="deck-sidebar-heading">
+              <h2 id="deck-list-heading">{t('decks')}</h2>
+              <button type="button" className="workspace-icon-button" aria-label={t('newDeck')} onClick={() => beginCreate('root')}><PlusIcon /></button>
             </div>
+            {decks.length > 0 && <label className="deck-mobile-picker" htmlFor="mobile-deck-picker">
+              <span className="sr-only">{t('selectedDeck')}</span>
+              <DeckIcon />
+              <select id="mobile-deck-picker" value={selectedId ?? ''} onChange={(event) => { const deck = findDeck(decks, event.target.value); if (deck) selectDeck(deck); }}>
+                {!selectedDeck && <option value="">{t('decks')}</option>}
+                {flattenDecks(decks).map((deck) => <option key={String(deck.id)} value={String(deck.id)}>{deck.name}</option>)}
+              </select>
+            </label>}
             {decks.length === 0 ? <p className="m-0 py-3 text-on-surface-variant">{t('noDecks')}</p> : (
-              <DeckTree decks={decks} selectedId={selectedId} onSelect={(deck) => { setSelectedId(String(deck.id)); setEditingNote(null); }} onDelete={removeDeck} />
+              <DeckTree decks={decks} selectedId={selectedId} onSelect={selectDeck} />
             )}
             {deleteDeckMutation.isError && <p role="alert" className="m-0 text-error">{errorMessage(deleteDeckMutation.error)}</p>}
+            <button type="button" className="deck-import-action" onClick={() => openPanel('transfer')}><ImportIcon />{t('importExport')}</button>
           </aside>
 
-          <div className="min-w-0 space-y-5">
-            {createMode && (
-              <form onSubmit={submitDeck} className="space-y-4 rounded-3xl bg-surface-container-low p-5" aria-labelledby="create-deck-heading">
-                <h2 id="create-deck-heading" className="m-0 text-xl font-semibold text-on-surface">{t(createMode === 'root' ? 'newTopLevelDeck' : 'addChildDeck')}</h2>
+          <div className="deck-main">
+            <WorkspaceDialog open={createMode !== null} onOpenChange={(open) => { if (!open) setCreateMode(null); }} title={t(createMode === 'child' ? 'addChildDeck' : 'newDeck')} returnFocusRef={taskOpener}>
+              <form onSubmit={submitDeck} className="space-y-4" aria-label={t(createMode === 'child' ? 'addChildDeck' : 'newDeck')}>
                 <label className="grid gap-2 text-sm font-medium text-on-surface" htmlFor="new-deck-name">
                   {t('deckName')}
                   <input id="new-deck-name" name="name" required autoFocus className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" />
                 </label>
                 {createMode === 'root' && (
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-4 medium:grid-cols-2">
                     <label className="grid gap-2 text-sm font-medium text-on-surface" htmlFor="target-language">
                       {t('targetLanguage')}
                       <select id="target-language" value={targetLanguage} onChange={(event) => setTargetLanguage(event.target.value as TargetLanguage)} className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
@@ -381,27 +437,35 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                   <Button type="button" variant="tonal" onClick={() => setCreateMode(null)}>{t('cancel')}</Button>
                 </div>
               </form>
-            )}
+            </WorkspaceDialog>
 
             {selectedDeck ? (
-              <section className="deck-detail space-y-5 rounded-3xl bg-surface-container-low p-5 expanded:p-6" aria-labelledby="selected-deck-heading">
-                <header className="deck-detail-header space-y-1">
-                  <p className="deck-detail-kicker">{t('selectedDeck')}</p>
-                  <h2 id="selected-deck-heading" className="m-0 break-words text-2xl font-semibold text-on-surface">{selectedDeck.name}</h2>
-                  <p className="deck-language">{pair ?? t('languagePairNotSet')}</p>
-                  {selectedDeck.canEdit === false && <p className="m-0 rounded-2xl bg-secondary-container p-3 text-sm text-on-secondary-container">{t('readOnlySubscription')}</p>}
+              <section className="deck-detail" aria-labelledby="selected-deck-heading">
+                <header className="deck-detail-header">
+                  <div className="deck-heading-copy">
+                    <p className="deck-language">{pair ?? t('languagePairNotSet')}</p>
+                    <h1 id="selected-deck-heading">{selectedDeck.name}</h1>
+                    {selectedDeck.counts && <p className="deck-count-summary">{t('deckCounts').replace('{notes}', new Intl.NumberFormat('en').format(selectedDeck.counts.notes)).replace('{new}', new Intl.NumberFormat('en').format(selectedDeck.counts.new)).replace('{learning}', new Intl.NumberFormat('en').format(selectedDeck.counts.learning)).replace('{due}', new Intl.NumberFormat('en').format(selectedDeck.counts.due))}</p>}
+                  </div>
+                  <div className="deck-header-actions">
+                    <a className="deck-study-link" href="/study"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7z" /></svg>{t('study')}</a>
+                    {selectedDeck.canEdit !== false && <DropdownMenu.Root>
+                      <DropdownMenu.Trigger ref={deckActionsTrigger} className="workspace-icon-button" aria-label={t('deckActions')}><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg></DropdownMenu.Trigger>
+                      <DropdownMenu.Portal><DropdownMenu.Content className="deck-actions-menu" align="end" sideOffset={8}>
+                        <DropdownMenu.Item onSelect={() => openPanel('rename')}>{t('renameDeck')}</DropdownMenu.Item>
+                        <DropdownMenu.Item onSelect={() => beginCreate('child')}>{t('addChildDeck')}</DropdownMenu.Item>
+                        <DropdownMenu.Item onSelect={() => openPanel('transfer')}>{t('importExport')}</DropdownMenu.Item>
+                        {ownerId > 0 && <DropdownMenu.Item onSelect={() => openPanel('enrich')}>{t('deckEnrichment')}</DropdownMenu.Item>}
+                        <DropdownMenu.Separator />
+                        <DropdownMenu.Item className="deck-action-destructive" onSelect={() => removeDeck(selectedDeck)}>{t('deleteDeck')}</DropdownMenu.Item>
+                      </DropdownMenu.Content></DropdownMenu.Portal>
+                    </DropdownMenu.Root>}
+                  </div>
                 </header>
+                {selectedDeck.canEdit === false && <p className="deck-readonly">{t('readOnlySubscription')}</p>}
 
-                {selectedDeck.counts && <div className="deck-metrics">
-                  <div><span>{t('notes')}</span><strong>{new Intl.NumberFormat('en').format(selectedDeck.counts.notes)}</strong></div>
-                  <div><span>{t('newCount')}</span><strong>{new Intl.NumberFormat('en').format(selectedDeck.counts.new)}</strong></div>
-                  <div><span>{t('statsStateLearning')}</span><strong>{new Intl.NumberFormat('en').format(selectedDeck.counts.learning)}</strong></div>
-                  <div><span>{t('statsDueCards')}</span><strong>{new Intl.NumberFormat('en').format(selectedDeck.counts.due)}</strong></div>
-                </div>}
-
-                {selectedDeck.canEdit !== false && <details className="deck-settings">
-                <summary>{t('renameDeck')}</summary>
-                <form onSubmit={submitDeckRename} className="grid gap-3 pt-3 sm:grid-cols-[minmax(0,1fr)_auto]" aria-label={t('renameDeck')}>
+                {selectedDeck.canEdit !== false && <WorkspaceDialog open={panel === 'rename'} onOpenChange={(open) => { if (!open) setPanel(null); }} title={t('renameDeck')} returnFocusRef={taskOpener}>
+                <form onSubmit={submitDeckRename} className="grid gap-3" aria-label={t('renameDeck')}>
                   <label className="grid gap-2 text-sm font-medium text-on-surface" htmlFor="rename-deck">
                     {t('deckName')}
                     <input id="rename-deck" name="name" required defaultValue={selectedDeck.name} key={String(selectedDeck.id) + selectedDeck.name} className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" />
@@ -410,10 +474,12 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                 </form>
                 {patchDeckMutation.isError && <p role="alert" className="m-0 text-error">{errorMessage(patchDeckMutation.error)}</p>}
                 {patchDeckMutation.isSuccess && <p role="status" className="m-0 text-on-surface-variant">{t('deckSaved')}</p>}
-                </details>}
+                </WorkspaceDialog>}
 
-                <div className="space-y-4 border-t border-outline-variant pt-5">
-                  <h3 className="m-0 text-lg font-semibold text-on-surface">{t('notes')}</h3>
+                <div className="deck-words">
+                  <div className="deck-words-heading"><h2>{t('notes')}</h2>
+                    {selectedDeck.canEdit !== false && <Button type="button" variant="tonal" onClick={() => openPanel('add')}><PlusIcon />{t('addNote')}</Button>}
+                  </div>
                   {notesQuery.isPending && <p role="status" className="m-0 text-on-surface-variant">{t('loadingNotes')}</p>}
                   {notesQuery.isError && <p role="alert" className="m-0 text-error">{errorMessage(notesQuery.error)}</p>}
                   {notesQuery.isSuccess && (notesQuery.data.length ? (
@@ -446,34 +512,43 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                         </li>
                       ))}
                     </ul>
-                  ) : <p className="m-0 text-on-surface-variant">{t('noNotes')}</p>)}
-                  {(createNoteMutation.isError || deleteNoteMutation.isError) && <p role="alert" className="m-0 text-error">{errorMessage(createNoteMutation.error ?? deleteNoteMutation.error)}</p>}
+                   ) : <div className="deck-empty">
+                     <span className="deck-empty-icon"><DeckIcon /></span>
+                     <h3>{t('noNotes')}</h3>
+                     {selectedDeck.canEdit !== false && <><p>{t('emptyDeckHint')}</p><button type="button" className="deck-import-action" onClick={() => openPanel('transfer')}><ImportIcon />{t('importDeck')}</button></>}
+                   </div>)}
+                  {deleteNoteMutation.isError && <p role="alert" className="m-0 text-error">{errorMessage(deleteNoteMutation.error)}</p>}
 
-                  {selectedDeck.canEdit !== false && <details className="rounded-2xl bg-surface-container p-4">
-                    <summary className="min-h-12 cursor-pointer content-center font-semibold text-on-surface">{t('addNote')}</summary>
-                    <form ref={newNoteForm} onSubmit={submitNote} className="space-y-4 pt-4" aria-label={t('addNote')}>
+                  {selectedDeck.canEdit !== false && <WorkspaceDialog key={String(selectedDeck.id)} open={panel === 'add'} onOpenChange={(open) => { if (!open) setPanel(null); }} title={t('addNote')} returnFocusRef={taskOpener}>
+                    <form ref={newNoteForm} onSubmit={submitNote} className="space-y-4" aria-label={t('addNote')}>
                       <NoteFields prefix="new-note" onTermChange={setNewNoteTerm} />
                       {llmStatusQuery.data?.enabled && typeof selectedDeck.id === 'number' && (
                         <WordAutoFill deckId={selectedDeck.id} word={newNoteTerm} enabled onUse={useWordSuggestion} />
                       )}
                       <Button type="submit" disabled={createNoteMutation.isPending}>{t(createNoteMutation.isPending ? 'addingNote' : 'addNote')}</Button>
+                      {createNoteMutation.isError && <p role="alert" className="text-error">{errorMessage(createNoteMutation.error)}</p>}
                     </form>
-                  </details>}
+                  </WorkspaceDialog>}
                 </div>
 
-                {selectedDeck.canEdit !== false && <ImportPanel decks={decks} selectedDeck={selectedDeck} />}
-                {selectedDeck.canEdit !== false && ownerId > 0 && (
-                  <DeckEnrichmentPanel
+                {selectedDeck.canEdit !== false && ownerId > 0 && <WorkspaceDialog open={panel === 'enrich'} onOpenChange={closePanel} title={t('deckEnrichment')} returnFocusRef={taskOpener}>
+                   {!llmStatusQuery.data?.enabled && <p className="text-on-surface-variant">{t('llmFeaturesDisabled')}</p>}
+                   <DeckEnrichmentPanel
                     ownerId={ownerId}
                     deckId={selectedDeck.id}
                     deckName={selectedDeck.name}
-                    enabled={llmStatusQuery.data?.enabled === true}
+                     enabled={llmStatusQuery.data?.enabled === true}
+                     onDirtyChange={setPanelDirty}
+                     onBusyChange={setPanelBusy}
                   />
-                )}
+                </WorkspaceDialog>}
               </section>
             ) : (
-              !createMode && <section className="rounded-3xl bg-surface-container-low p-6"><h2 className="m-0 text-xl font-semibold text-on-surface">{t('selectOrCreateDeck')}</h2></section>
+              <section className="deck-detail deck-no-selection"><DeckIcon /><h1>{t('selectOrCreateDeck')}</h1><Button type="button" onClick={() => beginCreate('root')}><PlusIcon />{t('newDeck')}</Button></section>
             )}
+            <WorkspaceDialog open={panel === 'transfer'} onOpenChange={closePanel} title={t('importExport')} returnFocusRef={taskOpener}>
+              <ImportPanel decks={decks} selectedDeck={selectedDeck?.canEdit === false ? undefined : selectedDeck} onDirtyChange={setPanelDirty} onBusyChange={setPanelBusy} />
+            </WorkspaceDialog>
           </div>
         </div>
       )}

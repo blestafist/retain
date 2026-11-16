@@ -2,8 +2,8 @@ import { t, type TranslationKey } from './i18n/en';
 import './app-navigation.css';
 
 const destinations: { href: string; label: TranslationKey; path: string }[] = [
-  { href: '/', label: 'decksWorkspace', path: 'M4 5h12v14H4z M8 2h12v14 M7 9h6 M7 12h6' },
-  { href: '/study', label: 'study', path: 'M5 4h14v16H5z M8 8h8 M8 12h8 M8 16h5' },
+  { href: '/', label: 'decks', path: 'M5 7h11a2 2 0 0 1 2 2v11H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2ZM7 3h12a2 2 0 0 1 2 2v11 M7 12h7 M7 16h5' },
+  { href: '/study', label: 'study', path: 'M4 5h12a2 2 0 0 1 2 2v13H6a2 2 0 0 1-2-2V5ZM8 3h12v13 M9 9l5 3-5 3z' },
   { href: '/stats', label: 'stats', path: 'M4 20h16 M6 17v-5 M12 17V5 M18 17V9' },
   { href: '/friends', label: 'friends', path: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3 19v-1a6 6 0 0 1 12 0v1z M16 5a3 3 0 0 1 0 6 M17 13a5 5 0 0 1 4 5v1' },
   { href: '/settings', label: 'settings', path: 'M4 7h16 M4 17h16 M8 4v6 M16 14v6' },
@@ -16,7 +16,7 @@ export function AppNavigation({ isAdmin, pathname }: { isAdmin: boolean; pathnam
       {destinations.filter((item) => isAdmin || item.href !== '/admin').map((item) => (
         <a className="app-navigation-link" key={item.href} href={item.href} aria-current={pathname === item.href ? 'page' : undefined}>
           <span className="app-navigation-indicator" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" focusable="false">
               <path d={item.path} />
             </svg>
           </span>
