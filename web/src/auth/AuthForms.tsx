@@ -4,6 +4,7 @@ import { ApiError, login, register, type LoginRequest, type RegisterRequest } fr
 import { t, type TranslationKey } from '../i18n/en';
 import { Button } from '../ui/Button';
 import { meQueryKey } from './session';
+import './AuthForms.css';
 
 type AuthMode = 'signin' | 'signup';
 type FieldName = 'invite' | 'email' | 'name' | 'password';
@@ -69,9 +70,11 @@ function SignInForm() {
 
   return (
     <>
-      <p className="auth-kicker">{t('accountAccess')}</p>
-      <h1>{t('signInHeading')}</h1>
-      <p className="auth-description">{t('signInDescription')}</p>
+      <header className="auth-intro">
+        <p className="auth-kicker">{t('accountAccess')}</p>
+        <h1>{t('signInHeading')}</h1>
+        <p className="auth-description">{t('signInDescription')}</p>
+      </header>
       <form className="auth-form" noValidate aria-busy={mutation.isPending} onSubmit={submit}>
         <ErrorNotice error={mutation.error} />
         <div className="auth-field">
@@ -152,9 +155,11 @@ function SignUpForm() {
   if (mutation.isSuccess) {
     return (
       <section className="auth-success" aria-live="polite">
-        <p className="auth-kicker">{t('accountCreated')}</p>
-        <h1>{t('accountReadyHeading')}</h1>
-        <p className="auth-description">{t('accountReadyPrompt')}</p>
+        <header className="auth-intro">
+          <p className="auth-kicker">{t('accountCreated')}</p>
+          <h1>{t('accountReadyHeading')}</h1>
+          <p className="auth-description">{t('accountReadyPrompt')}</p>
+        </header>
         <a className="auth-primary-link" href="/">{t('signIn')}</a>
       </section>
     );
@@ -162,9 +167,11 @@ function SignUpForm() {
 
   return (
     <>
-      <p className="auth-kicker">{t('inviteOnly')}</p>
-      <h1>{t('signUpHeading')}</h1>
-      <p className="auth-description">{t('signUpDescription')}</p>
+      <header className="auth-intro">
+        <p className="auth-kicker">{t('inviteOnly')}</p>
+        <h1>{t('signUpHeading')}</h1>
+        <p className="auth-description">{t('signUpDescription')}</p>
+      </header>
       <form className="auth-form" noValidate aria-busy={mutation.isPending} onSubmit={submit}>
         <ErrorNotice error={mutation.error} />
         <div className="auth-field">

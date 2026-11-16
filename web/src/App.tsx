@@ -12,6 +12,7 @@ import { SettingsPage } from './settings/SettingsPage';
 import { StudySession } from './study/StudySession';
 import { clearOfflineData } from './offline/database';
 import { synchronizeOfflineData } from './offline/sync';
+import { AppNavigation } from './AppNavigation';
 
 const DevShowcase = import.meta.env.DEV ? lazy(() => import('./dev/Showcase')) : null;
 const StatsPage = lazy(async () => ({ default: (await import('./stats/StatsPage')).StatsPage }));
@@ -29,9 +30,9 @@ export function App() {
   return <AuthenticatedApp />;
 }
 
-function AppFrame({ children }: { children: ReactNode }) {
+function AppFrame({ children, signedIn = false }: { children: ReactNode; signedIn?: boolean }) {
   return (
-    <div className="app-shell">
+    <div className={`app-shell${signedIn ? ' app-shell-signed-in' : ''}`}>
       <a className="skip-link" href="#main-content">
         {t('skipToMain')}
       </a>
@@ -130,7 +131,8 @@ function AuthenticatedApp() {
   }
 
   return (
-    <AppFrame>
+    <AppFrame signedIn={!!meQuery.data}>
+      {meQuery.data && <AppNavigation isAdmin={!!meQuery.data.user.is_admin} pathname={window.location.pathname} />}
       <main className={`main-content ${meQuery.data ? 'app-content' : 'auth-content'}`} id="main-content" tabIndex={-1}>
         {meQuery.data ? (
           <>
@@ -143,14 +145,6 @@ function AuthenticatedApp() {
               <span className="rounded-full bg-surface-container px-3 py-2 text-sm text-on-surface-variant" role="status" aria-live="polite">
                 {t(isOnline ? 'connectionOnline' : 'connectionOffline')}
               </span>
-              <nav aria-label={t('navigation')} className="flex flex-wrap items-center gap-2">
-                <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/">{t('decksWorkspace')}</a>
-                <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/study">{t('study')}</a>
-                <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/stats" aria-current={window.location.pathname === '/stats' ? 'page' : undefined}>{t('stats')}</a>
-                <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/friends" aria-current={window.location.pathname === '/friends' ? 'page' : undefined}>{t('friends')}</a>
-                <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/settings">{t('settings')}</a>
-                {meQuery.data.user.is_admin && <a className="inline-flex min-h-12 items-center rounded-full px-4 text-primary hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href="/admin">{t('admin')}</a>}
-              </nav>
               <Button
                 variant="tonal"
                 type="button"

@@ -14,6 +14,7 @@ import { Button } from '../ui/Button';
 import { DeckEnrichmentPanel } from './DeckEnrichmentPanel';
 import { ImportPanel } from './ImportPanel';
 import { WordAutoFill, type SuggestionKey } from './WordAutoFill';
+import './DecksWorkspace.css';
 import {
   useCreateDeck,
   useCreateDeckNote,
@@ -312,13 +313,18 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
   const pair = selectedDeck ? languagePair(decks, selectedDeck) : undefined;
 
   return (
-    <section className="mx-auto w-full max-w-6xl space-y-6 py-8" aria-labelledby="decks-workspace-heading">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="m-0 text-sm font-medium uppercase tracking-wide text-primary">{t('decks')}</p>
-          <h1 id="decks-workspace-heading" className="m-0 text-3xl font-semibold text-on-surface">{t('decksWorkspace')}</h1>
+    <section className="deck-workspace mx-auto w-full max-w-6xl space-y-6 py-8" aria-labelledby="decks-workspace-heading">
+      <header className="deck-hero">
+        <div className="deck-hero-copy">
+          <p className="deck-hero-kicker">{t('yourDecks')}</p>
+          <h1 id="decks-workspace-heading">{t('decksWorkspace')}</h1>
+          <p className="deck-hero-description">{t('welcomeHeading')}</p>
+          <div className="deck-hero-actions">
+            <a className="deck-study-link" href="/study">{t('study')} <span aria-hidden="true">↗</span></a>
+            <Button type="button" variant="tonal" onClick={() => beginCreate('root')}>{t('newTopLevelDeck')}</Button>
+          </div>
         </div>
-        <Button type="button" variant="tonal" onClick={() => beginCreate('root')}>{t('newTopLevelDeck')}</Button>
+        <div className="deck-hero-mark" aria-hidden="true"><span>✳</span></div>
       </header>
 
       {decksQuery.isPending && <p role="status" className="text-on-surface-variant">{t('loadingDecks')}</p>}
@@ -331,7 +337,7 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
 
       {!decksQuery.isPending && !decksQuery.isError && (
         <div className="grid gap-5 expanded:grid-cols-[minmax(16rem,0.85fr)_minmax(0,1.5fr)]">
-          <aside className="space-y-4 rounded-3xl bg-surface-container-low p-4 expanded:p-5" aria-labelledby="deck-list-heading">
+          <aside className="deck-sidebar space-y-4 rounded-3xl bg-surface-container-low p-4 expanded:p-5" aria-labelledby="deck-list-heading">
             <div className="flex items-center justify-between gap-3">
               <h2 id="deck-list-heading" className="m-0 text-xl font-semibold text-on-surface">{t('yourDecks')}</h2>
               {decks.length > 0 && <Button type="button" variant="tonal" onClick={() => beginCreate('child')} disabled={!selectedDeck || selectedDeck.canEdit === false}>{t('addChildDeck')}</Button>}
@@ -381,13 +387,20 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
             )}
 
             {selectedDeck ? (
-              <section className="space-y-5 rounded-3xl bg-surface-container-low p-5 expanded:p-6" aria-labelledby="selected-deck-heading">
-                <header className="space-y-1">
-                  <p className="m-0 text-sm text-on-surface-variant">{t('selectedDeck')}</p>
+              <section className="deck-detail space-y-5 rounded-3xl bg-surface-container-low p-5 expanded:p-6" aria-labelledby="selected-deck-heading">
+                <header className="deck-detail-header space-y-1">
+                  <p className="deck-detail-kicker">{t('selectedDeck')}</p>
                   <h2 id="selected-deck-heading" className="m-0 break-words text-2xl font-semibold text-on-surface">{selectedDeck.name}</h2>
-                  <p className="m-0 text-sm text-on-surface-variant">{pair ?? t('languagePairNotSet')}</p>
+                  <p className="deck-language">{pair ?? t('languagePairNotSet')}</p>
                   {selectedDeck.canEdit === false && <p className="m-0 rounded-2xl bg-secondary-container p-3 text-sm text-on-secondary-container">{t('readOnlySubscription')}</p>}
                 </header>
+
+                {selectedDeck.counts && <div className="deck-metrics">
+                  <div><span>{t('notes')}</span><strong>{new Intl.NumberFormat('en').format(selectedDeck.counts.notes)}</strong></div>
+                  <div><span>{t('newCount')}</span><strong>{new Intl.NumberFormat('en').format(selectedDeck.counts.new)}</strong></div>
+                  <div><span>{t('statsStateLearning')}</span><strong>{new Intl.NumberFormat('en').format(selectedDeck.counts.learning)}</strong></div>
+                  <div><span>{t('statsDueCards')}</span><strong>{new Intl.NumberFormat('en').format(selectedDeck.counts.due)}</strong></div>
+                </div>}
 
                 {selectedDeck.canEdit !== false && <form onSubmit={submitDeckRename} className="grid gap-3 border-t border-outline-variant pt-4 sm:grid-cols-[minmax(0,1fr)_auto]" aria-label={t('renameDeck')}>
                   <label className="grid gap-2 text-sm font-medium text-on-surface" htmlFor="rename-deck">

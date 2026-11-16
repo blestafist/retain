@@ -69,7 +69,7 @@ body {
 
 .skip-link {
   position: absolute;
-  z-index: 1;
+  z-index: 20;
   top: 0.75rem;
   left: 0.75rem;
   min-height: 3rem;
@@ -272,9 +272,19 @@ body {
   padding-block: 1.25rem 4rem;
 }
 
+.app-shell-signed-in .app-content {
+  padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 52.5rem) {
+  .app-shell-signed-in { padding-inline-start: calc(6.5rem + clamp(1.25rem, 5vw, 4rem)); }
+  .app-shell-signed-in .app-content { padding-bottom: 4rem; }
+}
+
 .app-user-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 1rem;
   padding-block: 1rem;
