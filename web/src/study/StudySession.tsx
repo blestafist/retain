@@ -18,6 +18,7 @@ import {
   type OfflineReview,
 } from '../offline/database';
 import { cacheServerCard, isNetworkFailure, saveOfflineReview, synchronizeOfflineData } from '../offline/sync';
+import './StudySession.css';
 
 const ratingLabels: Record<StudyRating, 'again' | 'hard' | 'good' | 'easy'> = {
   1: 'again',
@@ -530,11 +531,11 @@ export function StudySession({
   const complete = sessionReady && !currentCard;
 
   return (
-    <section className="mx-auto grid w-full max-w-4xl gap-5 py-6" aria-labelledby="study-session-heading">
-      <header className="flex flex-wrap items-center justify-between gap-3">
+    <section className="study-session mx-auto grid w-full max-w-4xl gap-5 py-6" aria-labelledby="study-session-heading">
+      <header className="study-session__header flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1">
           <a href="/" className="inline-flex min-h-12 items-center rounded-full px-3 text-primary underline-offset-4 hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{t('backToDecks')}</a>
-          <h1 id="study-session-heading" className="m-0 text-3xl font-semibold text-on-surface">{t('studySession')}</h1>
+          <h1 id="study-session-heading" className="study-session__heading m-0 text-on-surface">{t('studySession')}</h1>
         </div>
         <div className="flex gap-2" aria-label={t('sessionActions')}>
           {voice && currentCard && <Button type="button" variant="tonal" onClick={() => speak(currentCard, voice)}><SpeakIcon />{t('speak')}</Button>}
@@ -570,7 +571,7 @@ export function StudySession({
       )}
 
       {currentCard && (
-        <div role="group" aria-label={t('studyModeGroup')} className="flex flex-wrap gap-2">
+        <div role="group" aria-label={t('studyModeGroup')} className="study-session__modes flex flex-wrap gap-2">
           {([
             ['flip', 'flipMode'],
             ['typing', 'typingMode'],
@@ -625,30 +626,30 @@ export function StudySession({
 
       {currentCard && (
         <>
-          <div className="grid gap-2 rounded-2xl bg-surface-container-low p-4">
+          <div className="study-session__progress grid gap-2">
             <div className="flex justify-between gap-3 text-sm text-on-surface-variant">
               <span>{t('studyProgress').replace('{current}', String(reviewed.length + 1)).replace('{total}', String(queue.length))}</span>
               <span>{t('cardsReviewed').replace('{count}', String(reviewed.length))}</span>
             </div>
             <div role="progressbar" aria-label={t('studyProgressBar')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)} className="h-2 overflow-hidden rounded-full bg-surface-container-high">
-              <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${progress}%` }} />
+              <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
             </div>
           </div>
 
           <article
-            className="grid min-h-80 content-center gap-8 rounded-[2rem] bg-surface-container-low p-6 text-center [touch-action:pan-y] sm:p-10"
+            className="study-card grid gap-8 [touch-action:pan-y]"
             aria-label={t('studyCard')}
             onPointerDown={onSwipeStart}
             onPointerUp={onSwipeEnd}
             onPointerCancel={() => { swipeStart.current = null; }}
           >
-            <div className="grid gap-4">
-              <p className="m-0 text-sm font-medium uppercase tracking-wide text-primary">{t('front')}</p>
-              <h2 className="m-0 break-words text-4xl font-semibold text-on-surface sm:text-5xl">{currentCard.front}</h2>
+            <div className="study-card__entry grid gap-4">
+              <p className="study-card__label m-0 text-primary">{t('front')}</p>
+              <h2 className="study-card__term m-0 break-words text-on-surface">{currentCard.front}</h2>
               {answerShown && (
-                <div className="mx-auto grid w-full max-w-2xl gap-2 border-t border-outline-variant pt-6">
-                  <p className="m-0 text-sm font-medium uppercase tracking-wide text-on-surface-variant">{t('answer')}</p>
-                  <p className="m-0 break-words text-2xl text-on-surface">{currentCard.back}</p>
+                <div className="study-card__answer grid w-full gap-2">
+                  <p className="study-card__label m-0 text-on-surface-variant">{t('answer')}</p>
+                  <p className="study-card__translation m-0 break-words text-on-surface">{currentCard.back}</p>
                   {answerMatch && (
                     <div role="status" className="mt-3 grid gap-2 rounded-2xl bg-surface-container p-4 text-start">
                       <p className="m-0 font-medium text-on-surface">{t(answerMatch.match === 'exact' ? 'answerExact' : answerMatch.match === 'typo' ? 'answerTypo' : answerMatch.match === 'article' ? 'answerArticle' : 'answerWrong')}</p>
@@ -662,7 +663,7 @@ export function StudySession({
             </div>
             {!answerShown ? (
               effectiveMode === 'flip' ? (
-                <div className="grid justify-items-center gap-2">
+                <div className="study-card__reveal grid justify-items-start gap-2">
                   {studyMode === 'choice' && currentCard.state !== 0 && (
                     <p className="m-0 text-sm text-on-surface-variant">{t('choiceFlipHint')}</p>
                   )}
@@ -670,7 +671,7 @@ export function StudySession({
                   <p className="m-0 text-sm text-on-surface-variant">{t('showAnswerShortcut')}</p>
                 </div>
               ) : effectiveMode === 'typing' ? (
-                <form onSubmit={(event) => { event.preventDefault(); void checkAnswer(); }} className="mx-auto grid w-full max-w-2xl gap-3 text-start">
+                <form onSubmit={(event) => { event.preventDefault(); void checkAnswer(); }} className="grid w-full gap-3 text-start">
                   <label htmlFor="typed-answer" className="text-sm font-medium text-on-surface">{t('typeYourAnswer')}</label>
                   <input
                     ref={answerInput}
@@ -708,7 +709,7 @@ export function StudySession({
                   </Button>
                 </form>
               ) : (
-                <div className="mx-auto grid w-full max-w-2xl gap-3">
+                <div className="grid w-full gap-3">
                   {choiceOptionsQuery.isPending && <p role="status" className="m-0 text-on-surface-variant">{t('choiceLoading')}</p>}
                   {choiceOptionsQuery.isError && (
                     <div role="alert" className="grid gap-3 rounded-2xl bg-error-container p-4 text-start text-on-error-container">
@@ -737,7 +738,7 @@ export function StudySession({
                 </div>
               )
             ) : (
-              <div className="grid gap-3">
+              <div className="study-card__ratings grid gap-3">
                 <div role="group" aria-label={t('ratingGroup')} className="grid grid-cols-2 gap-2 expanded:grid-cols-4">
                   {([1, 2, 3, 4] as const).map((rating) => (
                     <button
@@ -745,7 +746,7 @@ export function StudySession({
                       type="button"
                       disabled={busy || pendingReview !== null || isCheckingAnswer}
                       onClick={() => void rate(rating)}
-                      className={`flex min-h-12 flex-col items-center justify-center rounded-2xl px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 ${answerMatch?.suggested_rating === rating ? 'ring-2 ring-primary' : ''} ${ratingClasses[rating]}`}
+                      className={`study-card__rating flex min-h-12 flex-col items-center justify-center rounded-2xl px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 ${answerMatch?.suggested_rating === rating ? 'ring-2 ring-primary' : ''} ${ratingClasses[rating]}`}
                     >
                       <span className="font-medium">{t(ratingLabels[rating])}</span>
                       <span className="text-sm opacity-80">{formatInterval(currentCard.previews[rating].interval)}</span>

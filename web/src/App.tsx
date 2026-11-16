@@ -37,9 +37,7 @@ function AppFrame({ children, signedIn = false }: { children: ReactNode; signedI
         {t('skipToMain')}
       </a>
 
-      <header className="app-header">
-        <p className="app-name">{t('appName')}</p>
-      </header>
+      {!signedIn && <header className="app-header"><p className="app-name">{t('appName')}</p></header>}
 
       {children}
     </div>
@@ -133,27 +131,29 @@ function AuthenticatedApp() {
   return (
     <AppFrame signedIn={!!meQuery.data}>
       {meQuery.data && <AppNavigation isAdmin={!!meQuery.data.user.is_admin} pathname={window.location.pathname} />}
+      {meQuery.data && (
+        <header className="app-user-bar">
+          <p className="app-name">{t('appName')}</p>
+          <div className="app-user-identity">
+            <p className="app-user-name">{meQuery.data.user.name}</p>
+            <p className="app-user-email">{meQuery.data.user.email}</p>
+          </div>
+          <span className="app-connection-status" role="status" aria-live="polite">
+            {t(isOnline ? 'connectionOnline' : 'connectionOffline')}
+          </span>
+          <Button
+            variant="tonal"
+            type="button"
+            disabled={logoutMutation.isPending}
+            onClick={() => logoutMutation.mutate()}
+          >
+            {t(logoutMutation.isPending ? 'signingOut' : 'signOut')}
+          </Button>
+        </header>
+      )}
       <main className={`main-content ${meQuery.data ? 'app-content' : 'auth-content'}`} id="main-content" tabIndex={-1}>
         {meQuery.data ? (
           <>
-            <header className="app-user-bar">
-              <div>
-                <p className="auth-kicker">{t('signedIn')}</p>
-                <p className="app-user-name">{meQuery.data.user.name}</p>
-                <p className="app-user-email">{meQuery.data.user.email}</p>
-              </div>
-              <span className="rounded-full bg-surface-container px-3 py-2 text-sm text-on-surface-variant" role="status" aria-live="polite">
-                {t(isOnline ? 'connectionOnline' : 'connectionOffline')}
-              </span>
-              <Button
-                variant="tonal"
-                type="button"
-                disabled={logoutMutation.isPending}
-                onClick={() => logoutMutation.mutate()}
-              >
-                {t(logoutMutation.isPending ? 'signingOut' : 'signOut')}
-              </Button>
-            </header>
             {logoutMutation.isError && (
               <p className="auth-form-error" role="alert">
                 {logoutMutation.error instanceof ApiError && logoutMutation.error.serverMessage
