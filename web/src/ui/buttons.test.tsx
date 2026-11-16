@@ -32,4 +32,14 @@ describe('ConnectedButtonGroup', () => {
     expect(state.props[0].whileTap).toBeUndefined();
     expect(state.props[0].style).toEqual({ borderRadius: '1.5rem' });
   });
+  it('distinguishes the selected rating without relying on shape alone', () => {
+    renderToStaticMarkup(<ConnectedButtonGroup label="sessionActions" selected="good" actions={[
+      { id: 'good', label: 'good', rating: 'good', onSelect() {} },
+      { id: 'easy', label: 'easy', rating: 'easy', onSelect() {} },
+    ]} />);
+    expect(state.props[0]['aria-pressed']).toBe(true);
+    expect(state.props[0].className).toContain('ring-inset');
+    expect(state.props[1]['aria-pressed']).toBe(false);
+    expect(state.props[1].className).not.toContain('ring-inset');
+  });
 });

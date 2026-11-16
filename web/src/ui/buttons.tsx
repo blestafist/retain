@@ -4,8 +4,8 @@ import { t, type TranslationKey } from '../i18n/en';
 import { getMotionTransition } from '../theme/motion';
 import { Chevron, Plus, menuItem, target, type Action } from './shared';
 
-const button = `${target} inline-flex items-center justify-center gap-2 bg-primary px-5 text-on-primary disabled:opacity-50`;
-const popup = 'z-50 min-w-48 rounded-2xl bg-surface-container-high p-2 text-on-surface shadow-lg';
+const button = `${target} inline-flex items-center justify-center gap-2 bg-primary px-5 font-medium text-on-primary hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none`;
+const popup = 'z-50 min-w-48 rounded-3xl bg-surface-container-high p-2 text-on-surface shadow-xl';
 
 type Rating = 'again' | 'hard' | 'good' | 'easy';
 const ratingClasses: Record<Rating, string> = {
@@ -17,7 +17,7 @@ const ratingClasses: Record<Rating, string> = {
 
 export function ConnectedButtonGroup({ actions, selected, label }: { actions: (Action & { rating: Rating })[]; selected?: string; label: TranslationKey }) {
   const reduced = !!useReducedMotion();
-  return <div role="group" aria-label={t(label)} className="flex flex-wrap gap-0.5">{actions.map((action) => <motion.button key={action.id} type="button" disabled={action.disabled} aria-pressed={selected === action.id} onClick={action.onSelect} className={`${target} flex flex-1 items-center justify-center gap-2 px-3 disabled:opacity-50 ${ratingClasses[action.rating]}`} style={reduced ? { borderRadius: selected === action.id ? '1.5rem' : '0.5rem' } : undefined} animate={reduced ? undefined : { borderRadius: selected === action.id ? '1.5rem' : '0.5rem' }} whileTap={reduced ? undefined : { borderRadius: '0.375rem' }} transition={reduced ? undefined : getMotionTransition('spatial', 'fast', false)}>{action.icon}{t(action.label)}</motion.button>)}</div>;
+  return <div role="group" aria-label={t(label)} className="flex flex-wrap gap-0.5">{actions.map((action) => <motion.button key={action.id} type="button" disabled={action.disabled} aria-pressed={selected === action.id} onClick={action.onSelect} className={`${target} flex flex-1 items-center justify-center gap-2 px-3 font-medium hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none ${selected === action.id ? 'ring-2 ring-inset ring-current' : ''} ${ratingClasses[action.rating]}`} style={reduced ? { borderRadius: selected === action.id ? '1.5rem' : '0.5rem' } : undefined} animate={reduced ? undefined : { borderRadius: selected === action.id ? '1.5rem' : '0.5rem' }} whileTap={reduced ? undefined : { borderRadius: '0.375rem' }} transition={reduced ? undefined : getMotionTransition('spatial', 'fast', false)}>{action.icon}{t(action.label)}</motion.button>)}</div>;
 }
 
 function MenuItems({ actions }: { actions: Action[] }) {
@@ -25,7 +25,7 @@ function MenuItems({ actions }: { actions: Action[] }) {
 }
 
 export function FabMenu({ actions, label = 'openActions', portalContainer }: { actions: Action[]; label?: TranslationKey; portalContainer?: HTMLElement | null }) {
-  return <DropdownMenu.Root><DropdownMenu.Trigger aria-label={t(label)} className={`${target} flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-container text-on-primary-container shadow-lg`}><Plus /></DropdownMenu.Trigger><DropdownMenu.Portal container={portalContainer}><DropdownMenu.Content sideOffset={8} align="end" className={popup}><MenuItems actions={actions} /></DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>;
+  return <DropdownMenu.Root><DropdownMenu.Trigger aria-label={t(label)} className={`${target} flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-container text-on-primary-container shadow-lg hover:shadow-xl data-[state=open]:rounded-full`}><Plus /></DropdownMenu.Trigger><DropdownMenu.Portal container={portalContainer}><DropdownMenu.Content sideOffset={8} align="end" className={popup}><MenuItems actions={actions} /></DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>;
 }
 
 export function SplitButton({ action, options, menuLabel = 'chooseMode', portalContainer }: { action: Action; options: Action[]; menuLabel?: TranslationKey; portalContainer?: HTMLElement | null }) {
