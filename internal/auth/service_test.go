@@ -127,7 +127,7 @@ func TestCreateAdminRegisterAndAccount(t *testing.T) {
 		admin.Settings.MaximumInterval != 36500 || admin.Settings.LearningSteps != "1m 10m" ||
 		admin.Settings.RelearningSteps != "10m" || admin.Settings.Timezone != "UTC" ||
 		admin.Settings.DayStartHour != 4 || admin.Settings.ThemeMode != "system" ||
-		admin.Settings.ThemeSeed != "#3A4527" || admin.Settings.ThemeVariant != "fidelity" ||
+		admin.Settings.ThemeSeed != "#2563EB" || admin.Settings.ThemeVariant != "tonal_spot" ||
 		admin.Settings.ThemeContrast != 0 || admin.Settings.FsrsWeights != nil || admin.Settings.ReminderTime != nil {
 		t.Errorf("CreateAdmin() settings = %+v, want complete defaults", admin.Settings)
 	}
@@ -158,6 +158,10 @@ func TestCreateAdminRegisterAndAccount(t *testing.T) {
 	}
 	if account.User != registered || account.Settings.UserID != registered.ID {
 		t.Errorf("GetAccount() = %+v, want user %+v and own settings", account, registered)
+	}
+	if account.Settings.ThemeSeed != "#2563EB" || account.Settings.ThemeVariant != "tonal_spot" ||
+		account.Settings.ThemeMode != "system" || account.Settings.ThemeContrast != 0 {
+		t.Errorf("Register() theme settings = %+v, want current defaults", account.Settings)
 	}
 	if _, err := service.CreateInvite(ctx, registered.ID); !errors.Is(err, ErrForbidden) {
 		t.Errorf("CreateInvite(non-admin) error = %v, want ErrForbidden", err)
@@ -604,7 +608,8 @@ func TestSettingsPatchValidationAndIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAccount(second) error = %v", err)
 	}
-	if second.Settings.NewPerDay != 20 || second.Settings.ThemeMode != "system" || second.Settings.ThemeSeed != "#3A4527" {
+	if second.Settings.NewPerDay != 20 || second.Settings.ThemeMode != "system" ||
+		second.Settings.ThemeSeed != "#2563EB" || second.Settings.ThemeVariant != "tonal_spot" {
 		t.Errorf("first user's patch leaked to second user's settings: %+v", second.Settings)
 	}
 	if _, err := service.UpdateSettings(ctx, secondID+999, map[string]json.RawMessage{"new_per_day": json.RawMessage(`5`)}); !errors.Is(err, ErrUnauthenticated) {

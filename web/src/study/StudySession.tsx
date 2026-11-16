@@ -537,7 +537,7 @@ export function StudySession({
           <a href="/" className="inline-flex min-h-12 items-center rounded-full px-3 text-primary underline-offset-4 hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{t('backToDecks')}</a>
           <h1 id="study-session-heading" className="study-session__heading m-0 text-on-surface">{t('studySession')}</h1>
         </div>
-        <div className="flex gap-2" aria-label={t('sessionActions')}>
+        <div className="flex gap-2" role="group" aria-label={t('sessionActions')}>
           {voice && currentCard && <Button type="button" variant="tonal" onClick={() => speak(currentCard, voice)}><SpeakIcon />{t('speak')}</Button>}
           {reviewed.length > 0 && <Button type="button" variant="tonal" disabled={busy || pendingReview !== null || !isOnline} onClick={() => void undo()}>{t(busy ? 'undoing' : 'undo')}</Button>}
         </div>

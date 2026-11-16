@@ -88,6 +88,17 @@ function settingsFor(
 }
 
 describe('MD3 palette generation', () => {
+  it.each(MODES)('uses blue accents with low-chroma neutral surfaces by default in %s', (mode) => {
+    const palette = createThemePalette(DEFAULT_THEME_SETTINGS, mode);
+    const primary = Hct.fromInt(argbFromHex(palette.primary));
+    const surface = Hct.fromInt(argbFromHex(palette.surface));
+
+    expect(primary.hue).toBeGreaterThan(250);
+    expect(primary.hue).toBeLessThan(300);
+    expect(surface.chroma).toBeLessThan(10);
+    expect(palette).not.toEqual(createThemePalette(settingsFor({ seed: '#3A4527', variant: 'fidelity' }), mode));
+  });
+
   it.each(THEME_VARIANTS)(
     'generates every role for %s at all contrast levels and modes',
     (variant) => {

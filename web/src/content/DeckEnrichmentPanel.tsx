@@ -200,21 +200,20 @@ function statusText(job: JobStatus): string {
   return t(job.status === 'done' ? 'enrichmentCompleted' : 'enrichmentFailed');
 }
 
-export function DeckEnrichmentPanel({ ownerId, deckId, deckName, enabled }: {
+interface DeckEnrichmentPanelProps {
   ownerId: number;
   deckId: DeckId;
   deckName: string;
   enabled: boolean;
-}) {
-  return <DeckEnrichmentPanelForOwner key={ownerId} ownerId={ownerId} deckId={deckId} deckName={deckName} enabled={enabled} />;
+  onDirtyChange?: (dirty: boolean) => void;
+  onBusyChange?: (busy: boolean) => void;
 }
 
-function DeckEnrichmentPanelForOwner({ ownerId, deckId, deckName, enabled }: {
-  ownerId: number;
-  deckId: DeckId;
-  deckName: string;
-  enabled: boolean;
-}) {
+export function DeckEnrichmentPanel(props: DeckEnrichmentPanelProps) {
+  return <DeckEnrichmentPanelForOwner key={props.ownerId} {...props} />;
+}
+
+function DeckEnrichmentPanelForOwner({ ownerId, deckId, deckName, enabled, onDirtyChange, onBusyChange }: DeckEnrichmentPanelProps) {
   const [jobs, setJobs] = useState<TrackedJob[]>(() => readJobs(ownerId));
   const [selectedJobId, setSelectedJobId] = useState<string | null>(() => jobs.at(-1)?.jobId ?? null);
   const [startError, setStartError] = useState(false);
@@ -223,6 +222,10 @@ function DeckEnrichmentPanelForOwner({ ownerId, deckId, deckName, enabled }: {
   const [applyResults, setApplyResults] = useState<Record<string, ApplySummary>>({});
   const startMutation = useStartDeckEnrichment();
   const applyMutation = useApplyNoteEnrichment();
+
+  const dirty = Object.values(selectedFields).some((fields) => Object.values(fields).some(Boolean));
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => { onBusyChange?.(startMutation.isPending || applyMutation.isPending); }, [startMutation.isPending, applyMutation.isPending, onBusyChange]);
 
   useEffect(() => {
     if (jobs.some((item) => item.jobId === selectedJobId)) return;

@@ -150,8 +150,8 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const createUserSettings = `-- name: CreateUserSettings :one
-INSERT INTO user_settings (user_id)
-VALUES (?)
+INSERT INTO user_settings (user_id, theme_seed, theme_variant)
+VALUES (?, '#2563EB', 'tonal_spot')
 RETURNING user_id, new_per_day, max_reviews_per_day, request_retention, maximum_interval, learning_steps, relearning_steps, fsrs_weights, timezone, day_start_hour, reminder_time, tts_auto, theme_mode, theme_seed, theme_variant, theme_contrast
 `
 

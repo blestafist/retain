@@ -18,7 +18,7 @@ body {
   min-width: 20rem;
   min-height: 100vh;
   margin: 0;
-  background: var(--md-sys-color-surface);
+  background: var(--md-sys-color-surface-container-low);
   color: var(--md-sys-color-on-surface);
 }
 
@@ -26,20 +26,42 @@ body {
   display: flex;
   min-height: 100vh;
   flex-direction: column;
-  padding: 0 clamp(1.25rem, 5vw, 4rem);
+  padding: 0 1rem;
+  background: var(--md-sys-color-surface-container-low);
 }
 
 .app-header {
   display: flex;
-  min-height: 4.5rem;
+  width: 100%;
+  max-width: 82.5rem;
+  min-height: 4rem;
+  align-self: center;
   align-items: center;
-  border-bottom: 1px solid var(--md-sys-color-outline-variant);
 }
+
+.app-brand {
+  display: inline-flex;
+  min-height: 3rem;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--md-sys-color-on-surface);
+  text-decoration: none;
+}
+
+.app-brand-mark {
+  width: 2rem;
+  height: 2rem;
+  color: var(--md-sys-color-primary);
+}
+
+.app-brand-mark path { stroke: var(--md-sys-color-on-primary); }
 
 .app-name {
   margin: 0;
-  font: var(--md-sys-typescale-title-medium);
-  letter-spacing: var(--md-sys-typescale-title-medium-letter-spacing);
+  font: var(--md-sys-typescale-headline-small);
+  font-weight: 600;
+  letter-spacing: -0.035em;
 }
 
 .main-content {
@@ -276,51 +298,127 @@ body {
   padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
 }
 
-@media (min-width: 52.5rem) {
-  .app-shell-signed-in { padding-inline-start: calc(6.5rem + clamp(1.25rem, 5vw, 4rem)); }
-  .app-shell-signed-in .app-content { padding-bottom: 4rem; }
+@media (min-width: 37.5rem) {
+  .app-shell { padding-inline: 1.5rem; }
+  .app-header { min-height: 4.5rem; }
 }
 
 .app-user-bar {
   display: flex;
   width: 100%;
-  max-width: 96rem;
+  max-width: 82.5rem;
   align-self: center;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.75rem 1rem;
-  min-height: 4.75rem;
-  margin-bottom: 0.75rem;
-  padding-block: 0.625rem;
-  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 4rem;
+  padding-block: 0.5rem;
 }
 
-.app-user-bar .app-name {
-  margin-right: auto;
-  color: var(--md-sys-color-primary);
-  font: var(--md-sys-typescale-title-large);
-  font-weight: 700;
-}
-
-.app-user-identity {
+.app-user-controls {
+  display: flex;
   min-width: 0;
-  text-align: right;
+  align-items: center;
+  gap: 0.75rem;
 }
 
-.app-user-name,
-.app-user-email {
-  margin: 0;
+.app-account-trigger {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 3rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.625rem;
+  padding: 0.25rem;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-surface-container-low);
+  color: var(--md-sys-color-on-surface);
+  font: var(--md-sys-typescale-label-large);
+  cursor: pointer;
+}
+
+.app-account-trigger:hover,
+.app-account-trigger[data-state='open'] {
+  background: var(--md-sys-color-surface-container-highest);
+}
+
+.app-account-avatar {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  font: var(--md-sys-typescale-title-medium);
+}
+
+.app-account-trigger-name,
+.app-account-chevron { display: none; }
+
+.app-account-menu {
+  z-index: 50;
+  width: min(20rem, calc(100vw - 2rem));
+  max-height: var(--radix-dropdown-menu-content-available-height);
+  overflow-y: auto;
+  padding: 0.5rem;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-extra-large);
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+}
+
+.app-account-identity {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem 1rem;
+}
+
+.app-account-caption {
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-label-medium);
 }
 
 .app-user-name {
-  color: var(--md-sys-color-on-surface);
   font: var(--md-sys-typescale-title-medium);
+  overflow-wrap: anywhere;
 }
 
 .app-user-email {
   color: var(--md-sys-color-on-surface-variant);
   font: var(--md-sys-typescale-body-medium);
   overflow-wrap: anywhere;
+}
+
+.app-account-separator {
+  height: 1px;
+  margin: 0.25rem 0.5rem;
+  background: var(--md-sys-color-outline-variant);
+}
+
+.app-account-menu-item {
+  display: flex;
+  min-height: 3rem;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--md-sys-shape-corner-large);
+  font: var(--md-sys-typescale-label-large);
+  cursor: pointer;
+}
+
+.app-account-menu-item svg { width: 1.25rem; height: 1.25rem; }
+.app-account-menu-item[data-highlighted] { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); outline: none; }
+.app-account-menu-item[data-disabled] { color: var(--md-sys-color-on-surface-variant); cursor: not-allowed; }
+
+.app-brand:focus-visible,
+.app-account-trigger:focus-visible,
+.app-account-menu-item:focus-visible {
+  outline: 3px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
 }
 
 .app-connection-status {
@@ -331,7 +429,7 @@ body {
   border-radius: var(--md-sys-shape-corner-full);
   background: var(--md-sys-color-secondary-container);
   color: var(--md-sys-color-on-secondary-container);
-  font: var(--md-sys-typescale-label-large);
+  font: var(--md-sys-typescale-label-medium);
 }
 
 .app-connection-status::before {
@@ -346,14 +444,20 @@ body {
   .auth-card {
     box-shadow: none;
   }
-
-  .app-user-bar {
-    gap: 0.5rem;
-  }
-
-  .app-user-identity { flex: 1 1 10rem; }
-  .app-user-bar .app-name { margin-right: 0.5rem; }
 }
+
+@media (min-width: 37.5rem) {
+  .app-user-bar { min-height: 4.5rem; }
+  .app-account-trigger { max-width: 18rem; padding-inline-end: 0.75rem; }
+  .app-account-trigger-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .app-account-chevron { display: block; width: 1.25rem; height: 1.25rem; flex-shrink: 0; }
+}
+
+@media (min-width: 52.5rem) {
+  .app-shell-signed-in { padding-inline-start: calc(5.5rem + 1.5rem); }
+  .app-shell-signed-in .app-content { padding-bottom: 4rem; }
+}
+
 .stats-page {
   display: grid;
   gap: 1.25rem;

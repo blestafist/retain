@@ -407,11 +407,11 @@ Background jobs (`jobs`) are run by a simple in-process worker pool; on restart,
 ### 8.1 Color: adaptive theme
 The entire palette is built at runtime from a single **seed color** (MD3 dynamic color). Change the accent and the whole app changes.
 
-- **Default**: swamp green **`#3A4527`**.
+- **Default**: clear blue **`#2563EB`**, using `TonalSpot` for coordinated blue accents, neutral surfaces, and a restrained complementary tertiary. The previous swamp/Fidelity default made every surface look olive and visually flattened the workspace.
 - **Settings → Appearance**:
-  - Preset swatches (MD3 color swatches): swamp `#3A4527` (default), plus 6–8 curated hues.
+  - Preset swatches (MD3 color swatches): blue `#2563EB` (default), swamp `#3A4527`, plus curated hues.
   - Custom color: color picker + HEX field.
-  - **Scheme style**: `Fidelity` (default — stays closest to the chosen hue), `TonalSpot` (calmer), `Vibrant`, `Expressive` (rotates hue more, brighter), `Monochrome`.
+  - **Scheme style**: `TonalSpot` (default — balanced accents and neutral surfaces), `Fidelity` (stays closest to the chosen hue), `Vibrant`, `Expressive` (rotates hue more, brighter), `Monochrome`.
   - **Contrast**: standard / medium / high (`contrastLevel` 0 / 0.5 / 1).
   - Theme: light / dark / system.
   - Live preview (card, rating buttons, chart) before saving.
@@ -419,6 +419,7 @@ The entire palette is built at runtime from a single **seed color** (MD3 dynamic
 - **Generation**: `@material/material-color-utilities` (`Hct`, `SchemeFidelity`/`SchemeTonalSpot`/..., `DynamicScheme`, `MaterialDynamicColors`) right in the browser → CSS variables `--md-sys-color-*` (primary, on-primary, primary-container, secondary, tertiary, surface, surface-container-lowest…highest, outline, error, etc.) on `:root`. Recalculation takes < 5 ms.
 - **No flash on load**: the last computed palette is cached in `localStorage`; an inline script in `index.html` applies it before React renders. Without a cache — a built-in default palette generated at build time (`web/scripts/gen-theme.ts`).
 - **Sync**: `theme_seed`, `theme_variant`, `theme_contrast`, `theme_mode` are stored in `user_settings` and follow the user across devices.
+- **Default refresh**: migrate only the exact old default combination (`#3A4527` + `fidelity`) to blue + `tonal_spot`, preserving mode, contrast, and all other settings. Explicitly customized seed/style combinations stay unchanged. New account settings are inserted explicitly with the current default; do not edit the original applied migration. Invalidate older computed-palette caches.
 - The Tailwind theme references variables only (`bg-primary-container`, `text-on-surface`, etc.); **no hard-coded colors in components** (enforced by a lint rule).
 - **Semantic colors don't depend on the seed**: rating buttons use fixed hues, harmonized (`Blend.harmonize`), so Again always stays "red" and Good "green" with any accent: Again → error, Hard → orange, Good → green, Easy → blue, each in its own `container` variant.
 - **Charts**: series use `primary` / `tertiary` / `secondary` and semantic roles.
@@ -426,7 +427,7 @@ The entire palette is built at runtime from a single **seed color** (MD3 dynamic
 - **Accessibility**: when a custom color is chosen, contrast of `on-*`/`*` pairs is checked against WCAG AA; if it fails — a warning and an offer to raise contrast. Tests run all presets × styles × light/dark.
 
 ### 8.2 Typography
-- **Roboto Flex** (variable, self-hosted via `@fontsource-variable`) covering Latin with diacritics and Cyrillic.
+- **Google Sans Flex** (variable, OFL-1.1, self-hosted via `@fontsource-variable`) for brand, headings, body and controls, with Latin/extended-Latin subsets. This font does not include Cyrillic; retain a self-hosted **Roboto Flex Cyrillic** fallback for Russian vocabulary. The Tailwind sans family must reference the same typeface token, not silently fall back to its system-font default. Verify the actual rendered face and font requests in the browser.
 - MD3 type scale (display / headline / title / body / label) + Expressive **emphasized** styles for key spots: the term on a card — `display-large-emphasized`, session summary and streak — `headline-emphasized`.
 
 ### 8.3 Shape
@@ -455,6 +456,7 @@ The entire palette is built at runtime from a single **seed color** (MD3 dynamic
 
 - Window size classes: compact < 600, medium 600–839, expanded ≥ 840.
 - Touch targets at least 48dp, visible focus ring, WCAG AA contrast (generated palette checked in tests).
+- **Deck workspace density**: one flat deck list and one content surface, not cards nested inside cards. The selected deck name is the primary heading; language and counts are compact supporting context, not a four-card dashboard. Words use aligned list rows. Import/export, rename, creation, and AI enrichment open only on request in accessible dialogs/sheets; their full forms are not permanently appended to the word list. Empty decks offer adding a word or importing immediately. Account details/sign-out live in an account menu, with an always-visible offline indicator only when offline. Keep all existing capabilities and permissions.
 
 ### 8.6 Implementation
 - There is no official web component library for MD3 Expressive at planning time (`@material/web` is in maintenance mode and lacks Expressive). So we build a small UI kit in `web/src/ui/`:

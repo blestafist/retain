@@ -14,13 +14,46 @@ import {
   THEME_CACHE_KEY,
   THEME_CACHE_REVISION,
   THEME_CACHE_VERSION,
+  THEME_PRESETS,
   normalizeSeedColor,
   resolveThemeMode,
   validateThemeSettings,
 } from './settings';
 import { THEME_ROLE_NAMES } from './palette';
 
+function bootstrapTheme(serialized: string, systemIsDark = false) {
+  const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
+  const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)?.[1];
+  const defaults = html.match(/<script id="theme-default-palette" type="application\/json">(.*?)<\/script>/)?.[1];
+  const properties: Record<string, string> = {};
+  const root = { dataset: {}, style: { colorScheme: '', setProperty: (key: string, value: string) => { properties[key] = value; } } };
+  let themeColor = '';
+  expect(script).toBeDefined();
+  expect(defaults).toBeDefined();
+  runInNewContext(script ?? '', {
+    window: { localStorage: { getItem: () => serialized }, matchMedia: () => ({ matches: systemIsDark }) },
+    document: {
+      documentElement: root,
+      querySelector: (selector: string) => selector.includes('cache-version')
+        ? { content: String(THEME_CACHE_VERSION) }
+        : selector.includes('cache-revision')
+          ? { content: String(THEME_CACHE_REVISION) }
+          : { setAttribute: (_key: string, value: string) => { themeColor = value; } },
+      getElementById: () => ({ textContent: defaults }),
+    },
+  });
+  return { properties, root, themeColor };
+}
+
 describe('theme settings validation', () => {
+  it('defaults to balanced blue and keeps Swamp available as a custom preset', () => {
+    expect(DEFAULT_THEME_SETTINGS).toEqual({
+      seed: '#2563EB', variant: 'tonalSpot', contrastLevel: 0, mode: 'system',
+    });
+    expect(THEME_PRESETS[0]).toEqual({ id: 'blue', name: 'Blue', seed: '#2563EB' });
+    expect(THEME_PRESETS).toContainEqual({ id: 'swamp', name: 'Swamp', seed: '#3A4527' });
+  });
+
   it.each([
     ['#abc', '#AABBCC'],
     ['ABCDEF', '#ABCDEF'],
@@ -180,6 +213,46 @@ describe('theme cache and fallback', () => {
     expect(migrated).toEqual(expected);
     expect(persistThemeCache(migrated, storage)).toBe(true);
     expect(parseThemeCache(stored)).toEqual(expected);
+  });
+
+  it.each(['light', 'dark', 'system'] as const)('refreshes only an older default pair and preserves %s mode and contrast', (mode) => {
+    const settings = { seed: '#3A4527', variant: 'fidelity', contrastLevel: 0.5, mode } as const;
+    const stale = JSON.stringify({ ...createThemeCache(settings), revision: 2 });
+    const storage: ThemeStorage = { getItem: () => stale, setItem: () => undefined };
+    const expected = createThemeCache({ ...settings, seed: '#2563EB', variant: 'tonalSpot' });
+
+    expect(parseThemeCache(stale)).toBeNull();
+    expect(loadThemeCache(storage)).toEqual(expected);
+
+    const bootstrap = bootstrapTheme(stale, true);
+    const resolvedMode = mode === 'light' ? 'light' : 'dark';
+    const defaultPalette = createThemeCache(DEFAULT_THEME_SETTINGS).palettes[resolvedMode];
+    expect(bootstrap.root.style.colorScheme).toBe(resolvedMode);
+    expect(bootstrap.themeColor).toBe(defaultPalette.surface);
+    expect(bootstrap.properties['--md-sys-color-primary']).toBe(defaultPalette.primary);
+  });
+
+  it.each([
+    { seed: '#3A4527', variant: 'tonalSpot' },
+    { seed: '#006874', variant: 'fidelity' },
+  ] as const)('preserves older custom seed/style $seed/$variant on first paint and load', (custom) => {
+    const settings = { ...DEFAULT_THEME_SETTINGS, ...custom, mode: 'dark', contrastLevel: 1 } as const;
+    const expected = createThemeCache(settings);
+    const stale = JSON.stringify({ ...expected, revision: 2 });
+
+    expect(loadThemeCache({ getItem: () => stale, setItem: () => undefined })).toEqual(expected);
+    const bootstrap = bootstrapTheme(stale);
+    expect(bootstrap.root.style.colorScheme).toBe('dark');
+    for (const role of THEME_ROLE_NAMES) {
+      expect(bootstrap.properties[`--md-sys-color-${role}`]).toBe(expected.palettes.dark[role]);
+    }
+  });
+
+  it('preserves a newly selected Swamp/Fidelity theme in the current revision', () => {
+    const expected = createThemeCache({ ...DEFAULT_THEME_SETTINGS, seed: '#3A4527', variant: 'fidelity', mode: 'dark' });
+    const serialized = JSON.stringify(expected);
+    expect(loadThemeCache({ getItem: () => serialized, setItem: () => undefined })).toEqual(expected);
+    expect(bootstrapTheme(serialized).properties['--md-sys-color-primary']).toBe(expected.palettes.dark.primary);
   });
 
   it('uses the generated default for an incompatible stale cache', () => {

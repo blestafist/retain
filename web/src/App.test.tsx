@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
@@ -79,6 +79,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -154,14 +155,15 @@ describe('account screens', () => {
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Email or password is incorrect.');
     await user.click(screen.getByRole('button', { name: t('signIn') }));
 
-    expect(await screen.findByRole('heading', { name: t('decksWorkspace') })).toBeTruthy();
+    expect(await screen.findByRole('region', { name: t('decksWorkspace') })).toBeTruthy();
     expect(await screen.findByRole('heading', { name: 'German course' })).toBeTruthy();
-    expect(screen.getByText('Morgan')).toBeTruthy();
-    const email = screen.getByText('friend@example.com');
-    const banner = email.closest('header');
-    expect(banner).not.toBeNull();
-    expect(screen.getAllByRole('banner')).toContain(banner);
+    const banner = screen.getByRole('banner', { name: t('appName') });
+    expect(within(banner).getByRole('link', { name: t('appName') })).toBeTruthy();
+    expect(within(banner).getByRole('button', { name: `${t('signedIn')}: Morgan` })).toBeTruthy();
     expect(screen.getByRole('main').contains(banner)).toBe(false);
+    expect(screen.queryByText('friend@example.com')).toBeNull();
+    expect(screen.queryByText(t('signOut'))).toBeNull();
+    expect(screen.queryByText(t('connectionOnline'))).toBeNull();
     expect(meCalls).toBe(2);
   });
 
@@ -176,11 +178,16 @@ describe('account screens', () => {
     });
     const { queryClient } = renderApp();
 
-    expect(await screen.findByText('Morgan')).toBeTruthy();
-    expect(screen.getByText('friend@example.com')).toBeTruthy();
+    const account = await screen.findByRole('button', { name: `${t('signedIn')}: Morgan` });
+    expect(account.querySelector('.app-account-avatar')?.textContent).toBe('M');
+    expect(screen.queryByText('friend@example.com')).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: t('signOut') })).toBeNull();
     queryClient.setQueryData(['deck-notes', '42'], [{ id: 7, term: 'Wort' }]);
-    expect(queryClient.getQueryData(['decks'])).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: t('signOut') }));
+    await waitFor(() => expect(queryClient.getQueryData(['decks'])).toBeTruthy());
+    await user.click(account);
+    const menu = await screen.findByRole('menu', { name: `${t('signedIn')}: Morgan` });
+    expect(within(menu).getByText('friend@example.com')).toBeTruthy();
+    await user.click(within(menu).getByRole('menuitem', { name: t('signOut') }));
     await screen.findByRole('heading', { name: t('signInHeading') });
 
     expect(calls.map(({ url }) => url)).toContain('/api/v1/llm/status');
@@ -188,6 +195,112 @@ describe('account screens', () => {
     await waitFor(() => expect(screen.queryByText('Morgan')).toBeNull());
     expect(queryClient.getQueryData(['decks'])).toBeUndefined();
     expect(queryClient.getQueryData(['deck-notes', '42'])).toBeUndefined();
+  });
+
+  it('opens the account menu with a keyboard and restores focus when dismissed', async () => {
+    const user = userEvent.setup();
+    setFetchHandler(async (url) => {
+      if (url === '/api/v1/me') return response(signedInResponse);
+      if (url === '/api/v1/llm/status') return response({ enabled: false });
+      if (url === '/api/v1/decks') return response([]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    renderApp();
+
+    const account = await screen.findByRole('button', { name: `${t('signedIn')}: Morgan` });
+    expect(account.getAttribute('aria-haspopup')).toBe('menu');
+    expect(account.getAttribute('aria-expanded')).toBe('false');
+    account.focus();
+    await user.keyboard('{Enter}');
+
+    const menu = await screen.findByRole('menu', { name: `${t('signedIn')}: Morgan` });
+    expect(within(menu).getByText('Morgan')).toBeTruthy();
+    expect(within(menu).getByText('friend@example.com')).toBeTruthy();
+    const signOut = within(menu).getByRole('menuitem', { name: t('signOut') });
+    await waitFor(() => expect(document.activeElement).toBe(signOut));
+    expect(account.getAttribute('aria-expanded')).toBe('true');
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    expect(document.activeElement).toBe(account);
+    expect(calls.some(({ url }) => url === '/api/v1/auth/logout')).toBe(false);
+  });
+
+  it('shows an offline status in the banner only while disconnected', async () => {
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+    setFetchHandler(async (url) => {
+      if (url === '/api/v1/me') return response(signedInResponse);
+      if (url === '/api/v1/llm/status') return response({ enabled: false });
+      if (url === '/api/v1/decks') return response([]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    renderApp();
+
+    await screen.findByRole('button', { name: `${t('signedIn')}: Morgan` });
+    const banner = screen.getByRole('banner', { name: t('appName') });
+    expect(within(banner).queryByRole('status')).toBeNull();
+    expect(screen.queryByText(t('connectionOnline'))).toBeNull();
+
+    online.mockReturnValue(false);
+    act(() => { window.dispatchEvent(new Event('offline')); });
+    const status = within(banner).getByRole('status');
+    expect(status.textContent).toBe(t('connectionOffline'));
+    expect(status.getAttribute('aria-live')).toBe('polite');
+    expect(screen.getByRole('main').contains(status)).toBe(false);
+
+    online.mockReturnValue(true);
+    act(() => { window.dispatchEvent(new Event('online')); });
+    expect(within(banner).queryByRole('status')).toBeNull();
+    expect(screen.queryByText(t('connectionOnline'))).toBeNull();
+  });
+
+  it('retains the session and exposes the server error when menu sign-out fails', async () => {
+    const user = userEvent.setup();
+    setFetchHandler(async (url) => {
+      if (url === '/api/v1/me') return response(signedInResponse);
+      if (url === '/api/v1/llm/status') return response({ enabled: false });
+      if (url === '/api/v1/decks') return response([]);
+      if (url === '/api/v1/auth/logout') return response({ error: { code: 'unavailable', message: 'Please try signing out again.' } }, 503);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const { queryClient } = renderApp();
+
+    const account = await screen.findByRole('button', { name: `${t('signedIn')}: Morgan` });
+    await user.click(account);
+    await user.click(await screen.findByRole('menuitem', { name: t('signOut') }));
+
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Please try signing out again.');
+    expect(queryClient.getQueryData(meQueryKey)).toEqual(signedInResponse);
+    expect(screen.getByRole('main').contains(screen.getByRole('alert'))).toBe(true);
+    await user.click(account);
+    expect(await screen.findByRole('menuitem', { name: t('signOut') })).toBeTruthy();
+  });
+
+  it('prevents duplicate sign-out requests while the first request is pending', async () => {
+    const user = userEvent.setup();
+    let completeLogout: (value: Response) => void = () => undefined;
+    const logoutResponse = new Promise<Response>((resolve) => { completeLogout = resolve; });
+    setFetchHandler(async (url) => {
+      if (url === '/api/v1/me') return response(signedInResponse);
+      if (url === '/api/v1/llm/status') return response({ enabled: false });
+      if (url === '/api/v1/decks') return response([]);
+      if (url === '/api/v1/auth/logout') return logoutResponse;
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    renderApp();
+
+    const account = await screen.findByRole('button', { name: `${t('signedIn')}: Morgan` });
+    await user.click(account);
+    await user.click(await screen.findByRole('menuitem', { name: t('signOut') }));
+    expect(account.getAttribute('aria-busy')).toBe('true');
+    await user.click(account);
+    const pendingSignOut = await screen.findByRole('menuitem', { name: t('signingOut') });
+    expect(pendingSignOut.getAttribute('aria-disabled')).toBe('true');
+    await user.click(pendingSignOut);
+    expect(calls.filter(({ url }) => url === '/api/v1/auth/logout')).toHaveLength(1);
+
+    completeLogout(response(undefined, 204));
+    expect(await screen.findByRole('heading', { name: t('signInHeading') })).toBeTruthy();
   });
 
   it('clears cached content when the active session changes owners', async () => {
@@ -233,7 +346,7 @@ describe('account screens', () => {
 
     expect(await screen.findByRole('heading', { name: t('adminLlmHeading') })).toBeTruthy();
     expect(screen.getByRole('link', { name: t('admin') }).getAttribute('href')).toBe('/admin');
-    expect(screen.queryByRole('heading', { name: t('decksWorkspace') })).toBeNull();
+    expect(screen.queryByRole('region', { name: t('decksWorkspace') })).toBeNull();
   });
 
   it('routes signed-in users to analytics and loads the stats API', async () => {

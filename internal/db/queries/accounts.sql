@@ -50,8 +50,8 @@ DELETE FROM sessions
 WHERE expires_at <= ?;
 
 -- name: CreateUserSettings :one
-INSERT INTO user_settings (user_id)
-VALUES (?)
+INSERT INTO user_settings (user_id, theme_seed, theme_variant)
+VALUES (?, '#2563EB', 'tonal_spot')
 RETURNING *;
 
 -- name: GetUserSettings :one

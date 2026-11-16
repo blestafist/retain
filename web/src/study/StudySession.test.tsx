@@ -155,6 +155,7 @@ describe('study session', () => {
 
     renderSession();
     expect(await screen.findByRole('heading', { name: 'hello' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: t('sessionActions') })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: t('showAnswer') }));
     expect(screen.getByText('hallo')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: new RegExp(t('good')) }));
