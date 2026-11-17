@@ -30,9 +30,9 @@ const decks: DeckNode[] = [{
   parentId: null,
   langTarget: 'de',
   langNative: 'pl',
-  reverseCards: false,
+  reverseCards: false, reverseOnly: false,
   wrongArticleRating: 2,
-  children: [{ id: 43, name: 'Chapter A', parentId: 42, reverseCards: false, wrongArticleRating: 2, children: [] }],
+  children: [{ id: 43, name: 'Chapter A', parentId: 42, reverseCards: false, reverseOnly: false, wrongArticleRating: 2, children: [] }],
 }];
 
 function jsonResponse(body: unknown) {

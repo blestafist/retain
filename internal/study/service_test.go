@@ -682,3 +682,26 @@ func TestInvalidPersistedSettingsFailClosed(t *testing.T) {
 		t.Errorf("Review with invalid persisted settings = %v, want ErrInternal", err)
 	}
 }
+
+func TestQueueHidesForwardCardsInReverseOnlyDecks(t *testing.T) {
+	now := time.Date(2025, time.June, 4, 12, 0, 0, 0, time.UTC)
+	f := newStudyFixture(t, now)
+	forward := f.card(t, f.userID, f.parentID, srs.New, now)
+	if _, err := f.database.SQL.Exec(`INSERT INTO cards(note_id, user_id, direction) SELECT note_id, user_id, 'reverse' FROM cards WHERE id = ?`, forward); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.database.SQL.Exec(`UPDATE decks SET reverse_cards = 1 WHERE id = ?`, f.parentID); err != nil {
+		t.Fatal(err)
+	}
+	queue, err := f.service.Queue(context.Background(), f.userID, &f.parentID, 10)
+	if err != nil || len(queue) != 2 {
+		t.Fatalf("Queue() = %d cards, %v; want both directions", len(queue), err)
+	}
+	if _, err := f.database.SQL.Exec(`UPDATE decks SET reverse_only = 1 WHERE id = ?`, f.parentID); err != nil {
+		t.Fatal(err)
+	}
+	queue, err = f.service.Queue(context.Background(), f.userID, &f.parentID, 10)
+	if err != nil || len(queue) != 1 || queue[0].Direction != "reverse" {
+		t.Fatalf("Queue() = %+v, %v; want only the reverse card", queue, err)
+	}
+}

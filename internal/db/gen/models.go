@@ -57,6 +57,7 @@ type Deck struct {
 	UpdatedAt          time.Time
 	DeletedAt          sql.NullTime
 	DeletionBatch      sql.NullString
+	ReverseOnly        bool
 }
 
 type DeckShare struct {

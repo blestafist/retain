@@ -13,6 +13,7 @@ export interface DeckNode {
   langTarget?: TargetLanguage;
   langNative?: NativeLanguage;
   reverseCards: boolean;
+  reverseOnly: boolean;
   wrongArticleRating: 1 | 2;
   counts?: { notes: number; new: number; learning: number; due: number };
   children: DeckNode[];
@@ -37,6 +38,7 @@ export interface CreateDeckRequest {
   lang_target?: TargetLanguage;
   lang_native?: NativeLanguage;
   reverse_cards?: boolean;
+  reverse_only?: boolean;
   wrong_article_rating?: 1 | 2;
 }
 
@@ -176,6 +178,7 @@ export function decodeDeckTree(value: unknown): DeckNode[] {
         langTarget: optionalTargetLanguage(item.lang_target ?? item.langTarget),
         langNative: optionalNativeLanguage(item.lang_native ?? item.langNative),
         reverseCards: typeof item.reverse_cards === 'boolean' ? item.reverse_cards : false,
+        reverseOnly: item.reverse_only === true,
         wrongArticleRating: item.wrong_article_rating === 1 ? 1 : 2,
         ...(isRecord(item.counts) ? {
           counts: {

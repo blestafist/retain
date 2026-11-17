@@ -4,6 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { UserSettings } from '../api/client';
+import { ThemeProvider } from '../theme/context';
 import { t } from '../i18n/en';
 import { SettingsPage } from './SettingsPage';
 
@@ -41,7 +42,7 @@ describe('study settings', () => {
     vi.stubGlobal('fetch', fetchMock);
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
 
-    render(<QueryClientProvider client={queryClient}><SettingsPage settings={settings} /></QueryClientProvider>);
+    render(<ThemeProvider><QueryClientProvider client={queryClient}><SettingsPage settings={settings} /></QueryClientProvider></ThemeProvider>);
     const retention = screen.getByLabelText(t('desiredRetention'));
     await user.clear(retention);
     await user.type(retention, '1');

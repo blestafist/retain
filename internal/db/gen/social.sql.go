@@ -378,7 +378,7 @@ WITH RECURSIVE tree(id, depth) AS (
     WHERE child.owner_id = ?2 AND child.deleted_at IS NULL
       AND parent_deck.deleted_at IS NULL
 )
-SELECT decks.id, decks.owner_id, decks.parent_id, decks.name, decks.description, decks.position, decks.lang_target, decks.lang_native, decks.reverse_cards, decks.wrong_article_rating, decks.color_seed, decks.source, decks.external_id, decks.expected_count, decks.source_deck_id, decks.created_at, decks.updated_at, decks.deleted_at, decks.deletion_batch FROM tree JOIN decks ON decks.id = tree.id
+SELECT decks.id, decks.owner_id, decks.parent_id, decks.name, decks.description, decks.position, decks.lang_target, decks.lang_native, decks.reverse_cards, decks.wrong_article_rating, decks.color_seed, decks.source, decks.external_id, decks.expected_count, decks.source_deck_id, decks.created_at, decks.updated_at, decks.deleted_at, decks.deletion_batch, decks.reverse_only FROM tree JOIN decks ON decks.id = tree.id
 ORDER BY tree.depth, decks.position, decks.id
 `
 
@@ -416,6 +416,7 @@ func (q *Queries) ListDeckTreeForShare(ctx context.Context, arg ListDeckTreeForS
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.DeletionBatch,
+			&i.ReverseOnly,
 		); err != nil {
 			return nil, err
 		}
@@ -753,7 +754,6 @@ WITH eligible AS (
     JOIN decks ON decks.id = notes.deck_id
     JOIN eligible ON eligible.user_id = logs.user_id
     WHERE logs.undone = 0
-      AND cards.direction = 'forward'
       AND cards.deleted_at IS NULL
       AND notes.deleted_at IS NULL
       AND decks.deleted_at IS NULL

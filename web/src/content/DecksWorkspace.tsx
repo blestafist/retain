@@ -30,6 +30,17 @@ import {
 } from './hooks';
 
 type CreateMode = 'root' | 'child' | null;
+type Direction = 'forward' | 'reverse' | 'both';
+
+const directionFlags = {
+  forward: { reverse_cards: false, reverse_only: false },
+  reverse: { reverse_cards: true, reverse_only: true },
+  both: { reverse_cards: true, reverse_only: false },
+} as const;
+
+function deckDirection(deck: DeckNode): Direction {
+  return deck.reverseOnly ? 'reverse' : deck.reverseCards ? 'both' : 'forward';
+}
 type DeckPanel = 'add' | 'rename' | 'transfer' | 'enrich' | null;
 
 function flattenDecks(decks: DeckNode[]): DeckNode[] {
@@ -211,7 +222,7 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
   const [panelBusy, setPanelBusy] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState<TargetLanguage>('de');
   const [nativeLanguage, setNativeLanguage] = useState<NativeLanguage>('pl');
-  const [reverseCards, setReverseCards] = useState(false);
+  const [direction, setDirection] = useState<Direction>('reverse');
   const [editingNote, setEditingNote] = useState<DeckId | null>(null);
   const [newNoteTerm, setNewNoteTerm] = useState('');
   const [newNoteFields, setNewNoteFields] = useState<Record<string, unknown>>({});
@@ -242,7 +253,7 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
   function beginCreate(mode: Exclude<CreateMode, null>) {
     rememberTaskOpener();
     createDeckMutation.reset();
-    setReverseCards(false);
+    setDirection('reverse');
     setCreateMode(mode);
   }
 
@@ -289,7 +300,7 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
       name,
       parent_id: createMode === 'child' ? selectedDeck?.id ?? null : null,
       ...(createMode === 'root' ? { lang_target: targetLanguage, lang_native: nativeLanguage } : {}),
-      reverse_cards: reverseCards,
+      ...directionFlags[direction],
     }, { onSuccess: () => setCreateMode(null) });
   }
 
@@ -426,11 +437,13 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                   </div>
                 )}
                 {createMode === 'child' && selectedDeck && <p className="m-0 text-sm text-on-surface-variant">{t('childDeckUnder')} <strong className="font-medium text-on-surface">{selectedDeck.name}</strong>{pair ? ` · ${pair}` : ''}</p>}
-                <label className="flex min-h-12 items-center gap-3 text-sm font-medium text-on-surface" htmlFor="new-deck-reverse-cards">
-                  <input id="new-deck-reverse-cards" type="checkbox" checked={reverseCards} onChange={(event) => setReverseCards(event.target.checked)} className="size-5 accent-primary" />
-                  {t('reverseCards')}
+                <label className="grid gap-2 text-sm font-medium text-on-surface" htmlFor="new-deck-direction">
+                  {t('studyDirection')}
+                  <select id="new-deck-direction" value={direction} onChange={(event) => setDirection(event.target.value as Direction)} className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+                    <option value="reverse">{t('directionReverse')}</option><option value="forward">{t('directionForward')}</option><option value="both">{t('directionBoth')}</option>
+                  </select>
+                  <span className="font-normal text-on-surface-variant">{t('studyDirectionHint')}</span>
                 </label>
-                <p className="m-0 text-sm text-on-surface-variant">{t('reverseCardsHint')}</p>
                 {createDeckMutation.isError && <p role="alert" className="m-0 text-error">{errorMessage(createDeckMutation.error)}</p>}
                 <div className="flex flex-wrap gap-3">
                   <Button type="submit" disabled={createDeckMutation.isPending}>{t(createDeckMutation.isPending ? 'creatingDeck' : 'createDeck')}</Button>
@@ -453,6 +466,11 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                       <DropdownMenu.Trigger ref={deckActionsTrigger} className="workspace-icon-button" aria-label={t('deckActions')}><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg></DropdownMenu.Trigger>
                       <DropdownMenu.Portal><DropdownMenu.Content className="deck-actions-menu" align="end" sideOffset={8}>
                         <DropdownMenu.Item onSelect={() => openPanel('rename')}>{t('renameDeck')}</DropdownMenu.Item>
+                        <DropdownMenu.Label className="px-4 pt-2 text-xs text-on-surface-variant">{t('studyDirection')}</DropdownMenu.Label>
+                        <DropdownMenu.RadioGroup value={deckDirection(selectedDeck)} onValueChange={(value) => patchDeckMutation.mutate({ id: selectedDeck.id, input: directionFlags[value as Direction] })}>
+                          {(['reverse', 'forward', 'both'] as const).map((value) => <DropdownMenu.RadioItem key={value} value={value} role="menuitemradio">{deckDirection(selectedDeck) === value ? '✓ ' : '\u2003'}{t(value === 'reverse' ? 'directionReverse' : value === 'forward' ? 'directionForward' : 'directionBoth')}</DropdownMenu.RadioItem>)}
+                        </DropdownMenu.RadioGroup>
+                        <DropdownMenu.Separator />
                         <DropdownMenu.Item onSelect={() => beginCreate('child')}>{t('addChildDeck')}</DropdownMenu.Item>
                         <DropdownMenu.Item onSelect={() => openPanel('transfer')}>{t('importExport')}</DropdownMenu.Item>
                         {ownerId > 0 && <DropdownMenu.Item onSelect={() => openPanel('enrich')}>{t('deckEnrichment')}</DropdownMenu.Item>}

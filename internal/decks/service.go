@@ -57,6 +57,7 @@ type CreateInput struct {
 	LangTarget         *string `json:"lang_target"`
 	LangNative         *string `json:"lang_native"`
 	ReverseCards       bool    `json:"reverse_cards"`
+	ReverseOnly        bool    `json:"reverse_only"`
 	WrongArticleRating *int64  `json:"wrong_article_rating"`
 	ColorSeed          *string `json:"color_seed"`
 }
@@ -70,6 +71,7 @@ type PatchInput struct {
 	LangTarget         OptionalString
 	LangNative         OptionalString
 	ReverseCards       *bool
+	ReverseOnly        *bool
 	WrongArticleRating *int64
 	ColorSeed          OptionalString
 }
@@ -94,6 +96,7 @@ type Deck struct {
 	LangTarget         *string   `json:"lang_target"`
 	LangNative         *string   `json:"lang_native"`
 	ReverseCards       bool      `json:"reverse_cards"`
+	ReverseOnly        bool      `json:"reverse_only"`
 	WrongArticleRating int64     `json:"wrong_article_rating"`
 	ColorSeed          *string   `json:"color_seed"`
 	CreatedAt          time.Time `json:"created_at"`
@@ -140,7 +143,8 @@ func (s *Service) Create(ctx context.Context, ownerID int64, input CreateInput) 
 		Position:           position,
 		LangTarget:         nullableString(input.LangTarget),
 		LangNative:         nullableString(input.LangNative),
-		ReverseCards:       input.ReverseCards,
+		ReverseCards:       input.ReverseCards || input.ReverseOnly,
+		ReverseOnly:        input.ReverseOnly,
 		WrongArticleRating: rating,
 		ColorSeed:          nullableString(input.ColorSeed),
 	})
@@ -202,6 +206,9 @@ func (s *Service) List(ctx context.Context, ownerID int64) ([]Deck, error) {
 	for _, card := range cards {
 		deckID, ok := noteDecks[card.NoteID]
 		if !ok {
+			continue
+		}
+		if (card.Direction == "forward" && nodes[deckID].ReverseOnly) || (card.Direction == "reverse" && !nodes[deckID].ReverseCards) {
 			continue
 		}
 		counts := nodes[deckID].Counts
@@ -321,6 +328,12 @@ func (s *Service) Update(ctx context.Context, ownerID, id int64, patch PatchInpu
 	if patch.ReverseCards != nil {
 		reverse = *patch.ReverseCards
 	}
+	reverseOnly := current.ReverseOnly
+	if patch.ReverseOnly != nil {
+		reverseOnly = *patch.ReverseOnly
+	}
+	// Reverse-only study needs reverse cards.
+	reverse = reverse || reverseOnly
 	rating := current.WrongArticleRating
 	if patch.WrongArticleRating != nil {
 		rating = *patch.WrongArticleRating
@@ -342,6 +355,7 @@ func (s *Service) Update(ctx context.Context, ownerID, id int64, patch PatchInpu
 		LangTarget:         langTarget,
 		LangNative:         langNative,
 		ReverseCards:       reverse,
+		ReverseOnly:        reverseOnly,
 		WrongArticleRating: rating,
 		ColorSeed:          color,
 		Source:             current.Source,
@@ -357,6 +371,11 @@ func (s *Service) Update(ctx context.Context, ownerID, id int64, patch PatchInpu
 	}
 	if err != nil {
 		return Deck{}, ErrInternal
+	}
+	if reverse && !current.ReverseCards {
+		if err := queries.CreateMissingReverseCards(ctx, gen.CreateMissingReverseCardsParams{DeckID: id, OwnerID: ownerID}); err != nil {
+			return Deck{}, ErrInternal
+		}
 	}
 	return publicDeck(updated), nil
 }
@@ -475,6 +494,7 @@ func publicDeck(deck gen.Deck) Deck {
 		LangTarget:         stringPointer(deck.LangTarget),
 		LangNative:         stringPointer(deck.LangNative),
 		ReverseCards:       deck.ReverseCards,
+		ReverseOnly:        deck.ReverseOnly,
 		WrongArticleRating: deck.WrongArticleRating,
 		ColorSeed:          stringPointer(deck.ColorSeed),
 		CreatedAt:          deck.CreatedAt.UTC(),

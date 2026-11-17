@@ -133,7 +133,7 @@ func (q *Queries) CreateCard(ctx context.Context, arg CreateCardParams) (Card, e
 const createDeck = `-- name: CreateDeck :one
 INSERT INTO decks (
     owner_id, parent_id, name, description, position,
-    lang_target, lang_native, reverse_cards, wrong_article_rating,
+    lang_target, lang_native, reverse_cards, reverse_only, wrong_article_rating,
     color_seed, source, external_id, expected_count, source_deck_id
 )
 SELECT CAST(?1 AS INTEGER),
@@ -144,19 +144,20 @@ SELECT CAST(?1 AS INTEGER),
        CAST(?6 AS TEXT),
        CAST(?7 AS TEXT),
        CAST(?8 AS BOOLEAN),
-       CAST(?9 AS INTEGER),
-       CAST(?10 AS TEXT),
+       CAST(?9 AS BOOLEAN),
+       CAST(?10 AS INTEGER),
        CAST(?11 AS TEXT),
        CAST(?12 AS TEXT),
-       CAST(?13 AS INTEGER),
-       CAST(?14 AS INTEGER)
+       CAST(?13 AS TEXT),
+       CAST(?14 AS INTEGER),
+       CAST(?15 AS INTEGER)
 WHERE ?2 IS NULL OR EXISTS (
     SELECT 1 FROM decks AS parent
     WHERE parent.id = ?2
       AND parent.owner_id = ?1
       AND parent.deleted_at IS NULL
 )
-RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch
+RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch, reverse_only
 `
 
 type CreateDeckParams struct {
@@ -168,6 +169,7 @@ type CreateDeckParams struct {
 	LangTarget         sql.NullString
 	LangNative         sql.NullString
 	ReverseCards       bool
+	ReverseOnly        bool
 	WrongArticleRating int64
 	ColorSeed          sql.NullString
 	Source             sql.NullString
@@ -186,6 +188,7 @@ func (q *Queries) CreateDeck(ctx context.Context, arg CreateDeckParams) (Deck, e
 		arg.LangTarget,
 		arg.LangNative,
 		arg.ReverseCards,
+		arg.ReverseOnly,
 		arg.WrongArticleRating,
 		arg.ColorSeed,
 		arg.Source,
@@ -214,6 +217,7 @@ func (q *Queries) CreateDeck(ctx context.Context, arg CreateDeckParams) (Deck, e
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.DeletionBatch,
+		&i.ReverseOnly,
 	)
 	return i, err
 }
@@ -256,6 +260,28 @@ func (q *Queries) CreateImportBatch(ctx context.Context, arg CreateImportBatchPa
 		&i.AppliedAt,
 	)
 	return i, err
+}
+
+const createMissingReverseCards = `-- name: CreateMissingReverseCards :exec
+INSERT INTO cards (note_id, user_id, direction)
+SELECT notes.id, decks.owner_id, 'reverse'
+FROM notes
+JOIN decks ON decks.id = notes.deck_id
+WHERE decks.id = ?1
+  AND decks.owner_id = ?2
+  AND notes.deleted_at IS NULL
+  AND decks.deleted_at IS NULL
+ON CONFLICT (note_id, user_id, direction) DO NOTHING
+`
+
+type CreateMissingReverseCardsParams struct {
+	DeckID  int64
+	OwnerID int64
+}
+
+func (q *Queries) CreateMissingReverseCards(ctx context.Context, arg CreateMissingReverseCardsParams) error {
+	_, err := q.db.ExecContext(ctx, createMissingReverseCards, arg.DeckID, arg.OwnerID)
+	return err
 }
 
 const createNote = `-- name: CreateNote :one
@@ -393,7 +419,7 @@ func (q *Queries) GetCard(ctx context.Context, arg GetCardParams) (Card, error) 
 }
 
 const getDeck = `-- name: GetDeck :one
-SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch FROM decks
+SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch, reverse_only FROM decks
 WHERE id = ? AND owner_id = ? AND deleted_at IS NULL
 `
 
@@ -425,12 +451,13 @@ func (q *Queries) GetDeck(ctx context.Context, arg GetDeckParams) (Deck, error) 
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.DeletionBatch,
+		&i.ReverseOnly,
 	)
 	return i, err
 }
 
 const getDeckBySourceExternalID = `-- name: GetDeckBySourceExternalID :one
-SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch FROM decks
+SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch, reverse_only FROM decks
 WHERE owner_id = ?
   AND source = ?
   AND external_id = ?
@@ -466,12 +493,13 @@ func (q *Queries) GetDeckBySourceExternalID(ctx context.Context, arg GetDeckBySo
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.DeletionBatch,
+		&i.ReverseOnly,
 	)
 	return i, err
 }
 
 const getDeletedDeckBySourceExternalID = `-- name: GetDeletedDeckBySourceExternalID :one
-SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch FROM decks
+SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch, reverse_only FROM decks
 WHERE owner_id = ?
   AND source = ?
   AND external_id = ?
@@ -509,6 +537,7 @@ func (q *Queries) GetDeletedDeckBySourceExternalID(ctx context.Context, arg GetD
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.DeletionBatch,
+		&i.ReverseOnly,
 	)
 	return i, err
 }
@@ -760,7 +789,7 @@ func (q *Queries) GetNoteByTermKey(ctx context.Context, arg GetNoteByTermKeyPara
 }
 
 const getReadableDeck = `-- name: GetReadableDeck :one
-SELECT decks.id, decks.owner_id, decks.parent_id, decks.name, decks.description, decks.position, decks.lang_target, decks.lang_native, decks.reverse_cards, decks.wrong_article_rating, decks.color_seed, decks.source, decks.external_id, decks.expected_count, decks.source_deck_id, decks.created_at, decks.updated_at, decks.deleted_at, decks.deletion_batch FROM decks
+SELECT decks.id, decks.owner_id, decks.parent_id, decks.name, decks.description, decks.position, decks.lang_target, decks.lang_native, decks.reverse_cards, decks.wrong_article_rating, decks.color_seed, decks.source, decks.external_id, decks.expected_count, decks.source_deck_id, decks.created_at, decks.updated_at, decks.deleted_at, decks.deletion_batch, decks.reverse_only FROM decks
 WHERE decks.id = ?1
   AND decks.deleted_at IS NULL
   AND (
@@ -802,6 +831,7 @@ func (q *Queries) GetReadableDeck(ctx context.Context, arg GetReadableDeckParams
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.DeletionBatch,
+		&i.ReverseOnly,
 	)
 	return i, err
 }
@@ -921,7 +951,7 @@ func (q *Queries) ListCardsByUser(ctx context.Context, userID int64) ([]Card, er
 }
 
 const listChildDecks = `-- name: ListChildDecks :many
-SELECT child.id, child.owner_id, child.parent_id, child.name, child.description, child.position, child.lang_target, child.lang_native, child.reverse_cards, child.wrong_article_rating, child.color_seed, child.source, child.external_id, child.expected_count, child.source_deck_id, child.created_at, child.updated_at, child.deleted_at, child.deletion_batch FROM decks AS child
+SELECT child.id, child.owner_id, child.parent_id, child.name, child.description, child.position, child.lang_target, child.lang_native, child.reverse_cards, child.wrong_article_rating, child.color_seed, child.source, child.external_id, child.expected_count, child.source_deck_id, child.created_at, child.updated_at, child.deleted_at, child.deletion_batch, child.reverse_only FROM decks AS child
 WHERE child.owner_id = ?
   AND child.parent_id = ?
   AND child.deleted_at IS NULL
@@ -968,6 +998,7 @@ func (q *Queries) ListChildDecks(ctx context.Context, arg ListChildDecksParams) 
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.DeletionBatch,
+			&i.ReverseOnly,
 		); err != nil {
 			return nil, err
 		}
@@ -983,7 +1014,7 @@ func (q *Queries) ListChildDecks(ctx context.Context, arg ListChildDecksParams) 
 }
 
 const listDecksByOwner = `-- name: ListDecksByOwner :many
-SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch FROM decks
+SELECT id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch, reverse_only FROM decks
 WHERE decks.deleted_at IS NULL
   AND (
       decks.owner_id = ?1
@@ -1026,6 +1057,7 @@ func (q *Queries) ListDecksByOwner(ctx context.Context, ownerID int64) ([]Deck, 
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.DeletionBatch,
+			&i.ReverseOnly,
 		); err != nil {
 			return nil, err
 		}
@@ -1179,7 +1211,7 @@ WHERE id = (
           )
       )
 )
-RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch
+RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch, reverse_only
 `
 
 type RestoreDeckBySourceExternalIDParams struct {
@@ -1217,6 +1249,7 @@ func (q *Queries) RestoreDeckBySourceExternalID(ctx context.Context, arg Restore
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.DeletionBatch,
+		&i.ReverseOnly,
 	)
 	return i, err
 }
@@ -1341,7 +1374,7 @@ SET deleted_at = ?,
     deletion_batch = lower(hex(randomblob(16))),
     updated_at = ?
 WHERE id = ? AND owner_id = ? AND deleted_at IS NULL
-RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch
+RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch, reverse_only
 `
 
 type SoftDeleteDeckParams struct {
@@ -1379,6 +1412,7 @@ func (q *Queries) SoftDeleteDeck(ctx context.Context, arg SoftDeleteDeckParams) 
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.DeletionBatch,
+		&i.ReverseOnly,
 	)
 	return i, err
 }
@@ -1446,15 +1480,16 @@ SET parent_id = ?1,
     lang_target = ?5,
     lang_native = ?6,
     reverse_cards = ?7,
-    wrong_article_rating = ?8,
-    color_seed = ?9,
-    source = ?10,
-    external_id = ?11,
-    expected_count = ?12,
-    source_deck_id = ?13,
-    updated_at = ?14
-WHERE decks.id = ?15
-  AND decks.owner_id = ?16
+    reverse_only = ?8,
+    wrong_article_rating = ?9,
+    color_seed = ?10,
+    source = ?11,
+    external_id = ?12,
+    expected_count = ?13,
+    source_deck_id = ?14,
+    updated_at = ?15
+WHERE decks.id = ?16
+  AND decks.owner_id = ?17
   AND decks.deleted_at IS NULL
   AND (
       ?1 IS NULL OR (
@@ -1479,7 +1514,7 @@ WHERE decks.id = ?15
             )
       )
   )
-RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch
+RETURNING id, owner_id, parent_id, name, description, position, lang_target, lang_native, reverse_cards, wrong_article_rating, color_seed, source, external_id, expected_count, source_deck_id, created_at, updated_at, deleted_at, deletion_batch, reverse_only
 `
 
 type UpdateDeckParams struct {
@@ -1490,6 +1525,7 @@ type UpdateDeckParams struct {
 	LangTarget         sql.NullString
 	LangNative         sql.NullString
 	ReverseCards       bool
+	ReverseOnly        bool
 	WrongArticleRating int64
 	ColorSeed          sql.NullString
 	Source             sql.NullString
@@ -1510,6 +1546,7 @@ func (q *Queries) UpdateDeck(ctx context.Context, arg UpdateDeckParams) (Deck, e
 		arg.LangTarget,
 		arg.LangNative,
 		arg.ReverseCards,
+		arg.ReverseOnly,
 		arg.WrongArticleRating,
 		arg.ColorSeed,
 		arg.Source,
@@ -1541,6 +1578,7 @@ func (q *Queries) UpdateDeck(ctx context.Context, arg UpdateDeckParams) (Deck, e
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.DeletionBatch,
+		&i.ReverseOnly,
 	)
 	return i, err
 }

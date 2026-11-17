@@ -108,3 +108,13 @@ export function resolveThemeMode(
 
   return mode;
 }
+
+// Server settings use snake_case variants; the client uses camelCase.
+export function themeFromServer(settings: { theme_mode: string; theme_seed: string; theme_variant: string; theme_contrast: number }): ThemeSettings | null {
+  return validateThemeSettings({
+    seed: settings.theme_seed,
+    variant: settings.theme_variant.replace(/_(\w)/g, (_, letter: string) => letter.toUpperCase()),
+    contrastLevel: settings.theme_contrast,
+    mode: settings.theme_mode,
+  });
+}

@@ -478,7 +478,7 @@ func (s *Service) applyDecks(ctx context.Context, tx *sql.Tx, queries *gen.Queri
 			updated, err := queries.UpdateDeck(ctx, gen.UpdateDeckParams{
 				ParentID: nullableInt64(parent), Name: deck.Name, Description: row.Description,
 				Position: int64(position), LangTarget: nullableStringPtr(langTarget), LangNative: nullableStringPtr(langNative),
-				ReverseCards: row.ReverseCards, WrongArticleRating: row.WrongArticleRating, ColorSeed: row.ColorSeed,
+				ReverseCards: row.ReverseCards, ReverseOnly: row.ReverseOnly, WrongArticleRating: row.WrongArticleRating, ColorSeed: row.ColorSeed,
 				Source: sql.NullString{String: source, Valid: true}, ExternalID: nullableString(deck.ExternalID),
 				ExpectedCount: expectedCount(deck.ExpectedCount, row.ExpectedCount), SourceDeckID: row.SourceDeckID,
 				UpdatedAt: s.now(), ID: row.ID, OwnerID: ownerID,
@@ -1146,6 +1146,6 @@ func scanDeck(row interface{ Scan(...any) error }, deck *gen.Deck) error {
 		&deck.ID, &deck.OwnerID, &deck.ParentID, &deck.Name, &deck.Description, &deck.Position,
 		&deck.LangTarget, &deck.LangNative, &deck.ReverseCards, &deck.WrongArticleRating,
 		&deck.ColorSeed, &deck.Source, &deck.ExternalID, &deck.ExpectedCount, &deck.SourceDeckID,
-		&deck.CreatedAt, &deck.UpdatedAt, &deck.DeletedAt, &deck.DeletionBatch,
+		&deck.CreatedAt, &deck.UpdatedAt, &deck.DeletedAt, &deck.DeletionBatch, &deck.ReverseOnly,
 	)
 }

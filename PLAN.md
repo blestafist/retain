@@ -95,7 +95,7 @@ The frontend is built into `web/dist` and embedded into the Go binary via `embed
 
 ### 3.4 Language specifics
 
-Card: front — term in the target language (`de`, `en`), back — translation in the native language (`pl`, `ru`). Reverse cards are enabled in deck settings.
+Card: front — term in the target language (`de`, `en`), back — translation in the native language (`pl`, `ru`). Study direction is a deck setting: `reverse_cards` creates reverse cards, `reverse_only` hides forward cards from the queue and counts (translation → word, the default for new decks). The accent color is picked from `THEME_PRESETS` in Settings and stored in `theme_seed`.
 
 **Answer normalization and rating suggestion in typing mode** (package `internal/lang`, one matcher per language):
 

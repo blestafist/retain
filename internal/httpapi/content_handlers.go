@@ -241,7 +241,7 @@ func deleteNoteHandler(authentication *auth.Service, service *notes.Service) htt
 }
 
 func decodeDeckPatch(r *http.Request) (decks.PatchInput, error) {
-	patch, err := decodePatchObject(r, "name", "parent_id", "description", "position", "lang_target", "lang_native", "reverse_cards", "wrong_article_rating", "color_seed")
+	patch, err := decodePatchObject(r, "name", "parent_id", "description", "position", "lang_target", "lang_native", "reverse_cards", "reverse_only", "wrong_article_rating", "color_seed")
 	if err != nil {
 		return decks.PatchInput{}, err
 	}
@@ -253,6 +253,9 @@ func decodeDeckPatch(r *http.Request) (decks.PatchInput, error) {
 		return decks.PatchInput{}, err
 	}
 	if result.ReverseCards, err = patchValue[bool](patch, "reverse_cards"); err != nil {
+		return decks.PatchInput{}, err
+	}
+	if result.ReverseOnly, err = patchValue[bool](patch, "reverse_only"); err != nil {
 		return decks.PatchInput{}, err
 	}
 	if result.WrongArticleRating, err = patchValue[int64](patch, "wrong_article_rating"); err != nil {

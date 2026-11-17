@@ -132,7 +132,6 @@ JOIN review_logs AS logs ON logs.card_id = cards.id AND logs.user_id = cards.use
 JOIN review_log_projection AS projection ON projection.review_id = logs.id
 JOIN deck_language ON deck_language.deck_id = decks.id
 WHERE cards.user_id = sqlc.arg(user_id)
-  AND cards.direction = 'forward'
   AND cards.deleted_at IS NULL
   AND notes.deleted_at IS NULL
   AND decks.deleted_at IS NULL

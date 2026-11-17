@@ -14,6 +14,8 @@ import { StudySession } from './study/StudySession';
 import { clearOfflineData } from './offline/database';
 import { synchronizeOfflineData } from './offline/sync';
 import { AppNavigation } from './AppNavigation';
+import { useTheme } from './theme/context';
+import { themeFromServer } from './theme/settings';
 
 const DevShowcase = import.meta.env.DEV ? lazy(() => import('./dev/Showcase')) : null;
 const StatsPage = lazy(async () => ({ default: (await import('./stats/StatsPage')).StatsPage }));
@@ -128,6 +130,13 @@ function AuthenticatedApp() {
       queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== meQueryKey[0] });
     },
   });
+
+  const { settings: themeSettings, setThemeSettings } = useTheme();
+  const serverSettings = meQuery.data?.settings;
+  useEffect(() => {
+    const next = serverSettings ? themeFromServer(serverSettings) : null;
+    if (next && JSON.stringify(next) !== JSON.stringify(themeSettings)) setThemeSettings(next);
+  }, [serverSettings]);
 
   useEffect(() => {
     const updateNetworkState = () => setIsOnline(navigator.onLine);

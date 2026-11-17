@@ -105,7 +105,6 @@ WITH eligible AS (
     JOIN decks ON decks.id = notes.deck_id
     JOIN eligible ON eligible.user_id = logs.user_id
     WHERE logs.undone = 0
-      AND cards.direction = 'forward'
       AND cards.deleted_at IS NULL
       AND notes.deleted_at IS NULL
       AND decks.deleted_at IS NULL

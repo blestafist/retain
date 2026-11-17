@@ -107,7 +107,7 @@ func TestThemeDefaultMigrationPreservesCustomizedSettings(t *testing.T) {
 	if _, err := provider.Up(ctx); err != nil {
 		t.Fatalf("apply theme default migration: %v", err)
 	}
-	assertMigrationVersion(t, ctx, database.SQL, 12)
+	assertMigrationVersion(t, ctx, database.SQL, 13)
 	assertSettings("migrate")
 	if _, err := provider.Up(ctx); err != nil {
 		t.Fatalf("reopen current migrations: %v", err)

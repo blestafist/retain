@@ -6,6 +6,10 @@ import { updateCachedSettings } from '../offline/database';
 import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
 import { PushSubscriptionControl } from './PushSubscriptionControl';
+import { useTheme } from '../theme/context';
+import { createThemePalette } from '../theme/palette';
+import { THEME_PRESETS } from '../theme/settings';
+import type { TranslationKey } from '../i18n/en';
 
 interface SettingsDraft {
   newPerDay: string;
@@ -147,6 +151,7 @@ export function SettingsPage({ settings }: { settings: UserSettings }) {
   const [draft, setDraft] = useState(() => createDraft(settings));
   const [showValidation, setShowValidation] = useState(false);
   const [saved, setSaved] = useState(false);
+  const { settings: theme, resolvedMode } = useTheme();
   const mutation = useMutation({
     mutationFn: patchMeSettings,
     onSuccess: async (nextSettings) => {
@@ -401,6 +406,24 @@ export function SettingsPage({ settings }: { settings: UserSettings }) {
             <h2 id="appearance-settings-heading" className="text-xl font-medium">{t('appearanceSettings')}</h2>
             <p className="text-on-surface-variant">{t('appearanceSettingsDescription')}</p>
           </div>
+          <fieldset className="m-0 grid gap-3 border-0 p-0">
+            <legend className="mb-1 font-medium">{t('accentColor')}</legend>
+            <div className="flex flex-wrap gap-3">
+              {THEME_PRESETS.map((preset) => {
+                const colors = createThemePalette({ ...theme, seed: preset.seed }, resolvedMode);
+                const selected = theme.seed === preset.seed;
+                return (
+                  <button key={preset.id} type="button" aria-pressed={selected} aria-label={t(preset.id as TranslationKey)} title={t(preset.id as TranslationKey)} disabled={mutation.isPending}
+                    onClick={() => mutation.mutate({ theme_seed: preset.seed })}
+                    className="grid size-12 place-items-center rounded-full border-2 border-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary aria-pressed:border-on-surface"
+                    style={{ background: `linear-gradient(135deg, ${colors.primary} 50%, ${colors['tertiary-container']} 50%)` }}>
+                    {selected && <span aria-hidden="true" className="text-lg font-bold" style={{ color: colors['on-primary'] }}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="m-0 text-sm text-on-surface-variant">{t('accentColorHint')}</p>
+          </fieldset>
           <div className={fieldLabelClass}>
             <label htmlFor="theme-mode" className="font-medium">{t('themeMode')}</label>
             <select
