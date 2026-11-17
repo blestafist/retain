@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ThemeProvider } from './theme/context';
 import { App } from './App';
 import { meQueryKey } from './auth/session';
 import { t } from './i18n/en';
@@ -29,7 +30,7 @@ function setFetchHandler(handler: (url: string, init?: RequestInit) => Promise<R
 function renderApp() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return {
-    ...render(<QueryClientProvider client={queryClient}><App /></QueryClientProvider>),
+    ...render(<ThemeProvider><QueryClientProvider client={queryClient}><App /></QueryClientProvider></ThemeProvider>),
     queryClient,
   };
 }

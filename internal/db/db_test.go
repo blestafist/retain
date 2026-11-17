@@ -80,9 +80,9 @@ func TestOpenAppliesMigrationsOnceAndCreatesAccountAndContentSchema(t *testing.T
 			_ = database.Close()
 			t.Fatalf("read current migration version: %v", err)
 		}
-		if currentVersion != 12 {
+		if currentVersion != 13 {
 			_ = database.Close()
-			t.Errorf("current migration version = %d, want 12", currentVersion)
+			t.Errorf("current migration version = %d, want 13", currentVersion)
 		}
 
 		var productTables int

@@ -1,7 +1,7 @@
 -- name: CreateDeck :one
 INSERT INTO decks (
     owner_id, parent_id, name, description, position,
-    lang_target, lang_native, reverse_cards, wrong_article_rating,
+    lang_target, lang_native, reverse_cards, reverse_only, wrong_article_rating,
     color_seed, source, external_id, expected_count, source_deck_id
 )
 SELECT CAST(sqlc.arg(owner_id) AS INTEGER),
@@ -12,6 +12,7 @@ SELECT CAST(sqlc.arg(owner_id) AS INTEGER),
        CAST(sqlc.narg(lang_target) AS TEXT),
        CAST(sqlc.narg(lang_native) AS TEXT),
        CAST(sqlc.arg(reverse_cards) AS BOOLEAN),
+       CAST(sqlc.arg(reverse_only) AS BOOLEAN),
        CAST(sqlc.arg(wrong_article_rating) AS INTEGER),
        CAST(sqlc.narg(color_seed) AS TEXT),
        CAST(sqlc.narg(source) AS TEXT),
@@ -80,6 +81,7 @@ SET parent_id = sqlc.narg(parent_id),
     lang_target = sqlc.narg(lang_target),
     lang_native = sqlc.narg(lang_native),
     reverse_cards = sqlc.arg(reverse_cards),
+    reverse_only = sqlc.arg(reverse_only),
     wrong_article_rating = sqlc.arg(wrong_article_rating),
     color_seed = sqlc.narg(color_seed),
     source = sqlc.narg(source),
@@ -422,6 +424,16 @@ SET deleted_at = NULL,
     END
 RETURNING *;
 
+-- name: CreateMissingReverseCards :exec
+INSERT INTO cards (note_id, user_id, direction)
+SELECT notes.id, decks.owner_id, 'reverse'
+FROM notes
+JOIN decks ON decks.id = notes.deck_id
+WHERE decks.id = sqlc.arg(deck_id)
+  AND decks.owner_id = sqlc.arg(owner_id)
+  AND notes.deleted_at IS NULL
+  AND decks.deleted_at IS NULL
+ON CONFLICT (note_id, user_id, direction) DO NOTHING;
 -- name: GetCard :one
 SELECT cards.* FROM cards
 JOIN notes ON notes.id = cards.note_id

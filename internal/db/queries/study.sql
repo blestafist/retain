@@ -183,6 +183,7 @@ WHERE cards.user_id = sqlc.arg(user_id)
              AND access.share_status = 'active'
        )
    )
+  AND ((cards.direction = 'forward' AND decks.reverse_only = 0) OR (cards.direction = 'reverse' AND decks.reverse_cards = 1))
   AND (cards.state = 0 OR cards.due <= sqlc.arg(due_before))
   AND (sqlc.narg(deck_id) IS NULL OR decks.id IN (SELECT id FROM selected_decks))
 ORDER BY CASE cards.state

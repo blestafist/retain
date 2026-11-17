@@ -253,14 +253,14 @@ describe('DecksWorkspace', () => {
     await user.type(within(rootForm).getByLabelText(t('deckName')), 'English course');
     await user.selectOptions(within(rootForm).getByLabelText(t('targetLanguage')), 'en');
     await user.selectOptions(within(rootForm).getByLabelText(t('nativeLanguage')), 'ru');
-    await user.click(within(rootForm).getByRole('checkbox', { name: t('reverseCards') }));
+    await user.selectOptions(within(rootForm).getByRole('combobox', { name: new RegExp(t('studyDirection')) }), 'both');
     await user.click(within(rootForm).getByRole('button', { name: t('createDeck') }));
 
     await screen.findByRole('heading', { name: 'English course', level: 1 });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     const rootCall = fetchMock.mock.calls.find(([url, init]) => String(url) === '/api/v1/decks' && init?.method === 'POST');
     expect(JSON.parse(String(rootCall?.[1]?.body))).toEqual({
-      name: 'English course', parent_id: null, lang_target: 'en', lang_native: 'ru', reverse_cards: true,
+      name: 'English course', parent_id: null, lang_target: 'en', lang_native: 'ru', reverse_cards: true, reverse_only: false,
     });
 
     await user.click(screen.getByRole('button', { name: t('deckActions') }));
@@ -271,14 +271,14 @@ describe('DecksWorkspace', () => {
     expect(within(childForm).getByText(`${t('english')} → ${t('russian')}`, { exact: false })).toBeTruthy();
     expect(within(childForm).queryByLabelText(t('targetLanguage'))).toBeNull();
     expect(within(childForm).queryByLabelText(t('nativeLanguage'))).toBeNull();
-    expect(within(childForm).getByRole('checkbox', { name: t('reverseCards') })).toHaveProperty('checked', false);
+    expect(within(childForm).getByRole('combobox', { name: new RegExp(t('studyDirection')) })).toHaveProperty('value', 'reverse');
     await user.type(within(childForm).getByLabelText(t('deckName')), 'Chapter 1');
     await user.click(within(childForm).getByRole('button', { name: t('createDeck') }));
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     const createCalls = fetchMock.mock.calls.filter(([url, init]) => String(url) === '/api/v1/decks' && init?.method === 'POST');
     expect(createCalls).toHaveLength(2);
-    expect(JSON.parse(String(createCalls[1]?.[1]?.body))).toEqual({ name: 'Chapter 1', parent_id: 42, reverse_cards: false });
+    expect(JSON.parse(String(createCalls[1]?.[1]?.body))).toEqual({ name: 'Chapter 1', parent_id: 42, reverse_cards: true, reverse_only: true });
     const deckList = screen.getByRole('list', { name: t('deckList') });
     await user.click(within(deckList).getByRole('button', { name: 'Chapter 1' }));
     expect(screen.getByRole('heading', { name: 'Chapter 1', level: 1 })).toBeTruthy();

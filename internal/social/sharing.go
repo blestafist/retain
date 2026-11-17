@@ -102,7 +102,7 @@ func (s *Service) copyDeck(ctx context.Context, queries *gen.Queries, ownerID, s
 			OwnerID: recipientID, ParentID: parentID, Name: source.Name,
 			Description: source.Description, Position: source.Position,
 			LangTarget: source.LangTarget, LangNative: source.LangNative,
-			ReverseCards: source.ReverseCards, WrongArticleRating: source.WrongArticleRating,
+			ReverseCards: source.ReverseCards, ReverseOnly: source.ReverseOnly, WrongArticleRating: source.WrongArticleRating,
 			ColorSeed: source.ColorSeed, ExpectedCount: source.ExpectedCount,
 			SourceDeckID: sql.NullInt64{Int64: source.ID, Valid: true},
 		})
