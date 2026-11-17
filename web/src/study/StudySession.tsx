@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { liveQuery } from 'dexie';
 import { ApiError, type UserSettings } from '../api/client';
 import { getDecks, type DeckId, type DeckNode, type NativeLanguage, type TargetLanguage } from '../api/content';
-import { checkStudyAnswer, createUUIDv7, getNextStudyQueue, getStudyChoiceOptions, getStudyQueue, submitStudyReview, undoStudyReview, type AnswerMatch, type QueueCard, type ReviewInput, type StudyMode, type StudyRating } from '../api/study';
+import { checkStudyAnswer, createUUIDv7, getNextStudyQueue, getStudyChoiceOptions, getStudyQueue, submitStudyReview, undoStudyReview, type AnswerMatch, type AnswerMatchKind, type QueueCard, type ReviewInput, type StudyMode, type StudyRating } from '../api/study';
 import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
 import { useLlmStatus } from '../content/hooks';
@@ -33,6 +33,25 @@ const ratingClasses: Record<StudyRating, string> = {
   3: 'bg-rating-good-container text-on-rating-good-container',
   4: 'bg-rating-easy-container text-on-rating-easy-container',
 };
+
+// Calculate review rating automatically in typing and multiple choice modes:
+// Correctness is the primary factor; response time is a weak secondary factor.
+export function calculateAutoRating(
+  match: AnswerMatchKind | undefined,
+  durationMs: number,
+  mode: StudyMode,
+): StudyRating {
+  if (match === 'wrong') return 1; // Again
+  if (match === 'typo' || match === 'article') return 2; // Hard
+  // Exact answer:
+  // Primary rating is Good (3). Time is a weak factor:
+  // very fast response gets Easy (4), unusually slow response gets Hard (2).
+  const fastThreshold = mode === 'choice' ? 3000 : 5000;
+  const slowThreshold = mode === 'choice' ? 12000 : 20000;
+  if (durationMs <= fastThreshold) return 4;
+  if (durationMs > slowThreshold) return 2;
+  return 3;
+}
 
 const queuePageSize = 50;
 
@@ -164,6 +183,7 @@ export function StudySession({
   const [error, setError] = useState<unknown>(null);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const shownAt = useRef(Date.now());
+  const answerDurationRef = useRef(0);
   const pendingReviewRef = useRef<ReviewInput | null>(null);
   const swipeStart = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const activeSession = sessionQueue?.deckKey === deckKey ? sessionQueue : null;
@@ -282,6 +302,7 @@ export function StudySession({
 
   useEffect(() => {
     shownAt.current = Date.now();
+    answerDurationRef.current = 0;
     setAnswerShown(false);
     setError(null);
     setTypedAnswer('');
@@ -368,21 +389,29 @@ export function StudySession({
     }
   }, [isOnline, ownerID, ownerScopeID, queryClient, settings]);
 
-  const rate = useCallback(async (rating: StudyRating) => {
+  const rate = useCallback(async (rating: StudyRating, durationMs?: number) => {
     if (!currentCard || busy) return;
     const existing = pendingReviewRef.current;
+    const duration = durationMs ?? Math.max(0, Date.now() - shownAt.current);
     const input = existing?.card_id === currentCard.id ? existing : {
         id: createUUIDv7(),
         card_id: currentCard.id,
         rating,
         mode: effectiveMode,
         reviewed_at: new Date().toISOString(),
-        duration_ms: Math.max(0, Date.now() - shownAt.current),
+        duration_ms: duration,
       } satisfies ReviewInput;
     pendingReviewRef.current = input;
     setPendingReview(input);
     await submitReview(input, currentCard);
   }, [busy, currentCard, effectiveMode, submitReview]);
+
+  const onContinue = useCallback(async () => {
+    if (!currentCard || busy || isCheckingAnswer) return;
+    const duration = answerDurationRef.current || Math.max(0, Date.now() - shownAt.current);
+    const rating = calculateAutoRating(answerMatch?.match, duration, effectiveMode);
+    await rate(rating, duration);
+  }, [answerMatch?.match, busy, currentCard, effectiveMode, isCheckingAnswer, rate]);
 
   const retryPendingReview = useCallback(async () => {
     const input = pendingReviewRef.current;
@@ -445,8 +474,12 @@ export function StudySession({
     const deltaX = event.clientX - start.x;
     const deltaY = event.clientY - start.y;
     if (Math.abs(deltaX) < 80 || Math.abs(deltaX) < Math.abs(deltaY) * 1.3) return;
-    void rate(deltaX < 0 ? 1 : 3);
-  }, [answerShown, busy, rate]);
+    if (effectiveMode === 'flip') {
+      void rate(deltaX < 0 ? 1 : 3);
+    } else {
+      void onContinue();
+    }
+  }, [answerShown, busy, effectiveMode, onContinue, rate]);
 
   const checkAnswer = useCallback(async (answer = typedAnswer, mode: 'typing' | 'choice' = 'typing') => {
     if (!currentCard || isCheckingAnswer || busy || !answer.trim()) return;
@@ -457,6 +490,7 @@ export function StudySession({
     try {
       const result = await checkStudyAnswer(cardID, answer, mode);
       if (checkSequence.current !== sequence || currentCardID.current !== cardID) return;
+      answerDurationRef.current = Math.max(0, Date.now() - shownAt.current);
       setAnswerMatch(result);
       setAnswerShown(true);
     } catch (caught) {
@@ -517,14 +551,17 @@ export function StudySession({
       if (effectiveMode === 'flip' && (event.key === ' ' || event.key === 'Spacebar') && currentCard && !answerShown) {
         event.preventDefault();
         setAnswerShown(true);
-      } else if (/^[1-4]$/.test(event.key) && answerShown && currentCard && !busy && !isCheckingAnswer) {
+      } else if (effectiveMode === 'flip' && /^[1-4]$/.test(event.key) && answerShown && currentCard && !busy && !isCheckingAnswer) {
         event.preventDefault();
         void rate(Number(event.key) as StudyRating);
+      } else if (effectiveMode !== 'flip' && (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') && answerShown && currentCard && !busy && !isCheckingAnswer) {
+        event.preventDefault();
+        void onContinue();
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [answerShown, busy, currentCard, effectiveMode, isCheckingAnswer, rate]);
+  }, [answerShown, busy, currentCard, effectiveMode, isCheckingAnswer, onContinue, rate]);
 
   const sessionReady = activeSession !== null;
   const progress = queue.length === 0 ? 100 : (reviewed.length / queue.length) * 100;
@@ -653,9 +690,6 @@ export function StudySession({
                   {answerMatch && (
                     <div role="status" className="mt-3 grid gap-2 rounded-2xl bg-surface-container p-4 text-start">
                       <p className="m-0 font-medium text-on-surface">{t(answerMatch.match === 'exact' ? 'answerExact' : answerMatch.match === 'typo' ? 'answerTypo' : answerMatch.match === 'article' ? 'answerArticle' : 'answerWrong')}</p>
-                      <p className="m-0 text-sm text-on-surface-variant">
-                        {t('suggestedRating').replace('{rating}', t(answerMatch.suggested_rating === 1 ? 'again' : answerMatch.suggested_rating === 2 ? 'hard' : 'good'))}
-                      </p>
                     </div>
                   )}
                 </div>
@@ -737,6 +771,18 @@ export function StudySession({
                   )}
                 </div>
               )
+            ) : effectiveMode !== 'flip' ? (
+              <div className="study-card__actions grid gap-3">
+                <Button type="button" disabled={busy} onClick={() => void onContinue()}>
+                  {t('continueAction')}
+                </Button>
+                {pendingReview && (
+                  <Button type="button" variant="tonal" disabled={busy} onClick={() => void retryPendingReview()}>
+                    {t(busy ? 'retryingReview' : 'retryReview')}
+                  </Button>
+                )}
+                <p className="m-0 text-sm text-on-surface-variant">{t('continueShortcut')}</p>
+              </div>
             ) : (
               <div className="study-card__ratings grid gap-3">
                 <div role="group" aria-label={t('ratingGroup')} className="grid grid-cols-2 gap-2 expanded:grid-cols-4">

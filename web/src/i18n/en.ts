@@ -135,6 +135,7 @@ export const en = {
   moreStudyCardsAvailable: 'There are more due cards beyond this batch.', loadMoreStudyCards: 'Load more cards',
   loadingMoreStudyCards: 'Loading more cards…', swipeRatingHint: 'On a touch screen, swipe left for Again or right for Good.',
   retryReview: 'Retry this review', retryingReview: 'Retrying review…',
+  continueAction: 'Continue', continueShortcut: 'Press Enter or Space to continue.',
 
   settingsHeading: 'Settings', settingsDescription: 'Personalize your study schedule and learning experience.',
   learningSettings: 'Learning limits', learningSettingsDescription: 'Choose how many new and due cards to study each day.',
