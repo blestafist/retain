@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { StudySession } from './StudySession';
+import { calculateAutoRating, StudySession } from './StudySession';
 import type { QueueCard } from '../api/study';
 import { t } from '../i18n/en';
 import type { UserSettings } from '../api/client';
@@ -524,16 +524,14 @@ describe('study session', () => {
     await user.click(screen.getByRole('button', { name: t('checkAnswer') }));
 
     expect(await screen.findByText(t('answerExact'))).toBeTruthy();
-    expect(screen.getByText(t('suggestedRating').replace('{rating}', t('good')))).toBeTruthy();
-    const ratingButtons = within(screen.getByRole('group', { name: t('ratingGroup') })).getAllByRole('button');
-    expect(ratingButtons.every((button) => !button.hasAttribute('aria-pressed'))).toBe(true);
+    expect(screen.queryByRole('group', { name: t('ratingGroup') })).toBeNull();
     const checkRequest = fetchMock.mock.calls.find(([url]) => url === '/api/v1/study/check-answer');
     expect(JSON.parse(String(checkRequest?.[1]?.body))).toEqual({ card_id: 5, answer: 'hallo' });
 
-    await user.click(screen.getByRole('button', { name: /Hard/ }));
+    await user.click(screen.getByRole('button', { name: t('continueAction') }));
     await screen.findByRole('heading', { name: t('studyComplete') });
     const reviewRequest = fetchMock.mock.calls.find(([url]) => url === '/api/v1/study/review');
-    expect(JSON.parse(String(reviewRequest?.[1]?.body))).toMatchObject({ card_id: 5, rating: 2, mode: 'typing' });
+    expect(JSON.parse(String(reviewRequest?.[1]?.body))).toMatchObject({ card_id: 5, mode: 'typing' });
   });
 
   it('offers synonym checking for a rejected typed answer when LLM is enabled', async () => {
@@ -581,14 +579,16 @@ describe('study session', () => {
     await user.click(await screen.findByRole('button', { name: 'hallo' }));
 
     expect(await screen.findByText(t('answerExact'))).toBeTruthy();
+    expect(screen.queryByRole('group', { name: t('ratingGroup') })).toBeNull();
     expect(JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/v1/study/choice-options')?.[1]?.body)))
       .toEqual({ card_id: 5 });
     expect(JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/v1/study/check-answer')?.[1]?.body)))
       .toEqual({ card_id: 5, answer: 'hallo', mode: 'choice' });
-    await user.click(screen.getByRole('button', { name: /Hard/ }));
+
+    await user.click(screen.getByRole('button', { name: t('continueAction') }));
     await screen.findByRole('heading', { name: t('studyComplete') });
     expect(JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/v1/study/review')?.[1]?.body)))
-      .toMatchObject({ card_id: 5, rating: 2, mode: 'choice' });
+      .toMatchObject({ card_id: 5, mode: 'choice' });
   });
 
   it('ignores a pending typed-answer result after undo changes the current card', async () => {
@@ -622,5 +622,30 @@ describe('study session', () => {
     expect(screen.queryByText(t('answerExact'))).toBeNull();
     expect(screen.queryByText('hallo')).toBeNull();
     expect(screen.getByRole('textbox', { name: t('typeYourAnswer') })).toBeTruthy();
+  });
+
+  describe('calculateAutoRating', () => {
+    it('assigns rating based primarily on correctness and weakly on response time', () => {
+      // Wrong answers always get Again (1) regardless of speed
+      expect(calculateAutoRating('wrong', 500, 'typing')).toBe(1);
+      expect(calculateAutoRating('wrong', 30000, 'typing')).toBe(1);
+      expect(calculateAutoRating('wrong', 1000, 'choice')).toBe(1);
+
+      // Typos and article mistakes get Hard (2)
+      expect(calculateAutoRating('typo', 500, 'typing')).toBe(2);
+      expect(calculateAutoRating('article', 1500, 'typing')).toBe(2);
+
+      // Exact answers: fast response -> Easy (4)
+      expect(calculateAutoRating('exact', 2000, 'typing')).toBe(4);
+      expect(calculateAutoRating('exact', 1500, 'choice')).toBe(4);
+
+      // Exact answers: normal response -> Good (3)
+      expect(calculateAutoRating('exact', 10000, 'typing')).toBe(3);
+      expect(calculateAutoRating('exact', 6000, 'choice')).toBe(3);
+
+      // Exact answers: slow response -> Hard (2)
+      expect(calculateAutoRating('exact', 25000, 'typing')).toBe(2);
+      expect(calculateAutoRating('exact', 15000, 'choice')).toBe(2);
+    });
   });
 });

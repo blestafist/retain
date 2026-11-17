@@ -69,9 +69,9 @@ The frontend is built into `web/dist` and embedded into the Go binary via `embed
    - Show card → "Show answer" → ratings **Again / Hard / Good / Easy**. Each button shows the interval until the next review ("10m", "3d", "2mo").
    - Hotkeys (Space, 1–4), swipes on mobile, undo of the last answer.
 5. **Exercise modes**:
-   - Card flip (classic).
-   - Typed answer: language-aware normalization (section 3.4) + Levenshtein distance → suggested rating (exact → Good, typo → Hard, wrong → Again).
-   - Multiple choice of 4 (distractors from the same deck) — for new cards.
+   - Card flip (classic): manual ratings (Again / Hard / Good / Easy).
+   - Typed answer: language-aware normalization (section 3.4) + Levenshtein distance; automatic rating based on correctness (primary) and response time (weak factor), without manual difficulty badges.
+   - Multiple choice of 4 (distractors from the same deck) — for new cards; automatic rating based on correctness and response time.
 6. **Text-to-speech** for the term, on demand and automatically (configurable).
 7. **Import** in the universal `retain/v1` format and via adapters (school `classes/wordsets` export, CSV): preview before applying, re-import without losing progress (section 3.5). **Export** to `retain/v1` and CSV.
 8. **Settings**: new cards per day, max reviews per day, desired retention (default 0.90), learning steps (`1m 10m`), time zone, start of a "new day" (default 04:00), appearance: accent color, scheme style, contrast, light/dark/system theme (section 8.1).
@@ -107,7 +107,7 @@ Card: front — term in the target language (`de`, `en`), back — translation i
 | `pl` | An answer without diacritics (`ą ć ę ł ń ó ś ź ż`) → Hard (almost right), not Again. |
 | `ru` | `ё` = `е`, stress marks (U+0301) are removed. |
 
-The matcher returns a suggestion, not a submitted review: an exact accepted answer suggests **Good**, one Levenshtein edit suggests **Hard**, and other mismatches suggest **Again**. The learner may choose any rating. A German article-only mistake uses the deck setting when the noun stem matches exactly; a stem typo uses the normal **Hard** suggestion. Language, direction, expected answer, alternatives, and article policy come from the authenticated user's server-side card, deck, and note.
+In typed answer and multiple choice modes, difficulty badges (Again / Hard / Good / Easy) are omitted. The review rating is determined automatically from correctness as the primary factor (exact → Good, typo/article → Hard, wrong → Again) and response time as a weak secondary factor (fast exact answers → Easy; unusually slow exact answers → Hard), with a single Continue action to advance. Card flip mode retains the manual rating buttons. Language, direction, expected answer, alternatives, and article policy come from the authenticated user's server-side card, deck, and note.
 
 - **On-screen character bar** in typing mode: `ä ö ü ß` for German, `ą ć ę ł ń ó ś ź ż` for Polish.
 - **TTS voices**: `de-DE`, `en-GB`/`en-US`, `pl-PL`, `ru-RU`. Voice availability is checked via `speechSynthesis.getVoices()`; if there is no voice, the button is hidden.
