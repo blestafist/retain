@@ -255,6 +255,21 @@ describe('account screens', () => {
     expect(screen.queryByText(t('connectionOnline'))).toBeNull();
   });
 
+  it('opens the study queue for the deck linked from the workspace', async () => {
+    setFetchHandler(async (url) => {
+      if (url === '/api/v1/me') return response(signedInResponse);
+      if (url === '/api/v1/llm/status') return response({ enabled: false });
+      if (url === '/api/v1/decks') return response([deck]);
+      if (url === '/api/v1/study/queue?deck_id=42&limit=50') return response([]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    window.history.replaceState(null, '', '/study?deck=42');
+    renderApp();
+
+    expect(await screen.findByText(t('noCardsToStudy'))).toBeTruthy();
+    expect(calls.some(({ url }) => url === '/api/v1/study/queue?deck_id=42&limit=50')).toBe(true);
+  });
+
   it('retains the session and exposes the server error when menu sign-out fails', async () => {
     const user = userEvent.setup();
     setFetchHandler(async (url) => {

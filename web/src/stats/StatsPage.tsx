@@ -17,6 +17,8 @@ import {
 } from '../api/stats';
 import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
+import { focus } from '../ui/shared';
+import './StatsPage.css';
 
 const staleTime = 5 * 60 * 1000;
 type RetentionPeriod = StatsRetention['period'];
@@ -84,28 +86,32 @@ function ChartError({ error, retry }: { error: unknown; retry: () => void }) {
 }
 
 function EmptyState({ children }: { children: string }) {
-  return <p className="m-0 rounded-2xl bg-surface-container p-4 text-on-surface-variant">{children}</p>;
+  return <p className="m-0 text-sm text-on-surface-variant">{children}</p>;
 }
 
-function SectionCard({ id, title, description, children }: {
+function AnalyticsSection({ id, title, description, control, children }: {
   id: string;
   title: string;
   description?: string;
+  control?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <section className="stats-card space-y-4" aria-labelledby={id}>
-      <header className="space-y-1">
-        <h2 id={id} className="m-0 text-xl font-semibold text-on-surface">{title}</h2>
-        {description && <p className="m-0 text-sm text-on-surface-variant">{description}</p>}
+    <section className="analytics-section" aria-labelledby={id}>
+      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div>
+          <h2 id={id}>{title}</h2>
+          {description && <p className="m-0 mt-0.5 break-words text-sm text-on-surface-variant">{description}</p>}
+        </div>
+        {control}
       </header>
       {children}
     </section>
   );
 }
 
-function OverviewCards({ overview }: { overview: StatsOverview }) {
-  const metrics = [
+function Overview({ overview }: { overview: StatsOverview }) {
+  const featured = [
     {
       label: t('statsReviewsToday'),
       value: formatCount(overview.today.reviews),
@@ -114,6 +120,18 @@ function OverviewCards({ overview }: { overview: StatsOverview }) {
         reviewCards: formatCount(overview.today.review_cards),
       }),
     },
+    {
+      label: t('statsDueToday'),
+      value: formatCount(overview.cards.due),
+      detail: t('statsDueTodayDetail'),
+    },
+    {
+      label: t('statsStreak'),
+      value: substitute(t('statsStreakDays'), { count: formatCount(overview.streak_days) }),
+      detail: t('statsStreakDetail'),
+    },
+  ];
+  const supporting = [
     {
       label: t('statsRetentionToday'),
       value: overview.today.review_cards > 0 ? formatPercent(overview.today.retention) : t('statsNotAvailable'),
@@ -125,19 +143,9 @@ function OverviewCards({ overview }: { overview: StatsOverview }) {
         : t('statsNoRetention'),
     },
     {
-      label: t('statsDueToday'),
-      value: formatCount(overview.cards.due),
-      detail: t('statsDueTodayDetail'),
-    },
-    {
       label: t('statsKnownRightNow'),
       value: formatDecimal(overview.known_right_now),
       detail: substitute(t('statsKnownRightNowDetail'), { count: formatCount(overview.cards.review) }),
-    },
-    {
-      label: t('statsStreak'),
-      value: substitute(t('statsStreakDays'), { count: formatCount(overview.streak_days) }),
-      detail: t('statsStreakDetail'),
     },
     {
       label: t('statsAverageAnswerTime'),
@@ -152,18 +160,23 @@ function OverviewCards({ overview }: { overview: StatsOverview }) {
   ];
 
   return (
-    <section className="stats-metrics" aria-label={t('statsHeading')}>
-      {metrics.map((metric) => (
-        <article key={metric.label} className="stats-metric rounded-3xl bg-surface-container-low p-5">
-          <dl className="m-0 space-y-2">
-            <dt className="text-sm font-medium text-on-surface-variant">{metric.label}</dt>
-            <dd className="m-0 text-3xl font-semibold tabular-nums text-on-surface">{metric.value}</dd>
-          </dl>
-          <p className="m-0 mt-3 text-sm text-on-surface-variant">{metric.detail}</p>
-        </article>
+    <section className="grid gap-4" aria-label={t('statsHeading')}>
+      {[featured, supporting].map((metrics, index) => (
+        <dl key={index} className={index === 0 ? 'analytics-metrics analytics-metrics-featured' : 'analytics-metrics'}>
+          {metrics.map((metric) => (
+            <div key={metric.label}>
+              <dt>{metric.label}</dt>
+              <dd><strong>{metric.value}</strong><span>{metric.detail}</span></dd>
+            </div>
+          ))}
+        </dl>
       ))}
     </section>
   );
+}
+
+function ChartFrame({ label, children }: { label: string; children: ReactNode }) {
+  return <div className={`analytics-plot ${focus}`} role="region" aria-label={label} tabIndex={0}>{children}</div>;
 }
 
 function retentionLabel(period: RetentionPeriod): string {
@@ -209,7 +222,7 @@ function RetentionChart({ data }: { data: StatsRetention }) {
         <span><i className="stats-legend-dot stats-legend-primary" />{t('statsActualRetention')}</span>
         <span><i className="stats-legend-dot stats-legend-secondary" />{t('statsDesiredRetention')}</span>
       </div>
-      <div className="stats-svg-wrap">
+      <ChartFrame label={chartTitle}>
         <svg className="stats-line-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={chartTitle}>
           <title>{chartTitle}</title>
           {[0, 0.5, 1].map((value) => {
@@ -236,11 +249,11 @@ function RetentionChart({ data }: { data: StatsRetention }) {
           })}
           {visibleLabels.map(({ point, index }) => {
             const x = data.points.length <= 1 ? (left + right) / 2 : left + ((right - left) * index) / (data.points.length - 1);
-            return <text key={point.period} x={x} y={height - 8} textAnchor="middle" className="stats-chart-axis-label">{point.period}</text>;
+            return <text key={point.period} x={x} y={height - 8} textAnchor={x === right ? 'end' : 'middle'} className="stats-chart-axis-label">{point.period}</text>;
           })}
         </svg>
-      </div>
-      <table className="sr-only">
+      </ChartFrame>
+      <div className="sr-only"><table>
         <caption>{t('statsRetentionTable')}</caption>
         <thead><tr><th scope="col">{t('statsPeriod')}</th><th scope="col">{t('statsActualRetention')}</th><th scope="col">{t('statsReviews')}</th><th scope="col">{t('statsRecalled')}</th></tr></thead>
         <tbody>{data.points.map((point) => (
@@ -251,7 +264,7 @@ function RetentionChart({ data }: { data: StatsRetention }) {
             <td>{formatCount(point.recalled_reviews)}</td>
           </tr>
         ))}</tbody>
-      </table>
+      </table></div>
     </>
   );
 }
@@ -268,22 +281,23 @@ function RetentionSection({ period, setPeriod }: { period: RetentionPeriod; setP
   const description = substitute(t('statsRetentionDescription'), { period: retentionLabel(period).toLowerCase() });
 
   return (
-    <SectionCard id="stats-retention-heading" title={t('statsRetentionTitle')} description={description}>
-      <div className="stats-control-row">
+    <AnalyticsSection id="stats-retention-heading" title={t('statsRetentionTitle')} description={description} control={(
+      <div className="analytics-control">
         <label htmlFor="stats-retention-period" className="text-sm font-medium text-on-surface">{t('statsRetentionPeriod')}</label>
         <select
           id="stats-retention-period"
           value={period}
           onChange={(event) => setPeriod(event.target.value as RetentionPeriod)}
-          className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+          className={`analytics-select ${focus}`}
         >
           {(['week', 'month', 'year'] as const).map((item) => <option key={item} value={item}>{retentionLabel(item)}</option>)}
         </select>
       </div>
+    )}>
       {query.isPending ? <ChartLoading /> : null}
       {query.isError ? <ChartError error={query.error} retry={() => { void query.refetch(); }} /> : null}
       {data && (hasActivity ? <RetentionChart data={data} /> : <EmptyState>{t('statsNoRetention')}</EmptyState>)}
-    </SectionCard>
+    </AnalyticsSection>
   );
 }
 
@@ -304,7 +318,7 @@ function ForecastChart({ data }: { data: StatsForecast }) {
   return (
     <>
       <p className="m-0 font-medium text-on-surface">{substitute(t('statsForecastTotal'), { count: formatCount(total) })}</p>
-      <div className="stats-svg-wrap">
+      <ChartFrame label={chartLabel}>
         <svg className="stats-bar-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={chartLabel}>
           <title>{chartLabel}</title>
           <line x1={left} x2={right} y1={bottom} y2={bottom} className="stats-chart-gridline" />
@@ -320,15 +334,15 @@ function ForecastChart({ data }: { data: StatsForecast }) {
             );
           })}
           {labelIndexes.map(({ item, index }) => (
-            <text key={item.date} x={left + slot * index + slot / 2} y={height - 7} textAnchor="middle" className="stats-chart-axis-label">{formatDate(item.date)}</text>
+            <text key={item.date} x={left + slot * index + slot / 2} y={height - 7} textAnchor={index === 0 ? 'start' : index === data.due.length - 1 ? 'end' : 'middle'} className="stats-chart-axis-label">{formatDate(item.date)}</text>
           ))}
         </svg>
-      </div>
-      <table className="sr-only">
+      </ChartFrame>
+      <div className="sr-only"><table>
         <caption>{t('statsForecastTable')}</caption>
         <thead><tr><th scope="col">{t('statsDate')}</th><th scope="col">{t('statsDueCards')}</th></tr></thead>
         <tbody>{data.due.map((item) => <tr key={item.date}><th scope="row">{formatDate(item.date, { year: 'numeric', month: 'long', day: 'numeric' })}</th><td>{formatCount(item.cards)}</td></tr>)}</tbody>
-      </table>
+      </table></div>
     </>
   );
 }
@@ -337,11 +351,11 @@ function ForecastSection() {
   const query = useQuery({ queryKey: ['stats', 'forecast', 30], queryFn: () => getStatsForecast(30), retry: false, staleTime });
   const data = query.data;
   return (
-    <SectionCard id="stats-forecast-heading" title={t('statsForecastTitle')} description={t('statsForecastDescription')}>
+    <AnalyticsSection id="stats-forecast-heading" title={t('statsForecastTitle')} description={t('statsForecastDescription')}>
       {query.isPending ? <ChartLoading /> : null}
       {query.isError ? <ChartError error={query.error} retry={() => { void query.refetch(); }} /> : null}
       {data && (data.due.length > 0 ? <ForecastChart data={data} /> : <EmptyState>{t('statsNoForecast')}</EmptyState>)}
-    </SectionCard>
+    </AnalyticsSection>
   );
 }
 
@@ -381,7 +395,7 @@ function ActivityHeatmap({ data }: { data: StatsHeatmap }) {
   return (
     <>
       {!daysWithActivity && <EmptyState>{t('statsNoActivity')}</EmptyState>}
-      <div className="stats-heatmap-scroll" aria-label={label}>
+      <div className={`stats-heatmap-scroll ${focus}`} role="region" aria-label={label} tabIndex={0}>
         <div className="stats-heatmap-months" aria-hidden="true">
           {months.map((month) => <span key={month.key} style={{ gridColumn: `${month.column} / span 4` }}>{month.label}</span>)}
         </div>
@@ -406,7 +420,7 @@ function ActivityHeatmap({ data }: { data: StatsHeatmap }) {
         {[0, 1, 2, 3, 4].map((level) => <i key={level} className={`stats-heatmap-cell stats-heatmap-level-${level}`} aria-hidden="true" />)}
         <span>{t('statsActivityMore')}</span>
       </div>
-      <table className="sr-only">
+      <div className="sr-only"><table>
         <caption>{t('statsReviewTimingTable')}</caption>
         <thead><tr><th scope="col">{t('statsDate')}</th><th scope="col">{t('statsReviews')}</th><th scope="col">{t('statsTotalReviewTime')}</th></tr></thead>
         <tbody>{data.days.map((day) => (
@@ -416,7 +430,7 @@ function ActivityHeatmap({ data }: { data: StatsHeatmap }) {
             <td>{formatDuration(day.duration_ms)}</td>
           </tr>
         ))}</tbody>
-      </table>
+      </table></div>
       <div className="space-y-3">
         <h3 className="m-0 text-lg font-semibold text-on-surface">{t('statsVocabularyGrowthTitle')}</h3>
         {data.vocabulary_growth.length === 0 ? <EmptyState>{t('statsNoVocabularyGrowth')}</EmptyState> : (
@@ -449,22 +463,23 @@ function HeatmapSection({ year, currentYear, setYear }: { year: number; currentY
   const query = useQuery({ queryKey: ['stats', 'heatmap', year], queryFn: () => getStatsHeatmap(year), retry: false, staleTime });
   const availableYears = Array.from({ length: 5 }, (_, index) => currentYear - index);
   return (
-    <SectionCard id="stats-activity-heading" title={t('statsActivityTitle')} description={t('statsActivityDescription')}>
-      <div className="stats-control-row">
+    <AnalyticsSection id="stats-activity-heading" title={t('statsActivityTitle')} description={t('statsActivityDescription')} control={(
+      <div className="analytics-control">
         <label htmlFor="stats-heatmap-year" className="text-sm font-medium text-on-surface">{t('statsHeatmapYear')}</label>
         <select
           id="stats-heatmap-year"
           value={year}
           onChange={(event) => setYear(Number(event.target.value))}
-          className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+          className={`analytics-select ${focus}`}
         >
           {availableYears.map((item) => <option key={item} value={item}>{item}</option>)}
         </select>
       </div>
+    )}>
       {query.isPending ? <ChartLoading /> : null}
       {query.isError ? <ChartError error={query.error} retry={() => { void query.refetch(); }} /> : null}
       {query.data && <ActivityHeatmap data={query.data} />}
-    </SectionCard>
+    </AnalyticsSection>
   );
 }
 
@@ -580,7 +595,7 @@ function CurveChart({ data }: { data: StatsCardCurve }) {
         {data.stability !== undefined && <> · {t('statsStability')}: {substitute(t('statsDays'), { count: formatDecimal(data.stability) })}</>}
         {data.difficulty !== undefined && <> · {t('statsDifficulty')}: {formatDecimal(data.difficulty)}</>}
       </p>
-      <div className="stats-svg-wrap">
+      <ChartFrame label={chartLabel}>
         <svg className="stats-line-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={chartLabel}>
           <title>{chartLabel}</title>
           {[0, 0.5, 1].map((value) => {
@@ -607,8 +622,8 @@ function CurveChart({ data }: { data: StatsCardCurve }) {
             <text x={right} y={height - 8} textAnchor="end" className="stats-chart-axis-label">{formatDate(data.curve[data.curve.length - 1]!.at)}</text>
           </>}
         </svg>
-      </div>
-      <table className="sr-only">
+      </ChartFrame>
+      <div className="sr-only"><table>
         <caption>{t('statsCurveDataTable')}</caption>
         <thead><tr><th scope="col">{t('statsDate')}</th><th scope="col">{t('statsRecallProbability')}</th></tr></thead>
         <tbody>{data.curve.map((point, index) => (
@@ -617,7 +632,7 @@ function CurveChart({ data }: { data: StatsCardCurve }) {
             <td>{formatPercent(point.retrievability)}</td>
           </tr>
         ))}</tbody>
-      </table>
+      </table></div>
     </>
   );
 }
@@ -626,11 +641,11 @@ function CurveSection({ cardId, term }: { cardId: number; term: string }) {
   const query = useQuery({ queryKey: ['stats', 'curve', cardId], queryFn: () => getStatsCardCurve(cardId), retry: false, staleTime });
   const description = substitute(t('statsCardCurveDescription'), { term: query.data?.term ?? term });
   return (
-    <SectionCard id="stats-curve-heading" title={t('statsCardCurve')} description={description}>
+    <AnalyticsSection id="stats-curve-heading" title={t('statsCardCurve')} description={description}>
       {query.isPending ? <ChartLoading /> : null}
       {query.isError ? <ChartError error={query.error} retry={() => { void query.refetch(); }} /> : null}
       {query.data && <CurveChart data={query.data} />}
-    </SectionCard>
+    </AnalyticsSection>
   );
 }
 
@@ -643,8 +658,8 @@ function DistributionSection({ data, selectedCardId, onSelect }: {
   const stateTotal = stateRows.reduce((sum, row) => sum + row.total, 0);
   return (
     <>
-      <SectionCard id="stats-distribution-heading" title={t('statsDistributionTitle')} description={t('statsDistributionDescription')}>
-        <div className="stats-distribution-grid">
+      <AnalyticsSection id="stats-distribution-heading" title={t('statsDistributionTitle')} description={t('statsDistributionDescription')}>
+        <div className="analytics-distribution">
           <div className="space-y-3">
             <h3 className="m-0 text-base font-semibold text-on-surface">{t('statsCardStates')}</h3>
             <StateDistributionChart data={data} />
@@ -659,13 +674,15 @@ function DistributionSection({ data, selectedCardId, onSelect }: {
             <Histogram bins={data.difficulty} />
           </div>
         </div>
-      </SectionCard>
-      <SectionCard id="stats-deck-stability-heading" title={t('statsDeckMedianStability')} description={t('statsDeckMedianDescription')}>
-        <DeckStability data={data} />
-      </SectionCard>
-      <SectionCard id="stats-hard-cards-heading" title={t('statsHardCards')} description={t('statsHardCardsDescription')}>
-        <HardCards data={data} selectedCardId={selectedCardId} onSelect={onSelect} />
-      </SectionCard>
+      </AnalyticsSection>
+      <div className="analytics-pair">
+        <AnalyticsSection id="stats-deck-stability-heading" title={t('statsDeckMedianStability')} description={t('statsDeckMedianDescription')}>
+          <DeckStability data={data} />
+        </AnalyticsSection>
+        <AnalyticsSection id="stats-hard-cards-heading" title={t('statsHardCards')} description={t('statsHardCardsDescription')}>
+          <HardCards data={data} selectedCardId={selectedCardId} onSelect={onSelect} />
+        </AnalyticsSection>
+      </div>
     </>
   );
 }
@@ -681,21 +698,20 @@ export function StatsPage({ timezone = Intl.DateTimeFormat().resolvedOptions().t
   const refreshAll = async () => queryClient.invalidateQueries({ queryKey: ['stats'] });
 
   return (
-    <div className="stats-page">
-      <header className="stats-page-header">
-        <div className="space-y-2">
-          <p className="m-0 text-sm font-medium uppercase tracking-wide text-primary">{t('stats')}</p>
-          <h1 id="stats-page-heading" className="m-0 text-3xl font-semibold text-on-surface">{t('statsHeading')}</h1>
-          <p className="m-0 max-w-2xl text-base text-on-surface-variant">{t('statsDescription')}</p>
-        </div>
+    <div className="analytics-page">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <header className="page-intro">
+          <h1 id="stats-page-heading">{t('statsHeading')}</h1>
+          <p>{t('statsDescription')}</p>
+        </header>
         <Button type="button" variant="tonal" onClick={() => { void refreshAll(); }}>{t('statsRefresh')}</Button>
-      </header>
+      </div>
 
       {overviewQuery.isPending && <ChartLoading />}
       {overviewQuery.isError && <ChartError error={overviewQuery.error} retry={() => { void overviewQuery.refetch(); }} />}
-      {overviewQuery.data && <OverviewCards overview={overviewQuery.data} />}
+      {overviewQuery.data && <Overview overview={overviewQuery.data} />}
 
-      <div className="stats-primary-grid">
+      <div className="analytics-pair analytics-pair-charts">
         <RetentionSection period={period} setPeriod={setPeriod} />
         <ForecastSection />
       </div>

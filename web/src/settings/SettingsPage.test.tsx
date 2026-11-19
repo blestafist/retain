@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { UserSettings } from '../api/client';
@@ -55,5 +55,27 @@ describe('study settings', () => {
     await user.click(screen.getByRole('button', { name: t('saveSettings') }));
     expect(await screen.findByText(t('settingsSaved'))).toBeTruthy();
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ request_retention: 0.95 });
+  });
+
+  it('keeps reminder details accessible and saves a configured time', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ...settings, reminder_time: '07:30' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<ThemeProvider><QueryClientProvider client={queryClient}><SettingsPage settings={settings} /></QueryClientProvider></ThemeProvider>);
+
+    expect(screen.queryByLabelText(t('reminderTime'))).toBeNull();
+    await user.click(screen.getByRole('checkbox', { name: t('dailyReminders'), description: t('dailyRemindersHint') }));
+    const time = screen.getByLabelText(t('reminderTime'));
+    await user.click(screen.getByRole('button', { name: t('saveSettings') }));
+    expect(time.getAttribute('aria-invalid')).toBe('true');
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.change(time, { target: { value: '07:30' } });
+    await user.click(screen.getByRole('button', { name: t('saveSettings') }));
+    expect(await screen.findByText(t('settingsSaved'))).toBeTruthy();
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ reminder_time: '07:30' });
   });
 });

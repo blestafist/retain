@@ -14,7 +14,7 @@ export function AppNavigation({ isAdmin, pathname }: { isAdmin: boolean; pathnam
   return (
     <nav className="app-navigation" aria-label={t('navigation')}>
       {destinations.filter((item) => isAdmin || item.href !== '/admin').map((item) => (
-        <a className="app-navigation-link" key={item.href} href={item.href} aria-current={pathname === item.href ? 'page' : undefined}>
+        <a className={`app-navigation-link${item.href === '/admin' ? ' app-navigation-admin' : ''}`} key={item.href} href={item.href} aria-current={pathname === item.href ? 'page' : undefined}>
           <span className="app-navigation-indicator" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" focusable="false">
               <path d={item.path} />

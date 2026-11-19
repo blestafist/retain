@@ -42,6 +42,8 @@ describe('FriendsPage', () => {
       const method = init?.method ?? 'GET';
       if (url === '/api/v1/decks' && method === 'GET') return jsonResponse([{
         id: 11, owner_id: 7, can_edit: true, name: 'German', parent_id: null, children: [],
+      }, {
+        id: 12, owner_id: 9, can_edit: false, name: 'Read-only deck', parent_id: null, children: [],
       }]);
       if (url === '/api/v1/friends' && method === 'GET') return jsonResponse([{ id: 9, email: 'friend@example.test', name: 'Friend', friends_at: '2026-11-01T00:00:00Z' }]);
       if (url === '/api/v1/friends/requests' && method === 'GET') return jsonResponse(requests);
@@ -74,12 +76,15 @@ describe('FriendsPage', () => {
     renderPage();
     await screen.findByRole('heading', { name: t('friendsHeading') });
     await screen.findByRole('option', { name: 'Friend' });
+    expect(screen.queryByRole('option', { name: 'Read-only deck' })).toBeNull();
 
     await user.type(screen.getByLabelText(t('friendEmail')), 'unknown@example.test');
     await user.click(screen.getByRole('button', { name: t('sendFriendRequest') }));
     await screen.findByText(t('friendRequestSent'));
 
-    await user.click(screen.getByRole('checkbox', { name: t('socialVisibility') }));
+    const visibility = screen.getByRole('checkbox', { name: t('socialVisibility'), description: t('socialVisibilityHint') });
+    visibility.focus();
+    await user.keyboard('[Space]');
     await waitFor(() => expect(setting.visible).toBe(true));
 
     await user.selectOptions(screen.getByLabelText(t('chooseDeckToShare')), '11');

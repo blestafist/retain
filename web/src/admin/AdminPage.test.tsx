@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { t } from '../i18n/en';
@@ -60,7 +60,9 @@ describe('AdminPage', () => {
     expect((screen.getByRole('button', { name: t('saveLlmModel') }) as HTMLButtonElement).disabled).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/admin/llm/models', expect.anything());
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/admin/llm-usage', expect.anything());
-    expect(screen.getByRole('cell', { name: 'Morgan' })).toBeTruthy();
+    const usageRegion = await screen.findByRole('region', { name: t('llmUsageTable') });
+    expect(usageRegion.tabIndex).toBe(0);
+    expect(within(usageRegion).getByRole('cell', { name: 'Morgan' })).toBeTruthy();
     expect(screen.getByRole('cell', { name: '44' })).toBeTruthy();
     expect(screen.queryByRole('columnheader', { name: /cost/i })).toBeNull();
 

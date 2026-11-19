@@ -6,6 +6,7 @@ import { getDecks, type DeckId, type DeckNode, type NativeLanguage, type TargetL
 import { checkStudyAnswer, createUUIDv7, getNextStudyQueue, getStudyChoiceOptions, getStudyQueue, submitStudyReview, undoStudyReview, type AnswerMatch, type AnswerMatchKind, type QueueCard, type ReviewInput, type StudyMode, type StudyRating } from '../api/study';
 import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
+import { WavyProgress } from '../ui/indicators';
 import { useLlmStatus } from '../content/hooks';
 import { StudyLlmTools } from './StudyLlmTools';
 import {
@@ -569,15 +570,15 @@ export function StudySession({
 
   return (
     <section className="study-session mx-auto grid w-full max-w-4xl gap-5 py-6" aria-labelledby="study-session-heading">
-      <header className="study-session__header flex flex-wrap items-center justify-between gap-3">
+      <header className="study-session__header page-intro flex flex-wrap items-end justify-between gap-2">
         <div className="space-y-1">
           <a href="/" className="inline-flex min-h-12 items-center rounded-full px-3 text-primary underline-offset-4 hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{t('backToDecks')}</a>
-          <h1 id="study-session-heading" className="study-session__heading m-0 text-on-surface">{t('studySession')}</h1>
+          <h1 id="study-session-heading">{t('studySession')}</h1>
         </div>
-        <div className="flex gap-2" role="group" aria-label={t('sessionActions')}>
+        {(voice && currentCard || reviewed.length > 0) && <div className="flex flex-wrap gap-2" role="group" aria-label={t('sessionActions')}>
           {voice && currentCard && <Button type="button" variant="tonal" onClick={() => speak(currentCard, voice)}><SpeakIcon />{t('speak')}</Button>}
           {reviewed.length > 0 && <Button type="button" variant="tonal" disabled={busy || pendingReview !== null || !isOnline} onClick={() => void undo()}>{t(busy ? 'undoing' : 'undo')}</Button>}
-        </div>
+        </div>}
       </header>
 
       {!isOnline && <p className="m-0 rounded-2xl bg-secondary-container p-4 text-on-secondary-container" role="status">{t('offlineStudyHint')}</p>}
@@ -608,16 +609,16 @@ export function StudySession({
       )}
 
       {currentCard && (
-        <div role="group" aria-label={t('studyModeGroup')} className="study-session__modes flex flex-wrap gap-2">
+        <div role="group" aria-label={t('studyModeGroup')} className="study-session__modes">
           {([
             ['flip', 'flipMode'],
             ['typing', 'typingMode'],
             ['choice', 'choiceMode'],
           ] as const).map(([mode, label]) => (
-            <Button
+            <button
               key={mode}
               type="button"
-              variant={effectiveMode === mode ? 'filled' : 'tonal'}
+              className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               aria-pressed={effectiveMode === mode}
               disabled={isCheckingAnswer || busy || (!isOnline && mode !== 'flip')}
               onClick={() => {
@@ -630,7 +631,7 @@ export function StudySession({
               }}
             >
               {t(label)}
-            </Button>
+            </button>
           ))}
         </div>
       )}
@@ -668,12 +669,11 @@ export function StudySession({
               <span>{t('studyProgress').replace('{current}', String(reviewed.length + 1)).replace('{total}', String(queue.length))}</span>
               <span>{t('cardsReviewed').replace('{count}', String(reviewed.length))}</span>
             </div>
-            <div role="progressbar" aria-label={t('studyProgressBar')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)} className="h-2 overflow-hidden rounded-full bg-surface-container-high">
-              <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
-            </div>
+            <WavyProgress value={Math.round(progress)} label="studyProgressBar" />
           </div>
 
           <article
+            data-revealed={answerShown}
             className="study-card grid gap-8 [touch-action:pan-y]"
             aria-label={t('studyCard')}
             onPointerDown={onSwipeStart}
@@ -681,7 +681,7 @@ export function StudySession({
             onPointerCancel={() => { swipeStart.current = null; }}
           >
             <div className="study-card__entry grid gap-4">
-              <p className="study-card__label m-0 text-primary">{t('front')}</p>
+              <p className="study-card__label m-0">{t('front')}</p>
               <h2 className="study-card__term m-0 break-words text-on-surface">{currentCard.front}</h2>
               {answerShown && (
                 <div className="study-card__answer grid w-full gap-2">
@@ -702,7 +702,7 @@ export function StudySession({
                     <p className="m-0 text-sm text-on-surface-variant">{t('choiceFlipHint')}</p>
                   )}
                   <Button type="button" onClick={() => setAnswerShown(true)}>{t('showAnswer')}</Button>
-                  <p className="m-0 text-sm text-on-surface-variant">{t('showAnswerShortcut')}</p>
+                  <p className="study-keyboard-hint m-0 text-sm">{t('showAnswerShortcut')}</p>
                 </div>
               ) : effectiveMode === 'typing' ? (
                 <form onSubmit={(event) => { event.preventDefault(); void checkAnswer(); }} className="grid w-full gap-3 text-start">
@@ -781,18 +781,18 @@ export function StudySession({
                     {t(busy ? 'retryingReview' : 'retryReview')}
                   </Button>
                 )}
-                <p className="m-0 text-sm text-on-surface-variant">{t('continueShortcut')}</p>
+                 <p className="study-keyboard-hint m-0 text-sm">{t('continueShortcut')}</p>
               </div>
             ) : (
               <div className="study-card__ratings grid gap-3">
-                <div role="group" aria-label={t('ratingGroup')} className="grid grid-cols-2 gap-2 expanded:grid-cols-4">
+                 <div role="group" aria-label={t('ratingGroup')} className="study-card__rating-group">
                   {([1, 2, 3, 4] as const).map((rating) => (
                     <button
                       key={rating}
                       type="button"
                       disabled={busy || pendingReview !== null || isCheckingAnswer}
                       onClick={() => void rate(rating)}
-                      className={`study-card__rating flex min-h-12 flex-col items-center justify-center rounded-2xl px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 ${answerMatch?.suggested_rating === rating ? 'ring-2 ring-primary' : ''} ${ratingClasses[rating]}`}
+                       className={`study-card__rating flex flex-col items-center justify-center py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 ${answerMatch?.suggested_rating === rating ? 'ring-2 ring-primary' : ''} ${ratingClasses[rating]}`}
                     >
                       <span className="font-medium">{t(ratingLabels[rating])}</span>
                       <span className="text-sm opacity-80">{formatInterval(currentCard.previews[rating].interval)}</span>
@@ -800,8 +800,8 @@ export function StudySession({
                   ))}
                 </div>
                 {pendingReview && <Button type="button" variant="tonal" disabled={busy} onClick={() => void retryPendingReview()}>{t(busy ? 'retryingReview' : 'retryReview')}</Button>}
-                <p className="m-0 text-sm text-on-surface-variant">{t('ratingShortcut')}</p>
-                <p className="m-0 text-sm text-on-surface-variant">{t('swipeRatingHint')}</p>
+                 <p className="study-keyboard-hint m-0 text-sm">{t('ratingShortcut')}</p>
+                 <p className="study-touch-hint m-0 text-sm">{t('swipeRatingHint')}</p>
               </div>
             )}
           </article>

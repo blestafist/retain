@@ -50,24 +50,23 @@ export function AdminPage() {
     && !modelMutation.isPending;
 
   return (
-    <section className="mx-auto w-full max-w-5xl space-y-6 py-6" aria-labelledby="admin-heading">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="m-0 text-sm font-medium uppercase tracking-wide text-primary">{t('admin')}</p>
-          <h1 id="admin-heading" className="m-0 text-3xl font-semibold text-on-surface">{t('adminLlmHeading')}</h1>
-        </div>
+    <section className="mx-auto grid w-full min-w-0 max-w-5xl gap-6" aria-labelledby="admin-heading">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <header className="page-intro">
+          <h1 id="admin-heading">{t('adminLlmHeading')}</h1>
+        </header>
         <Button type="button" variant="tonal" onClick={() => void refresh()}>{t('refresh')}</Button>
-      </header>
+      </div>
 
-      <section className="space-y-4 rounded-3xl bg-surface-container-low p-5 sm:p-6" aria-labelledby="admin-model-heading">
-        <div>
-          <h2 id="admin-model-heading" className="m-0 text-xl font-semibold text-on-surface">{t('llmModel')}</h2>
+      <section className="grid min-w-0 gap-3 border-t border-outline-variant pt-4" aria-labelledby="admin-model-heading">
+        <header>
+          <h2 id="admin-model-heading" className="m-0 text-base font-semibold text-on-surface">{t('llmModel')}</h2>
           <p className="m-0 mt-1 text-sm text-on-surface-variant">{t('llmModelDescription')}</p>
-        </div>
+        </header>
         {llmStatus.isPending && <p role="status" className="m-0 text-on-surface-variant">{t('loadingLlmStatus')}</p>}
         {llmStatus.isError && <p role="alert" className="m-0 text-error">{errorMessage(llmStatus.error)}</p>}
         {llmStatus.data?.enabled === false && (
-          <p role="status" className="m-0 rounded-2xl bg-surface-container p-4 text-on-surface-variant">{t('llmFeaturesDisabled')}</p>
+          <p role="status" className="m-0 text-sm text-on-surface-variant">{t('llmFeaturesDisabled')}</p>
         )}
         {llmEnabled && modelsQuery.isPending && <p role="status" className="m-0 text-on-surface-variant">{t('loadingLlmModels')}</p>}
         {llmEnabled && modelsQuery.isError && (
@@ -77,24 +76,24 @@ export function AdminPage() {
           </div>
         )}
         {llmEnabled && models && (
-          <div className="space-y-3">
+          <div className="grid min-w-0 gap-3">
             {!models.available && (
-              <p role="status" className="m-0 rounded-2xl bg-surface-container p-4 text-on-surface-variant">
+              <p role="status" className="m-0 text-sm text-on-surface-variant">
                 {models.warning || t('llmModelsUnavailable')}
               </p>
             )}
             {models.available && models.warning && (
-              <p role="status" className="m-0 rounded-2xl bg-surface-container p-4 text-on-surface-variant">{models.warning}</p>
+              <p role="status" className="m-0 text-sm text-on-surface-variant">{models.warning}</p>
             )}
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="min-w-60 flex-1 space-y-2">
+            <div className="flex max-w-2xl flex-wrap items-end gap-2">
+              <div className="grid min-w-0 flex-1 basis-64 gap-1">
                 <label htmlFor="admin-llm-model" className="block text-sm font-medium text-on-surface">{t('selectedLlmModel')}</label>
                 <select
                   id="admin-llm-model"
                   value={selectedModel}
                   disabled={!models.available || models.models.length === 0 || modelMutation.isPending}
                   onChange={(event) => setSelectedModel(event.target.value)}
-                  className="min-h-12 w-full rounded-xl border border-outline bg-surface-container-lowest px-4 text-base text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
+                  className="min-h-12 w-full min-w-0 rounded-xl border border-outline bg-surface-container-lowest px-3 text-base text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-60"
                 >
                   {!models.models.includes(models.selected_model) && models.selected_model && (
                     <option value={models.selected_model} disabled>{models.selected_model}</option>
@@ -116,11 +115,11 @@ export function AdminPage() {
         )}
       </section>
 
-      <section className="space-y-4 rounded-3xl bg-surface-container-low p-5 sm:p-6" aria-labelledby="admin-usage-heading">
-        <div>
-          <h2 id="admin-usage-heading" className="m-0 text-xl font-semibold text-on-surface">{t('llmUsage')}</h2>
+      <section className="grid min-w-0 gap-3 border-t border-outline-variant pt-4" aria-labelledby="admin-usage-heading">
+        <header>
+          <h2 id="admin-usage-heading" className="m-0 text-base font-semibold text-on-surface">{t('llmUsage')}</h2>
           <p className="m-0 mt-1 text-sm text-on-surface-variant">{t('llmUsageLifetimeHint')}</p>
-        </div>
+        </header>
         {usageQuery.isPending && <p role="status" className="m-0 text-on-surface-variant">{t('loadingLlmUsage')}</p>}
         {usageQuery.isError && (
           <div role="alert" className="space-y-3 rounded-2xl bg-error-container p-4 text-on-error-container">
@@ -132,27 +131,26 @@ export function AdminPage() {
           <p className="m-0 text-on-surface-variant">{t('noLlmUsage')}</p>
         )}
         {usageQuery.data && usageQuery.data.users.some((user) => user.models.length > 0) && (
-          <div className="overflow-x-auto rounded-2xl border border-outline-variant">
-            <table className="w-full min-w-[760px] border-collapse text-left text-sm text-on-surface">
+          <div role="region" aria-label={t('llmUsageTable')} tabIndex={0} className="overflow-x-auto rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+            <table className="w-full min-w-[44rem] border-collapse text-start text-sm text-on-surface">
               <caption className="sr-only">{t('llmUsageTable')}</caption>
-              <thead className="bg-surface-container-high text-on-surface-variant">
+              <thead className="bg-surface-container text-on-surface-variant">
                 <tr>
-                  {(['user', 'usageEmail', 'model', 'featureKind', 'requests', 'cachedRequests', 'promptTokens', 'completionTokens'] as const).map((key) => (
-                    <th key={key} scope="col" className="px-3 py-3 font-medium">{t(key)}</th>
+                  {(['user', 'usageEmail', 'model', 'featureKind', 'requests', 'cachedRequests', 'promptTokens', 'completionTokens'] as const).map((key, index) => (
+                    <th key={key} scope="col" className={`px-3 py-2 font-medium ${index >= 4 ? 'text-end' : ''}`}>{t(key)}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {usageQuery.data.users.flatMap((user) => user.models.map((usage, index) => (
                   <tr key={`${user.user_id}-${usage.model}-${usage.kind}`} className="border-t border-outline-variant">
-                    <td className="px-3 py-3">{index === 0 ? user.name : ''}</td>
-                    <td className="px-3 py-3">{index === 0 ? user.email : ''}</td>
-                    <td className="px-3 py-3">{usage.model}</td>
-                    <td className="px-3 py-3">{usage.kind}</td>
-                    <td className="px-3 py-3">{usage.requests.toLocaleString('en')}</td>
-                    <td className="px-3 py-3">{usage.cached_requests.toLocaleString('en')}</td>
-                    <td className="px-3 py-3">{usage.prompt_tokens.toLocaleString('en')}</td>
-                    <td className="px-3 py-3">{usage.completion_tokens.toLocaleString('en')}</td>
+                    <td className="px-3 py-2">{index === 0 ? user.name : ''}</td>
+                    <td className="px-3 py-2">{index === 0 ? user.email : ''}</td>
+                    <td className="px-3 py-2">{usage.model}</td>
+                    <td className="px-3 py-2">{usage.kind}</td>
+                    {[usage.requests, usage.cached_requests, usage.prompt_tokens, usage.completion_tokens].map((count, column) => (
+                      <td key={column} className="px-3 py-2 text-end tabular-nums">{count.toLocaleString('en')}</td>
+                    ))}
                   </tr>
                 )))}
               </tbody>
