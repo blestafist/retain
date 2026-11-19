@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { calculateAutoRating, StudySession } from './StudySession';
@@ -155,13 +155,13 @@ describe('study session', () => {
 
     renderSession();
     expect(await screen.findByRole('heading', { name: 'hello' })).toBeTruthy();
-    expect(screen.getByRole('group', { name: t('sessionActions') })).toBeTruthy();
+    expect(screen.queryByRole('group', { name: t('sessionActions') })).toBeNull();
     await user.click(screen.getByRole('button', { name: t('showAnswer') }));
     expect(screen.getByText('hallo')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: new RegExp(t('good')) }));
     expect(await screen.findByRole('heading', { name: t('studyComplete') })).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: t('undo') }));
+    await user.click(within(screen.getByRole('group', { name: t('sessionActions') })).getByRole('button', { name: t('undo') }));
     expect(await screen.findByRole('heading', { name: 'hello' })).toBeTruthy();
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain('/api/v1/study/undo');
   });

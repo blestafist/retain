@@ -10,6 +10,7 @@ import { useTheme } from '../theme/context';
 import { createThemePalette } from '../theme/palette';
 import { THEME_PRESETS } from '../theme/settings';
 import type { TranslationKey } from '../i18n/en';
+import './SettingsPage.css';
 
 interface SettingsDraft {
   newPerDay: string;
@@ -143,8 +144,8 @@ function errorMessage(error: unknown): string {
   return error instanceof ApiError && error.serverMessage ? error.serverMessage : t('requestFailed');
 }
 
-const fieldClass = 'min-h-12 w-full rounded-xl border border-outline bg-surface-container-lowest px-4 text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary';
-const fieldLabelClass = 'grid gap-2 text-on-surface';
+const fieldClass = 'settings-field';
+const fieldLabelClass = 'grid min-w-0 content-start gap-1 text-sm text-on-surface';
 
 export function SettingsPage({ settings }: { settings: UserSettings }) {
   const queryClient = useQueryClient();
@@ -195,19 +196,62 @@ export function SettingsPage({ settings }: { settings: UserSettings }) {
   }
 
   return (
-    <div className="mx-auto grid w-full max-w-4xl gap-6">
-      <div className="grid gap-2">
+    <div className="mx-auto grid w-full min-w-0 max-w-4xl gap-6">
+      <header className="page-intro">
         <h1 id="settings-title">{t('settingsHeading')}</h1>
-        <p className="max-w-2xl text-on-surface-variant">{t('settingsDescription')}</p>
-      </div>
+        <p>{t('settingsDescription')}</p>
+      </header>
 
-      <form aria-labelledby="settings-title" noValidate onSubmit={submit} className="grid gap-4">
-        <section aria-labelledby="learning-settings-heading" className="grid gap-5 rounded-3xl border border-outline-variant bg-surface-container-low p-5 medium:p-7">
-          <div className="grid gap-1">
-            <h2 id="learning-settings-heading" className="text-xl font-medium">{t('learningSettings')}</h2>
-            <p className="text-on-surface-variant">{t('learningSettingsDescription')}</p>
+      <form aria-labelledby="settings-title" noValidate onSubmit={submit} className="settings-form">
+        <section aria-labelledby="appearance-settings-heading" className="settings-section">
+          <header>
+            <h2 id="appearance-settings-heading">{t('appearanceSettings')}</h2>
+            <p>{t('appearanceSettingsDescription')}</p>
+          </header>
+          <div className="grid min-w-0 gap-4">
+            <fieldset className="m-0 min-w-0 border-0 p-0" aria-describedby="accent-color-hint">
+              <legend className="mb-1 text-sm font-medium">{t('accentColor')}</legend>
+              <div className="flex flex-wrap gap-1">
+                {THEME_PRESETS.map((preset) => {
+                  const colors = createThemePalette({ ...theme, seed: preset.seed }, resolvedMode);
+                  const selected = theme.seed === preset.seed;
+                  return (
+                    <button key={preset.id} type="button" aria-pressed={selected} aria-label={t(preset.id as TranslationKey)} title={t(preset.id as TranslationKey)} disabled={mutation.isPending}
+                      onClick={() => mutation.mutate({ theme_seed: preset.seed })}
+                      className="settings-swatch"
+                      style={{ color: colors['on-primary'] }}>
+                      <span aria-hidden="true" style={{ background: colors.primary }}>
+                        {selected && <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m5 12 4 4L19 6" /></svg>}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p id="accent-color-hint" className="m-0 mt-1 text-sm text-on-surface-variant">{t('accentColorHint')}</p>
+            </fieldset>
+            <div className={fieldLabelClass}>
+              <label htmlFor="theme-mode" className="font-medium">{t('themeMode')}</label>
+              <select
+                id="theme-mode"
+                aria-describedby="theme-mode-hint"
+                disabled={mutation.isPending}
+                value={draft.themeMode}
+                onChange={(event) => updateDraft('themeMode', event.target.value as UserSettings['theme_mode'])}
+                className={`${fieldClass} max-w-60`}
+              >
+                {(['light', 'dark', 'system'] as const).map((mode) => <option key={mode} value={mode}>{t(mode)}</option>)}
+              </select>
+              <p id="theme-mode-hint" className="m-0 text-sm text-on-surface-variant">{t('themeModeHint')}</p>
+            </div>
           </div>
-          <div className="grid gap-5 medium:grid-cols-2">
+        </section>
+
+        <section aria-labelledby="learning-settings-heading" className="settings-section">
+          <header>
+            <h2 id="learning-settings-heading">{t('learningSettings')}</h2>
+            <p>{t('learningSettingsDescription')}</p>
+          </header>
+          <div className="settings-field-grid">
             <div className={fieldLabelClass}>
               <label htmlFor="new-per-day" className="font-medium">{t('newCardsPerDay')}</label>
               <input
@@ -246,8 +290,6 @@ export function SettingsPage({ settings }: { settings: UserSettings }) {
               <p id="max-reviews-per-day-hint" className="m-0 text-sm text-on-surface-variant">{t('maxReviewsPerDayHint')}</p>
               {showValidation && errors.maxReviewsPerDay && <span id="max-reviews-per-day-error" className="text-sm text-error">{errors.maxReviewsPerDay}</span>}
             </div>
-          </div>
-          <div className="grid gap-5 medium:grid-cols-2">
             <div className={fieldLabelClass}>
               <label htmlFor="request-retention" className="font-medium">{t('desiredRetention')}</label>
               <input
@@ -287,8 +329,6 @@ export function SettingsPage({ settings }: { settings: UserSettings }) {
               <p id="maximum-interval-hint" className="m-0 text-sm text-on-surface-variant">{t('maximumIntervalHint')}</p>
               {showValidation && errors.maximumInterval && <span id="maximum-interval-error" className="text-sm text-error">{errors.maximumInterval}</span>}
             </div>
-          </div>
-          <div className="grid gap-5 medium:grid-cols-2">
             {([
               ['learning-steps', 'learningSteps', 'learningStepsHint'],
               ['relearning-steps', 'relearningSteps', 'relearningStepsHint'],
@@ -313,12 +353,12 @@ export function SettingsPage({ settings }: { settings: UserSettings }) {
           </div>
         </section>
 
-        <section aria-labelledby="schedule-settings-heading" className="grid gap-5 rounded-3xl border border-outline-variant bg-surface-container-low p-5 medium:p-7">
-          <div className="grid gap-1">
-            <h2 id="schedule-settings-heading" className="text-xl font-medium">{t('studySchedule')}</h2>
-            <p className="text-on-surface-variant">{t('studyScheduleDescription')}</p>
-          </div>
-          <div className="grid gap-5 medium:grid-cols-2">
+        <section aria-labelledby="schedule-settings-heading" className="settings-section">
+          <header>
+            <h2 id="schedule-settings-heading">{t('studySchedule')}</h2>
+            <p>{t('studyScheduleDescription')}</p>
+          </header>
+          <div className="settings-field-grid">
             <div className={fieldLabelClass}>
               <label htmlFor="timezone" className="font-medium">{t('timezone')}</label>
               <input
@@ -359,25 +399,28 @@ export function SettingsPage({ settings }: { settings: UserSettings }) {
           </div>
         </section>
 
-        <section aria-labelledby="reminder-settings-heading" className="grid gap-5 rounded-3xl border border-outline-variant bg-surface-container-low p-5 medium:p-7">
-          <div className="grid gap-1">
-            <h2 id="reminder-settings-heading" className="text-xl font-medium">{t('reminderSettings')}</h2>
-            <p className="text-on-surface-variant">{t('reminderSettingsDescription')}</p>
-          </div>
-          <div className="grid gap-3">
-            <label htmlFor="reminders-enabled" className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl text-on-surface focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary">
+        <section aria-labelledby="reminder-settings-heading" className="settings-section">
+          <header>
+            <h2 id="reminder-settings-heading">{t('reminderSettings')}</h2>
+            <p>{t('reminderSettingsDescription')}</p>
+          </header>
+          <div className="grid min-w-0 gap-3">
+            <label htmlFor="reminders-enabled" className="settings-check-row">
               <input
                 id="reminders-enabled"
                 type="checkbox"
+                aria-labelledby="reminders-enabled-label"
                 aria-describedby="reminders-enabled-hint"
                 disabled={mutation.isPending}
                 checked={draft.reminderEnabled}
                 onChange={(event) => updateDraft('reminderEnabled', event.target.checked)}
-                className="h-5 w-5 accent-primary"
+                className="size-5 shrink-0 accent-primary"
               />
-              <span>{t('dailyReminders')}</span>
+              <span>
+                <span id="reminders-enabled-label" className="block font-medium">{t('dailyReminders')}</span>
+                <span id="reminders-enabled-hint" className="block text-sm text-on-surface-variant">{t('dailyRemindersHint')}</span>
+              </span>
             </label>
-            <p id="reminders-enabled-hint" className="m-0 ps-8 text-sm text-on-surface-variant">{t('dailyRemindersHint')}</p>
             {draft.reminderEnabled && (
               <div className={fieldLabelClass}>
                 <label htmlFor="reminder-time" className="font-medium">{t('reminderTime')}</label>
@@ -391,7 +434,7 @@ export function SettingsPage({ settings }: { settings: UserSettings }) {
                   aria-invalid={showValidation && errors.reminderTime ? 'true' : undefined}
                   aria-describedby={describedBy('reminder-time', showValidation ? errors.reminderTime : undefined)}
                   onChange={(event) => updateDraft('reminderTime', event.target.value)}
-                  className={fieldClass}
+                  className={`${fieldClass} max-w-60`}
                 />
                 <p id="reminder-time-hint" className="m-0 text-sm text-on-surface-variant">{t('reminderTimeHint')}</p>
                 {showValidation && errors.reminderTime && <span id="reminder-time-error" className="text-sm text-error">{errors.reminderTime}</span>}
@@ -401,72 +444,35 @@ export function SettingsPage({ settings }: { settings: UserSettings }) {
           </div>
         </section>
 
-        <section aria-labelledby="appearance-settings-heading" className="grid gap-5 rounded-3xl border border-outline-variant bg-surface-container-low p-5 medium:p-7">
-          <div className="grid gap-1">
-            <h2 id="appearance-settings-heading" className="text-xl font-medium">{t('appearanceSettings')}</h2>
-            <p className="text-on-surface-variant">{t('appearanceSettingsDescription')}</p>
-          </div>
-          <fieldset className="m-0 grid gap-3 border-0 p-0">
-            <legend className="mb-1 font-medium">{t('accentColor')}</legend>
-            <div className="flex flex-wrap gap-3">
-              {THEME_PRESETS.map((preset) => {
-                const colors = createThemePalette({ ...theme, seed: preset.seed }, resolvedMode);
-                const selected = theme.seed === preset.seed;
-                return (
-                  <button key={preset.id} type="button" aria-pressed={selected} aria-label={t(preset.id as TranslationKey)} title={t(preset.id as TranslationKey)} disabled={mutation.isPending}
-                    onClick={() => mutation.mutate({ theme_seed: preset.seed })}
-                    className="grid size-12 place-items-center rounded-full border-2 border-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary aria-pressed:border-on-surface"
-                    style={{ background: `linear-gradient(135deg, ${colors.primary} 50%, ${colors['tertiary-container']} 50%)` }}>
-                    {selected && <span aria-hidden="true" className="text-lg font-bold" style={{ color: colors['on-primary'] }}>✓</span>}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="m-0 text-sm text-on-surface-variant">{t('accentColorHint')}</p>
-          </fieldset>
-          <div className={fieldLabelClass}>
-            <label htmlFor="theme-mode" className="font-medium">{t('themeMode')}</label>
-            <select
-              id="theme-mode"
+        <section aria-labelledby="pronunciation-settings-heading" className="settings-section">
+          <header>
+            <h2 id="pronunciation-settings-heading">{t('pronunciationSettings')}</h2>
+            <p>{t('pronunciationSettingsDescription')}</p>
+          </header>
+          <label htmlFor="tts-auto" className="settings-check-row">
+            <input
+              id="tts-auto"
+              type="checkbox"
+              aria-labelledby="tts-auto-label"
+              aria-describedby="tts-auto-hint"
               disabled={mutation.isPending}
-              value={draft.themeMode}
-              onChange={(event) => updateDraft('themeMode', event.target.value as UserSettings['theme_mode'])}
-              className={fieldClass}
-            >
-              {(['light', 'dark', 'system'] as const).map((mode) => <option key={mode} value={mode}>{t(mode)}</option>)}
-            </select>
-            <p className="m-0 text-sm text-on-surface-variant">{t('themeModeHint')}</p>
-          </div>
-        </section>
-
-        <section aria-labelledby="pronunciation-settings-heading" className="grid gap-4 rounded-3xl border border-outline-variant bg-surface-container-low p-5 medium:p-7">
-          <div className="grid gap-1">
-            <h2 id="pronunciation-settings-heading" className="text-xl font-medium">{t('pronunciationSettings')}</h2>
-            <p className="text-on-surface-variant">{t('pronunciationSettingsDescription')}</p>
-          </div>
-          <div className="grid gap-1">
-            <label htmlFor="tts-auto" className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl text-on-surface focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary">
-              <input
-                id="tts-auto"
-                type="checkbox"
-                aria-describedby="tts-auto-hint"
-                disabled={mutation.isPending}
-                checked={draft.ttsAuto}
-                onChange={(event) => updateDraft('ttsAuto', event.target.checked)}
-                className="h-5 w-5 accent-primary"
-              />
-              <span>{t('ttsAuto')}</span>
-            </label>
-            <p id="tts-auto-hint" className="m-0 ps-8 text-sm text-on-surface-variant">{t('ttsAutoHint')}</p>
-          </div>
+              checked={draft.ttsAuto}
+              onChange={(event) => updateDraft('ttsAuto', event.target.checked)}
+              className="size-5 shrink-0 accent-primary"
+            />
+            <span>
+              <span id="tts-auto-label" className="block font-medium">{t('ttsAuto')}</span>
+              <span id="tts-auto-hint" className="block text-sm text-on-surface-variant">{t('ttsAutoHint')}</span>
+            </span>
+          </label>
         </section>
 
         {mutation.isError && <p role="alert" className="rounded-xl border-s-4 border-error bg-error-container p-4 text-on-error-container">{errorMessage(mutation.error)}</p>}
-        {saved && <p role="status" aria-live="polite" className="text-on-surface-variant">{t('settingsSaved')}</p>}
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3 border-t border-outline-variant pt-3">
           <Button type="submit" disabled={mutation.isPending || (!hasChanges && !hasErrors)}>
             {t(mutation.isPending ? 'savingSettings' : 'saveSettings')}
           </Button>
+          {saved && <p role="status" className="text-sm text-on-surface-variant">{t('settingsSaved')}</p>}
           {showValidation && hasErrors && <p role="alert" className="text-error">{t('settingsValidationError')}</p>}
         </div>
       </form>

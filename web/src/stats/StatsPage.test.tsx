@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { t } from '../i18n/en';
@@ -134,7 +134,9 @@ describe('StatsPage', () => {
     expect(screen.getByText('3 sec')).toBeTruthy();
     expect(screen.getByText(t('statsTotalReviewTime'), { selector: 'dt' })).toBeTruthy();
     expect(screen.getByText('22 min')).toBeTruthy();
-    expect(screen.getByRole('img', { name: t('statsRetentionChartLabel') })).toBeTruthy();
+    const retentionPlot = screen.getByRole('region', { name: t('statsRetentionChartLabel') });
+    expect(retentionPlot.tabIndex).toBe(0);
+    expect(within(retentionPlot).getByRole('img', { name: t('statsRetentionChartLabel') })).toBeTruthy();
     expect(screen.getByRole('img', { name: t('statsForecastChartLabel') })).toBeTruthy();
     expect(await screen.findByRole('list', { name: t('statsHeatmapLabel').replace('{year}', String(year)) })).toBeTruthy();
     const growthTable = screen.getByRole('table', { name: t('statsVocabularyGrowthTable') });

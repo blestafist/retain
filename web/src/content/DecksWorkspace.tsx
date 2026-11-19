@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { ApiError } from '../api/client';
 import {
@@ -42,6 +42,16 @@ function deckDirection(deck: DeckNode): Direction {
   return deck.reverseOnly ? 'reverse' : deck.reverseCards ? 'both' : 'forward';
 }
 type DeckPanel = 'add' | 'rename' | 'transfer' | 'enrich' | null;
+
+const expandedViewport = '(min-width: 52.5rem)';
+const isExpanded = () => window.matchMedia?.(expandedViewport).matches ?? true;
+function subscribeViewport(listener: () => void) {
+  const media = window.matchMedia?.(expandedViewport);
+  media?.addEventListener('change', listener);
+  return () => media?.removeEventListener('change', listener);
+}
+
+const numberFormat = new Intl.NumberFormat('en');
 
 function flattenDecks(decks: DeckNode[]): DeckNode[] {
   return decks.flatMap((deck) => [deck, ...flattenDecks(deck.children)]);
@@ -94,6 +104,18 @@ function ImportIcon() {
   return <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12m-4-4 4 4 4-4M4 15v5h16v-5" /></svg>;
 }
 
+function DeckArtwork() {
+  return (
+    <svg className="deck-artwork" viewBox="0 0 256 240" aria-hidden="true" focusable="false">
+      <path className="deck-art-orbit" d="M6 182C-2 159 49 112 123 77S250 38 258 61s-46 73-120 108S14 205 6 182Z" />
+      <path className="deck-art-card-back" d="M108 40h85a25 25 0 0 1 25 25v91a25 25 0 0 1-25 25h-85a25 25 0 0 1-25-25V65a25 25 0 0 1 25-25Z" transform="rotate(17 150 110)" />
+      <rect className="deck-art-card-front" x="44" y="63" width="116" height="138" rx="28" transform="rotate(-16 102 132)" />
+      <path className="deck-art-lines" d="M70 123h64m-64 19h42m-42 19h26" transform="rotate(-16 102 132)" />
+      <path className="deck-art-spark" d="M203 128c0 23 10 33 33 33-23 0-33 10-33 33 0-23-10-33-33-33 23 0 33-10 33-33ZM48 40c0 12 6 18 18 18-12 0-18 6-18 18 0-12-6-18-18-18 12 0 18-6 18-18Z" />
+    </svg>
+  );
+}
+
 function DeckTree({
   decks,
   selectedId,
@@ -102,7 +124,7 @@ function DeckTree({
 }: {
   decks: DeckNode[];
   selectedId: string | null;
-  onSelect: (deck: DeckNode) => void;
+  onSelect: (deck: DeckNode, opener: HTMLButtonElement) => void;
   depth?: number;
 }) {
   if (decks.length === 0) return null;
@@ -116,15 +138,15 @@ function DeckTree({
             <div style={{ paddingInlineStart: `${Math.min(depth, 6) * 0.75}rem` }}>
               <button
                 type="button"
-                aria-pressed={selected}
-                onClick={() => onSelect(deck)}
+                aria-current={selected ? 'true' : undefined}
+                onClick={(event) => onSelect(deck, event.currentTarget)}
                 className={`deck-tree-item ${selected ? 'is-selected' : ''}`}
               >
                 <span className="deck-tree-icon"><DeckIcon /></span>
                 <span className="deck-tree-copy"><span className="deck-tree-name">{deck.name}</span>
-                  {counts && <span className="deck-tree-count">{t('deckWordCount').replace('{count}', new Intl.NumberFormat('en').format(counts.notes))}</span>}
+                  {counts && <span className="deck-tree-count">{t('deckWordCount').replace('{count}', numberFormat.format(counts.notes))}</span>}
                 </span>
-                {selected && <svg className="deck-tree-check" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m5 12 4 4 10-10" /></svg>}
+                <svg className="deck-tree-chevron" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={selected ? 'm5 12 4 4 10-10' : 'm10 6 6 6-6 6'} /></svg>
               </button>
             </div>
             <DeckTree decks={deck.children} selectedId={selectedId} onSelect={onSelect} depth={depth + 1} />
@@ -212,6 +234,7 @@ function NoteFields({ note, prefix, onTermChange }: { note?: Note; prefix: strin
 }
 
 export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
+  const expanded = useSyncExternalStore(subscribeViewport, isExpanded);
   const decksQuery = useDecks();
   const llmStatusQuery = useLlmStatus();
   const decks = decksQuery.data ?? [];
@@ -229,6 +252,10 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
   const newNoteForm = useRef<HTMLFormElement>(null);
   const taskOpener = useRef<HTMLElement | null>(null);
   const deckActionsTrigger = useRef<HTMLButtonElement>(null);
+  const detailHeading = useRef<HTMLHeadingElement>(null);
+  const libraryHeading = useRef<HTMLHeadingElement>(null);
+  const deckOpener = useRef<HTMLButtonElement | null>(null);
+  const viewFocus = useRef<'detail' | 'library' | null>(null);
   const selectedDeck = findDeck(decks, selectedId);
   const notesQuery = useDeckNotes(selectedDeck?.id ?? null);
   const createDeckMutation = useCreateDeck();
@@ -247,8 +274,18 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
       setPanelBusy(false);
       setCreateMode(null);
     }
-    if (!selectedId && decks[0]) setSelectedId(String(decks[0].id));
-  }, [decks, selectedId]);
+    if (expanded && !selectedId && decks[0]) setSelectedId(String(decks[0].id));
+  }, [decks, expanded, selectedId]);
+
+  useEffect(() => {
+    if (viewFocus.current === 'detail' && selectedDeck && !expanded) detailHeading.current?.focus();
+    if (viewFocus.current === 'library') {
+      const opener = deckOpener.current;
+      if (opener?.isConnected) opener.focus();
+      else libraryHeading.current?.focus();
+    }
+    viewFocus.current = null;
+  }, [selectedId, expanded, selectedDeck]);
 
   function beginCreate(mode: Exclude<CreateMode, null>) {
     rememberTaskOpener();
@@ -283,11 +320,22 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
       : null;
   }
 
-  function selectDeck(deck: DeckNode) {
+  function selectDeck(deck: DeckNode, opener: HTMLButtonElement) {
+    deckOpener.current = opener;
+    if (!expanded) {
+      viewFocus.current = 'detail';
+      window.scrollTo(0, 0);
+    }
     setSelectedId(String(deck.id));
     setEditingNote(null);
     setPanel(null);
     patchDeckMutation.reset();
+  }
+
+  function showLibrary() {
+    viewFocus.current = 'library';
+    setSelectedId(null);
+    setEditingNote(null);
   }
 
   function submitDeck(event: FormEvent<HTMLFormElement>) {
@@ -318,8 +366,11 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
     deleteDeckMutation.mutate(deck.id, {
       onSuccess: () => {
         if (selected && removed.has(String(selected.id))) {
-          setSelectedId(deck.parentId === null ? null : String(deck.parentId));
-          setEditingNote(null);
+          if (!expanded) showLibrary();
+          else {
+            setSelectedId(deck.parentId === null ? null : String(deck.parentId));
+            setEditingNote(null);
+          }
         }
       },
     });
@@ -380,6 +431,8 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
   }
 
   const pair = selectedDeck ? languagePair(decks, selectedDeck) : undefined;
+  const counts = selectedDeck?.counts;
+  const LibraryHeading = expanded && selectedDeck ? 'h2' : 'h1';
 
   return (
     <section className="deck-workspace" aria-label={t('decksWorkspace')}>
@@ -393,25 +446,19 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
 
       {!decksQuery.isPending && !decksQuery.isError && (
         <div className="deck-workspace-layout">
-          <aside className="deck-sidebar" aria-labelledby="deck-list-heading">
-            <div className="deck-sidebar-heading">
-              <h2 id="deck-list-heading">{t('decks')}</h2>
-              <button type="button" className="workspace-icon-button" aria-label={t('newDeck')} onClick={() => beginCreate('root')}><PlusIcon /></button>
+          <section hidden={!expanded && !!selectedDeck} className="deck-sidebar" aria-labelledby="deck-list-heading">
+            <div className="deck-sidebar-heading page-intro">
+              <LibraryHeading id="deck-list-heading" ref={libraryHeading} tabIndex={-1}>{t('deckLibrary')}</LibraryHeading>
+              {!expanded && decks.length > 0 && <p>{t('deckLibraryHint')}</p>}
             </div>
-            {decks.length > 0 && <label className="deck-mobile-picker" htmlFor="mobile-deck-picker">
-              <span className="sr-only">{t('selectedDeck')}</span>
-              <DeckIcon />
-              <select id="mobile-deck-picker" value={selectedId ?? ''} onChange={(event) => { const deck = findDeck(decks, event.target.value); if (deck) selectDeck(deck); }}>
-                {!selectedDeck && <option value="">{t('decks')}</option>}
-                {flattenDecks(decks).map((deck) => <option key={String(deck.id)} value={String(deck.id)}>{deck.name}</option>)}
-              </select>
-            </label>}
-            {decks.length === 0 ? <p className="m-0 py-3 text-on-surface-variant">{t('noDecks')}</p> : (
+            <div className="deck-library-actions">
+              <Button type="button" onClick={() => beginCreate('root')}><PlusIcon />{t('newDeck')}</Button>
+              <button type="button" className="deck-library-import workspace-icon-button" aria-label={t('importExport')} title={t('importExport')} onClick={() => openPanel('transfer')}><ImportIcon /></button>
+            </div>
+            {decks.length === 0 ? <div className="deck-library-empty"><span className="deck-empty-icon"><DeckIcon /></span><p>{t('noDecks')}</p></div> : (
               <DeckTree decks={decks} selectedId={selectedId} onSelect={selectDeck} />
             )}
-            {deleteDeckMutation.isError && <p role="alert" className="m-0 text-error">{errorMessage(deleteDeckMutation.error)}</p>}
-            <button type="button" className="deck-import-action" onClick={() => openPanel('transfer')}><ImportIcon />{t('importExport')}</button>
-          </aside>
+          </section>
 
           <div className="deck-main">
             <WorkspaceDialog open={createMode !== null} onOpenChange={(open) => { if (!open) setCreateMode(null); }} title={t(createMode === 'child' ? 'addChildDeck' : 'newDeck')} returnFocusRef={taskOpener}>
@@ -454,17 +501,24 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
 
             {selectedDeck ? (
               <section className="deck-detail" aria-labelledby="selected-deck-heading">
+                {!expanded && <button type="button" className="deck-back" onClick={showLibrary}><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5m7-7-7 7 7 7" /></svg>{t('backToDecks')}</button>}
                 <header className="deck-detail-header">
                   <div className="deck-heading-copy">
-                    <p className="deck-language">{pair ?? t('languagePairNotSet')}</p>
-                    <h1 id="selected-deck-heading">{selectedDeck.name}</h1>
-                    {selectedDeck.counts && <p className="deck-count-summary">{t('deckCounts').replace('{notes}', new Intl.NumberFormat('en').format(selectedDeck.counts.notes)).replace('{new}', new Intl.NumberFormat('en').format(selectedDeck.counts.new)).replace('{learning}', new Intl.NumberFormat('en').format(selectedDeck.counts.learning)).replace('{due}', new Intl.NumberFormat('en').format(selectedDeck.counts.due))}</p>}
+                    <p className="deck-language"><DeckIcon />{pair ?? t('languagePairNotSet')}</p>
+                    <h1 id="selected-deck-heading" ref={detailHeading} tabIndex={-1}>{selectedDeck.name}</h1>
+                    {counts && <ul className="deck-count-summary">
+                      <li>{t('deckWordCount').replace('{count}', numberFormat.format(counts.notes))}</li>
+                      <li>{t('deckNewCount').replace('{count}', numberFormat.format(counts.new))}</li>
+                      <li>{t('deckLearningCount').replace('{count}', numberFormat.format(counts.learning))}</li>
+                      <li>{t('deckDueCount').replace('{count}', numberFormat.format(counts.due))}</li>
+                    </ul>}
                   </div>
+                  <DeckArtwork />
                   <div className="deck-header-actions">
-                    <a className="deck-study-link" href="/study"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7z" /></svg>{t('study')}</a>
+                    <a className="deck-study-link" href={`/study?deck=${encodeURIComponent(selectedDeck.id)}`}><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7z" /></svg>{t('study')}</a>
                     {selectedDeck.canEdit !== false && <DropdownMenu.Root>
                       <DropdownMenu.Trigger ref={deckActionsTrigger} className="workspace-icon-button" aria-label={t('deckActions')}><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg></DropdownMenu.Trigger>
-                      <DropdownMenu.Portal><DropdownMenu.Content className="deck-actions-menu" align="end" sideOffset={8}>
+                         <DropdownMenu.Portal><DropdownMenu.Content className="deck-actions-menu" align="start" sideOffset={8} collisionPadding={12}>
                         <DropdownMenu.Item onSelect={() => openPanel('rename')}>{t('renameDeck')}</DropdownMenu.Item>
                         <DropdownMenu.Label className="px-4 pt-2 text-xs text-on-surface-variant">{t('studyDirection')}</DropdownMenu.Label>
                         <DropdownMenu.RadioGroup value={deckDirection(selectedDeck)} onValueChange={(value) => patchDeckMutation.mutate({ id: selectedDeck.id, input: directionFlags[value as Direction] })}>
@@ -480,6 +534,8 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                     </DropdownMenu.Root>}
                   </div>
                 </header>
+                {patchDeckMutation.isError && panel !== 'rename' && <p role="alert" className="text-error">{errorMessage(patchDeckMutation.error)}</p>}
+                {deleteDeckMutation.isError && <p role="alert" className="text-error">{errorMessage(deleteDeckMutation.error)}</p>}
                 {selectedDeck.canEdit === false && <p className="deck-readonly">{t('readOnlySubscription')}</p>}
 
                 {selectedDeck.canEdit !== false && <WorkspaceDialog open={panel === 'rename'} onOpenChange={(open) => { if (!open) setPanel(null); }} title={t('renameDeck')} returnFocusRef={taskOpener}>
@@ -533,7 +589,8 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                    ) : <div className="deck-empty">
                      <span className="deck-empty-icon"><DeckIcon /></span>
                      <h3>{t('noNotes')}</h3>
-                     {selectedDeck.canEdit !== false && <><p>{t('emptyDeckHint')}</p><button type="button" className="deck-import-action" onClick={() => openPanel('transfer')}><ImportIcon />{t('importDeck')}</button></>}
+                      {selectedDeck.children.length > 0 ? <p>{t('deckChildWordsHint')}</p> : selectedDeck.canEdit !== false && <p>{t('emptyDeckHint')}</p>}
+                      {selectedDeck.canEdit !== false && <button type="button" className="deck-import-action" onClick={() => openPanel('transfer')}><ImportIcon />{t('importDeck')}</button>}
                    </div>)}
                   {deleteNoteMutation.isError && <p role="alert" className="m-0 text-error">{errorMessage(deleteNoteMutation.error)}</p>}
 
@@ -561,9 +618,7 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                   />
                 </WorkspaceDialog>}
               </section>
-            ) : (
-              <section className="deck-detail deck-no-selection"><DeckIcon /><h1>{t('selectOrCreateDeck')}</h1><Button type="button" onClick={() => beginCreate('root')}><PlusIcon />{t('newDeck')}</Button></section>
-            )}
+            ) : expanded && <div className="deck-library-art" aria-hidden="true"><DeckArtwork /></div>}
             <WorkspaceDialog open={panel === 'transfer'} onOpenChange={closePanel} title={t('importExport')} returnFocusRef={taskOpener}>
               <ImportPanel decks={decks} selectedDeck={selectedDeck?.canEdit === false ? undefined : selectedDeck} onDirtyChange={setPanelDirty} onBusyChange={setPanelBusy} />
             </WorkspaceDialog>

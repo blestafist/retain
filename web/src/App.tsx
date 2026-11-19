@@ -74,6 +74,11 @@ function AccountMenu({ user, signingOut, onSignOut }: {
             <span className="app-user-email">{user.email}</span>
           </DropdownMenu.Label>
           <DropdownMenu.Separator className="app-account-separator" />
+          {user.is_admin && (
+            <DropdownMenu.Item asChild className="app-account-menu-item">
+              <a href="/admin">{t('admin')}</a>
+            </DropdownMenu.Item>
+          )}
           <DropdownMenu.Item className="app-account-menu-item" disabled={signingOut} onSelect={onSignOut}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
               <path d="M10 4H5v16h5m5-12 4 4-4 4m-6-4h14" />
@@ -101,6 +106,7 @@ function AppFrame({ children, signedIn = false }: { children: ReactNode; signedI
 }
 
 function AuthenticatedApp() {
+  const studyDeck = new URLSearchParams(window.location.search).get('deck');
   const queryClient = useQueryClient();
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine);
   const meQuery = useQuery({
@@ -219,6 +225,7 @@ function AuthenticatedApp() {
             )}
             {window.location.pathname === '/study' ? (
               <StudySession
+                deckId={studyDeck && /^[1-9]\d*$/.test(studyDeck) ? studyDeck : null}
                 ownerID={meQuery.data.user.id}
                 ownerScopeID={meQuery.data.user.sync_scope}
                 settings={meQuery.data.settings}

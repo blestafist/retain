@@ -66,6 +66,7 @@
   --md-sys-typescale-label-small-letter-spacing: 0.03125rem;
 
   --md-sys-typescale-display-large-emphasized: 650 3.5625rem/4rem var(--md-ref-typeface-brand);
+  --md-sys-typescale-display-small-emphasized: 650 2.25rem/2.75rem var(--md-ref-typeface-brand);
   --md-sys-typescale-headline-large-emphasized: 650 2rem/2.5rem var(--md-ref-typeface-brand);
   --md-sys-typescale-headline-medium-emphasized: 650 1.75rem/2.25rem var(--md-ref-typeface-brand);
   --md-sys-typescale-headline-small-emphasized: 650 1.5rem/2rem var(--md-ref-typeface-brand);

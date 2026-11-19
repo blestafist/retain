@@ -65,12 +65,7 @@ describe('DecksWorkspace', () => {
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     const deckList = screen.getByRole('list', { name: t('deckList') });
     expect(within(deckList).getAllByRole('button')).toHaveLength(3);
-    const mobilePicker = screen.getByRole('combobox', { name: t('selectedDeck') });
-    expect(mobilePicker).toHaveProperty('value', '42');
-    expect(within(mobilePicker).getAllByRole('option').map((option) => option.textContent)).toEqual([
-      'German course', 'Chapter 1', 'English course',
-    ]);
-    expect(within(deckList).getByRole('button', { name: /German course/ }).getAttribute('aria-pressed')).toBe('true');
+    expect(within(deckList).getByRole('button', { name: /German course/ }).getAttribute('aria-current')).toBe('true');
     expect(screen.queryByRole('dialog', { hidden: true })).toBeNull();
     expect(screen.queryByRole('form', { name: t('newDeck'), hidden: true })).toBeNull();
     expect(screen.queryByRole('form', { name: t('renameDeck'), hidden: true })).toBeNull();
@@ -87,14 +82,9 @@ describe('DecksWorkspace', () => {
     await screen.findByText('Welt');
     expect(screen.queryByText('Hallo')).toBeNull();
     expect(screen.getByText(`${t('german')} → ${t('polish')}`)).toBeTruthy();
-    expect(within(deckList).getByRole('button', { name: 'Chapter 1' }).getAttribute('aria-pressed')).toBe('true');
-    expect(within(deckList).getByRole('button', { name: /German course/ }).getAttribute('aria-pressed')).toBe('false');
-    expect(mobilePicker).toHaveProperty('value', '43');
-    await user.selectOptions(mobilePicker, '42');
-    expect(screen.getByRole('heading', { name: 'German course', level: 1 })).toBeTruthy();
-    expect(within(deckList).getByRole('button', { name: /German course/ }).getAttribute('aria-pressed')).toBe('true');
-    await user.selectOptions(mobilePicker, '43');
-    expect(screen.getByRole('heading', { name: 'Chapter 1', level: 1 })).toBeTruthy();
+    expect(within(deckList).getByRole('button', { name: 'Chapter 1' }).getAttribute('aria-current')).toBe('true');
+    expect(within(deckList).getByRole('button', { name: /German course/ }).getAttribute('aria-current')).toBeNull();
+    expect(screen.getByRole('link', { name: t('study') }).getAttribute('href')).toBe('/study?deck=43');
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/jobs/'))).toBe(false);
 
     await user.click(screen.getByRole('button', { name: t('deckActions') }));
@@ -116,6 +106,34 @@ describe('DecksWorkspace', () => {
     expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/v1/import/batches')).toHaveLength(1);
   });
 
+  it('opens the library first on mobile, loads words on demand, and returns focus on Back', async () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    vi.stubGlobal('scrollTo', vi.fn());
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === '/api/v1/decks') return jsonResponse([{ id: 42, name: 'German course', parent_id: null, children: [] }]);
+      if (url === '/api/v1/decks/42/notes') return jsonResponse([{ id: 5, term: 'Hallo', translation: 'Cześć' }]);
+      if (url === '/api/v1/llm/status') return jsonResponse({ enabled: false });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    expect(await screen.findByRole('heading', { name: t('deckLibrary'), level: 1 })).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/notes'))).toBe(false);
+    const deck = screen.getByRole('button', { name: 'German course' });
+    await user.click(deck);
+
+    const heading = await screen.findByRole('heading', { name: 'German course', level: 1 });
+    expect(document.activeElement).toBe(heading);
+    expect(screen.queryByRole('list', { name: t('deckList') })).toBeNull();
+    expect(await screen.findByText('Hallo')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: t('backToDecks') }));
+    expect(screen.getByRole('heading', { name: t('deckLibrary'), level: 1 })).toBeTruthy();
+    expect(document.activeElement).toBe(deck);
+  });
+
   it('keeps import available without decks and confirms before discarding an upload or preview', async () => {
     const user = userEvent.setup();
     const confirm = vi.mocked(window.confirm).mockReturnValue(false);
@@ -133,7 +151,7 @@ describe('DecksWorkspace', () => {
     renderWorkspace();
 
     await screen.findByText(t('noDecks'));
-    expect(screen.getByRole('heading', { name: t('selectOrCreateDeck'), level: 1 })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: t('deckLibrary'), level: 1 })).toBeTruthy();
     expect(screen.queryByLabelText(t('chooseImportFile'))).toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/v1/import/batches')).toBe(false);
     const importButton = screen.getByRole('button', { name: t('importExport') });
@@ -245,7 +263,7 @@ describe('DecksWorkspace', () => {
     });
     renderWorkspace();
 
-    const sidebar = await screen.findByRole('complementary', { name: t('decks') });
+    const sidebar = await screen.findByRole('region', { name: t('deckLibrary') });
     expect(screen.queryByRole('form', { name: t('newDeck') })).toBeNull();
     await user.click(within(sidebar).getByRole('button', { name: t('newDeck') }));
     const rootDialog = screen.getByRole('dialog', { name: t('newDeck') });
@@ -359,7 +377,7 @@ describe('DecksWorkspace', () => {
       expect(screen.queryByRole('form', { name: t(action), hidden: true })).toBeNull();
       expect(screen.queryByDisplayValue('Draft for removed deck')).toBeNull();
       expect(screen.queryByRole('heading', { name: 'German course', level: 1 })).toBeNull();
-      expect(screen.getByRole('combobox', { name: t('selectedDeck') })).toHaveProperty('value', '43');
+      expect(screen.getByRole('button', { name: 'English course' }).getAttribute('aria-current')).toBe('true');
       expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/v1/decks')).toHaveLength(2);
       expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
 
