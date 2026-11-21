@@ -182,7 +182,7 @@ If you convert files yourself, emitting `retain/v1` is enough — no adapter nee
 
 **Import flow**
 1. `POST /import/preview`: the file is stored in `import_batches` along with the raw source (gzip), the adapter is auto-detected. The response contains the deck tree and per-deck counts: new / changed / unchanged / warnings.
-2. The user picks the language pair and where to put the decks, then `POST /import/{batch_id}/apply`. Everything is applied in a single transaction.
+2. Show the actual number of decks and words before saving, with mismatches visible and only editable decks offered as destinations. The user picks the language pair and where to put the decks, then confirms `POST /import/{batch_id}/apply`. Everything is applied in a single transaction.
 3. **Re-import** (the teacher added words to a chapter): a deck is matched by `(owner, source, external_id)`, a note by `external_id`, falling back to `term_key`.
     - New words are added.
     - Changed words get their translation updated; **FSRS progress is preserved**.
