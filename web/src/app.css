@@ -21,6 +21,10 @@ body {
   color: var(--md-sys-color-on-surface);
 }
 
+.material-button { font: var(--md-sys-typescale-label-large); letter-spacing: var(--md-sys-typescale-label-large-letter-spacing); }
+.material-button:enabled:hover { box-shadow: inset 0 0 0 1px currentColor; }
+.material-button:enabled:active { box-shadow: inset 0 0 0 2px currentColor; }
+
 .app-shell {
   display: flex;
   min-height: 100vh;
@@ -299,24 +303,23 @@ body {
 .app-shell-signed-in { --app-bottom-clearance: calc(4.75rem + env(safe-area-inset-bottom)); }
 .app-content :focus { scroll-margin-bottom: var(--app-bottom-clearance); }
 
-.page-intro { padding-block: 0.25rem 0.5rem; }
+.page-intro { padding-block: 0.25rem; }
 .main-content .page-intro h1 {
   max-width: none;
-  font: var(--md-sys-typescale-display-small-emphasized);
-  font-size: clamp(2.25rem, 5vw, 3.5rem);
-  line-height: 1.08;
-  letter-spacing: -0.045em;
+  font: var(--md-sys-typescale-headline-medium-emphasized);
+  letter-spacing: var(--md-sys-typescale-headline-medium-letter-spacing);
   overflow-wrap: anywhere;
   text-wrap: wrap;
 }
 .page-intro p {
   max-width: 58ch;
-  margin-block: 0.5rem 0;
+  margin-block: 0.25rem 0;
   color: var(--md-sys-color-on-surface-variant);
   font: var(--md-sys-typescale-body-large);
 }
 
 @media (min-width: 37.5rem) {
+  .main-content .page-intro h1 { font: var(--md-sys-typescale-headline-large-emphasized); }
   .app-shell { padding-inline: max(1.5rem, env(safe-area-inset-left)) max(1.5rem, env(safe-area-inset-right)); }
   .app-header { min-height: 4.5rem; }
 }
@@ -472,8 +475,11 @@ body {
 }
 
 @media (min-width: 52.5rem) {
-  .app-shell-signed-in { --app-bottom-clearance: 1rem; padding-inline-start: calc(5.5rem + max(1.5rem, env(safe-area-inset-left))); }
-  .app-user-bar { min-height: 5rem; }
+  .app-shell-signed-in {
+    --app-rail-width: 5rem;
+    --app-bottom-clearance: 1rem;
+    padding-inline-start: calc(var(--app-rail-width) + env(safe-area-inset-left) + 1.5rem);
+  }
   .app-shell-signed-in .app-content { padding-bottom: 4rem; }
 }
 

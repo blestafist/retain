@@ -81,7 +81,7 @@ func (s *Service) Preview(ctx context.Context, ownerID int64, filename, adapterN
 		return PreviewResult{}, ErrInternal
 	}
 	result.Summary.Source = source
-	result.Summary.Tree, result.Summary.Counts, result.Summary.DeckCounts, result.Summary.Warnings, err = s.previewTree(ctx, ownerID, bundle.Decks, source, nil, false, "")
+	result.Summary.Tree, result.Summary.Counts, result.Summary.DeckCounts, result.Summary.Warnings, err = s.previewTree(ctx, s.database.SQL, s.database.Queries(), ownerID, bundle.Decks, source, nil, false, "")
 	if err != nil {
 		return PreviewResult{}, err
 	}
@@ -183,6 +183,10 @@ func (s *Service) Apply(ctx context.Context, ownerID int64, batchID string, inpu
 		} else if err != nil {
 			return PreviewResult{}, ErrInternal
 		}
+	}
+	summary.Tree, summary.Counts, summary.DeckCounts, summary.Warnings, err = s.previewTree(ctx, tx, queries, ownerID, bundle.Decks, source, input.ParentDeckID, true, input.LangTarget)
+	if err != nil {
+		return PreviewResult{}, err
 	}
 	if err := s.applyDecks(ctx, tx, queries, ownerID, batchID, source, bundle.Decks, input.ParentDeckID, true, "", input); err != nil {
 		return PreviewResult{}, err
@@ -338,16 +342,22 @@ func (s *Service) Export(ctx context.Context, ownerID, deckID int64, format stri
 	return Export{Filename: fmt.Sprintf("deck-%d.csv", deckID), ContentType: "text/csv; charset=utf-8", Body: body}, nil
 }
 
-func (s *Service) previewTree(ctx context.Context, ownerID int64, decks []importer.Deck, source string, parentID *int64, parentKnown bool, inheritedLangTarget string) ([]PreviewDeck, Counts, DeckCounts, []string, error) {
+func (s *Service) previewTree(ctx context.Context, runner queryRunner, queries *gen.Queries, ownerID int64, decks []importer.Deck, source string, parentID *int64, parentKnown bool, inheritedLangTarget string) ([]PreviewDeck, Counts, DeckCounts, []string, error) {
 	tree := make([]PreviewDeck, 0, len(decks))
 	var total Counts
 	var deckTotal DeckCounts
 	warnings := make([]string, 0)
-	queries := s.database.Queries()
 	for _, deck := range decks {
-		existing, found, err := findDeck(ctx, s.database.SQL, queries, ownerID, source, deck, parentID, parentKnown)
+		existing, found, err := findDeck(ctx, runner, queries, ownerID, source, deck, parentID, parentKnown)
 		if err != nil {
 			return nil, Counts{}, DeckCounts{}, nil, err
+		}
+		var placement groupPlacement
+		if found && deck.FormerGroup != nil {
+			placement, err = resolveImportGroup(ctx, queries, ownerID, source, deck, existing, parentID)
+			if err != nil {
+				return nil, Counts{}, DeckCounts{}, nil, err
+			}
 		}
 		item := PreviewDeck{ExternalID: deck.ExternalID, Name: deck.Name, Status: "new", Warnings: []string{}, Decks: []PreviewDeck{}}
 		var existingID *int64
@@ -355,11 +365,15 @@ func (s *Service) previewTree(ctx context.Context, ownerID int64, decks []import
 			id := existing.ID
 			existingID = &id
 			item.Status = "unchanged"
-			if deckPreviewChanged(existing, deck) {
+			if placement.retire || deckPreviewChanged(existing, deck) {
 				item.Status = "changed"
 			}
 		}
-		effectiveLangTarget := previewLangTarget(deck, existing, found, inheritedLangTarget)
+		langTarget := inheritedLangTarget
+		if placement.group.LangTarget.Valid {
+			langTarget = placement.group.LangTarget.String
+		}
+		effectiveLangTarget := previewLangTarget(deck, existing, found, langTarget)
 		switch item.Status {
 		case "new":
 			deckTotal.New++
@@ -397,7 +411,7 @@ func (s *Service) previewTree(ctx context.Context, ownerID int64, decks []import
 			missingParent := int64(-1)
 			childLookupParent = &missingParent
 		}
-		children, counts, childDeckCounts, childWarnings, err := s.previewTree(ctx, ownerID, deck.Decks, source, childLookupParent, true, effectiveLangTarget)
+		children, counts, childDeckCounts, childWarnings, err := s.previewTree(ctx, runner, queries, ownerID, deck.Decks, source, childLookupParent, true, effectiveLangTarget)
 		if err != nil {
 			return nil, Counts{}, DeckCounts{}, nil, err
 		}
@@ -422,15 +436,59 @@ func previewLangTarget(deck importer.Deck, existing gen.Deck, found bool, inheri
 	if deck.LangTarget != "" {
 		return deck.LangTarget
 	}
-	if inherited != "" {
-		return inherited
-	}
 	if found && existing.LangTarget.Valid {
 		return existing.LangTarget.String
+	}
+	if inherited != "" {
+		return inherited
 	}
 	// PLAN.md defaults school-wordsets imports to German when the preview has no
 	// persisted or inherited language yet. New notes are still counted as new.
 	return "de"
+}
+
+type groupPlacement struct {
+	parent *int64
+	group  gen.Deck
+	retire bool
+}
+
+// resolveImportGroup only moves a wordset out of its original, untouched
+// wrapper. It must stay in place if moving it would change shared access.
+func resolveImportGroup(ctx context.Context, queries *gen.Queries, ownerID int64, source string, deck importer.Deck, existing gen.Deck, destination *int64) (groupPlacement, error) {
+	placement := groupPlacement{parent: destination}
+	if !existing.ParentID.Valid {
+		return placement, nil
+	}
+	group, err := queries.GetDeck(ctx, gen.GetDeckParams{ID: existing.ParentID.Int64, OwnerID: ownerID})
+	if errors.Is(err, sql.ErrNoRows) {
+		return placement, nil
+	}
+	if err != nil {
+		return placement, ErrInternal
+	}
+	if group.Source != nullableString(source) || group.ExternalID != nullableString(deck.FormerGroup.ExternalID) {
+		if destination == nil {
+			placement.parent = &existing.ParentID.Int64
+		}
+		return placement, nil
+	}
+	placement.group = group
+	pristine, err := queries.IsPristineImportGroup(ctx, gen.IsPristineImportGroupParams{
+		FolderID: group.ID, OwnerID: ownerID, OriginalName: deck.FormerGroup.Name,
+	})
+	if err != nil {
+		return placement, ErrInternal
+	}
+	if !pristine || (destination != nil && *destination == group.ID) {
+		placement.parent = &group.ID
+		return placement, nil
+	}
+	if destination == nil && group.ParentID.Valid {
+		placement.parent = &group.ParentID.Int64
+	}
+	placement.retire = true
+	return placement, nil
 }
 
 func (s *Service) applyDecks(ctx context.Context, tx *sql.Tx, queries *gen.Queries, ownerID int64, batchID, source string, decks []importer.Deck, parentID *int64, roots bool, inheritedLangTarget string, input ApplyInput) error {
@@ -443,30 +501,47 @@ func (s *Service) applyDecks(ctx context.Context, tx *sql.Tx, queries *gen.Queri
 		if err != nil {
 			return err
 		}
+		var placement groupPlacement
+		if found && roots && deck.FormerGroup != nil {
+			placement, err = resolveImportGroup(ctx, queries, ownerID, source, deck, row, parent)
+			if err != nil {
+				return err
+			}
+			parent = placement.parent
+		}
+		deckPosition := int64(position)
+		if placement.retire && sameParent(placement.group.ParentID, parent) {
+			deckPosition = placement.group.Position
+		} else if found && deck.FormerGroup != nil && sameParent(row.ParentID, parent) {
+			deckPosition = row.Position
+		}
 		langTarget, langNative := deck.LangTarget, deck.LangNative
-		if roots && langTarget == "" {
+		if langTarget == "" {
 			// The pair selected on the first import becomes the inherited language
 			// context for later previews when the source itself has no language.
 			if found && row.LangTarget.Valid {
 				langTarget = row.LangTarget.String
-			} else {
+			} else if placement.retire && placement.group.LangTarget.Valid {
+				langTarget = placement.group.LangTarget.String
+			} else if roots && (placement.group.ID == 0 || placement.retire) {
 				langTarget = input.LangTarget
 			}
 		}
-		if roots && langNative == "" {
+		if langNative == "" {
 			if found && row.LangNative.Valid {
 				langNative = row.LangNative.String
-			} else {
+			} else if placement.retire && placement.group.LangNative.Valid {
+				langNative = placement.group.LangNative.String
+			} else if roots && (placement.group.ID == 0 || placement.retire) {
 				langNative = input.LangNative
 			}
 		}
-		effectiveLangTarget := deck.LangTarget
+		effectiveLangTarget := langTarget
+		if effectiveLangTarget == "" && placement.group.LangTarget.Valid {
+			effectiveLangTarget = placement.group.LangTarget.String
+		}
 		if effectiveLangTarget == "" {
-			if roots {
-				effectiveLangTarget = langTarget
-			} else {
-				effectiveLangTarget = inheritedLangTarget
-			}
+			effectiveLangTarget = inheritedLangTarget
 		}
 		if found && row.DeletedAt.Valid {
 			row, err = restoreDeck(ctx, tx, ownerID, row.ID, s.now())
@@ -477,7 +552,7 @@ func (s *Service) applyDecks(ctx context.Context, tx *sql.Tx, queries *gen.Queri
 		if found {
 			updated, err := queries.UpdateDeck(ctx, gen.UpdateDeckParams{
 				ParentID: nullableInt64(parent), Name: deck.Name, Description: row.Description,
-				Position: int64(position), LangTarget: nullableStringPtr(langTarget), LangNative: nullableStringPtr(langNative),
+				Position: deckPosition, LangTarget: nullableStringPtr(langTarget), LangNative: nullableStringPtr(langNative),
 				ReverseCards: row.ReverseCards, ReverseOnly: row.ReverseOnly, WrongArticleRating: row.WrongArticleRating, ColorSeed: row.ColorSeed,
 				Source: sql.NullString{String: source, Valid: true}, ExternalID: nullableString(deck.ExternalID),
 				ExpectedCount: expectedCount(deck.ExpectedCount, row.ExpectedCount), SourceDeckID: row.SourceDeckID,
@@ -496,7 +571,7 @@ func (s *Service) applyDecks(ctx context.Context, tx *sql.Tx, queries *gen.Queri
 		} else {
 			created, err := queries.CreateDeck(ctx, gen.CreateDeckParams{
 				OwnerID: ownerID, ParentID: nullableInt64(parent), Name: deck.Name,
-				Position: int64(position), LangTarget: nullableStringPtr(langTarget), LangNative: nullableStringPtr(langNative),
+				Position: deckPosition, LangTarget: nullableStringPtr(langTarget), LangNative: nullableStringPtr(langNative),
 				WrongArticleRating: 2, Source: sql.NullString{String: source, Valid: true},
 				ExternalID: nullableString(deck.ExternalID), ExpectedCount: nullableExpected(deck.ExpectedCount),
 			})
@@ -507,6 +582,12 @@ func (s *Service) applyDecks(ctx context.Context, tx *sql.Tx, queries *gen.Queri
 				return ErrInternal
 			}
 			row = created
+		}
+		if placement.retire {
+			now := s.now()
+			if _, err := queries.SoftDeleteDeck(ctx, gen.SoftDeleteDeckParams{ID: placement.group.ID, OwnerID: ownerID, DeletedAt: sql.NullTime{Time: now, Valid: true}, UpdatedAt: now}); err != nil {
+				return ErrInternal
+			}
 		}
 		seen := make(map[int64]struct{}, len(deck.Notes))
 		for _, note := range deck.Notes {

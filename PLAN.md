@@ -168,7 +168,7 @@ type Adapter interface {
 }
 ```
 - `retain` — the native format.
-- `school-wordsets` — an export shaped like `classes[].class / wordsets[].info / entries[]`: `class` → parent deck (`external_id = class:<group_id>`), `wordset` → child deck (`wordset:<info.id>`, `expected_count`), `entries` → notes. If the word count does not match `expected_count`, a warning is shown. The file has no languages, so the pair is chosen in the preview (default de/pl).
+- `school-wordsets` — an export shaped like `classes[].class / wordsets[].info / entries[]`: each wordset is a studyable deck (`wordset:<info.id>`, `expected_count`), and entries become notes. A class with one wordset imports as that deck, not an empty class plus a chapter. Multiple wordsets in the same class keep their `class:<group_id>` parent. Preserve wordset identity and progress across re-imports; flatten a legacy wrapper only when safe, never remove user content or break sharing. If the word count differs from `expected_count`, show a warning. The file has no languages, so the pair is chosen in the preview (default de/pl).
 - `csv` — `term;translation;example;tags`.
 - Later: Anki `.apkg`.
 
@@ -182,7 +182,7 @@ If you convert files yourself, emitting `retain/v1` is enough — no adapter nee
 
 **Import flow**
 1. `POST /import/preview`: the file is stored in `import_batches` along with the raw source (gzip), the adapter is auto-detected. The response contains the deck tree and per-deck counts: new / changed / unchanged / warnings.
-2. The user picks the language pair and where to put the decks, then `POST /import/{batch_id}/apply`. Everything is applied in a single transaction.
+2. Show the actual number of decks and words before saving, with mismatches visible and only editable decks offered as destinations. The user picks the language pair and where to put the decks, then confirms `POST /import/{batch_id}/apply`. Everything is applied in a single transaction.
 3. **Re-import** (the teacher added words to a chapter): a deck is matched by `(owner, source, external_id)`, a note by `external_id`, falling back to `term_key`.
     - New words are added.
     - Changed words get their translation updated; **FSRS progress is preserved**.
@@ -409,7 +409,7 @@ The entire palette is built at runtime from a single **seed color** (MD3 dynamic
 
 - **Default**: clear blue **`#2563EB`**, using `TonalSpot` for coordinated blue accents, neutral surfaces, and a restrained complementary tertiary. The previous swamp/Fidelity default made every surface look olive and visually flattened the workspace.
 - **Settings → Appearance**:
-  - Preset swatches (MD3 color swatches): blue `#2563EB` (default), swamp `#3A4527`, plus curated hues.
+  - Preset swatches (MD3 color swatches): blue `#2563EB` (default), swamp `#3A4527`, plus curated hues. Stage the accent with the other form edits and save them together; trying a swatch must not erase an unsaved schedule.
   - Custom color: color picker + HEX field.
   - **Scheme style**: `TonalSpot` (default — balanced accents and neutral surfaces), `Fidelity` (stays closest to the chosen hue), `Vibrant`, `Expressive` (rotates hue more, brighter), `Monochrome`.
   - **Contrast**: standard / medium / high (`contrastLevel` 0 / 0.5 / 1).
@@ -458,6 +458,7 @@ The entire palette is built at runtime from a single **seed color** (MD3 dynamic
 - Touch targets at least 48dp, visible focus ring, WCAG AA contrast (generated palette checked in tests).
 - **Deck workspace density**: an expressive tonal header with compact language and counts, followed by a flat word list. The selected deck name is the primary heading. On compact and medium widths the deck library and deck detail are separate views, with an explicit back action; expanded screens show both. Import/export, rename, creation, and AI enrichment open only on request in accessible dialogs/sheets. Empty decks offer adding a word or importing immediately. Account details and sign-out stay in the account menu. Keep all existing capabilities and permissions.
 - **Compact navigation and secondary screens**: keep the principal destinations in a safe-area-aware bottom bar, with administrative access in the account menu on smaller screens. Keep settings, analytics, and friends on flat, self-sizing surfaces, using expressive accents for primary actions and meaningful metrics rather than framing every group as a card.
+- **Navigation and task hierarchy**: center expanded rail destinations vertically, keeping the first and last reachable on short screens. Separate studying from deck management; keep direction choices on demand and distinguish grouped subdecks from words directly in the deck. In analytics, lead with the daily picture and let learners open activity and detailed memory metrics when needed; no metric is removed.
 
 ### 8.6 Implementation
 - There is no official web component library for MD3 Expressive at planning time (`@material/web` is in maintenance mode and lacks Expressive). So we build a small UI kit in `web/src/ui/`:

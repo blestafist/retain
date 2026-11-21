@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
+import * as RovingFocus from '@radix-ui/react-roving-focus';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../api/client';
 import {
@@ -22,6 +23,12 @@ import './StatsPage.css';
 
 const staleTime = 5 * 60 * 1000;
 type RetentionPeriod = StatsRetention['period'];
+const analyticsTabs = [
+  ['overview', 'statsTabOverview'],
+  ['activity', 'statsTabActivity'],
+  ['details', 'statsTabDetails'],
+] as const;
+type AnalyticsTab = (typeof analyticsTabs)[number][0];
 
 function substitute(template: string, values: Record<string, string>): string {
   return Object.entries(values).reduce((result, [key, value]) => result.replaceAll(`{${key}}`, value), template);
@@ -37,6 +44,11 @@ function formatPercent(value: number): string {
 
 function formatDecimal(value: number): string {
   return new Intl.NumberFormat('en', { maximumFractionDigits: 1 }).format(value);
+}
+
+function formatDays(value: number): string {
+  const singular = new Intl.PluralRules('en', { maximumFractionDigits: 1 }).select(value) === 'one';
+  return substitute(t(singular ? 'statsDay' : 'statsDays'), { count: formatDecimal(value) });
 }
 
 function formatDuration(milliseconds: number): string {
@@ -110,8 +122,21 @@ function AnalyticsSection({ id, title, description, control, children }: {
   );
 }
 
+function MetricList({ metrics }: { metrics: { label: string; value: string; detail: string }[] }) {
+  return (
+    <dl className="analytics-metrics">
+      {metrics.map(({ label, value, detail }) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd><strong>{value}</strong><span>{detail}</span></dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 function Overview({ overview }: { overview: StatsOverview }) {
-  const featured = [
+  const metrics = [
     {
       label: t('statsReviewsToday'),
       value: formatCount(overview.today.reviews),
@@ -127,11 +152,9 @@ function Overview({ overview }: { overview: StatsOverview }) {
     },
     {
       label: t('statsStreak'),
-      value: substitute(t('statsStreakDays'), { count: formatCount(overview.streak_days) }),
+      value: formatDays(overview.streak_days),
       detail: t('statsStreakDetail'),
     },
-  ];
-  const supporting = [
     {
       label: t('statsRetentionToday'),
       value: overview.today.review_cards > 0 ? formatPercent(overview.today.retention) : t('statsNotAvailable'),
@@ -142,36 +165,35 @@ function Overview({ overview }: { overview: StatsOverview }) {
         })
         : t('statsNoRetention'),
     },
-    {
-      label: t('statsKnownRightNow'),
-      value: formatDecimal(overview.known_right_now),
-      detail: substitute(t('statsKnownRightNowDetail'), { count: formatCount(overview.cards.review) }),
-    },
+  ];
+
+  return (
+    <section className="analytics-today" aria-labelledby="stats-today-heading">
+      <h2 id="stats-today-heading">{t('statsToday')}</h2>
+      <MetricList metrics={metrics} />
+    </section>
+  );
+}
+
+function ReviewTiming({ overview }: { overview: StatsOverview }) {
+  const detail = substitute(t('statsReviewTimingDetail'), { count: formatCount(overview.reviews.total) });
+  const metrics = [
     {
       label: t('statsAverageAnswerTime'),
       value: formatDuration(overview.reviews.average_duration_ms),
-      detail: substitute(t('statsReviewTimingDetail'), { count: formatCount(overview.reviews.total) }),
+      detail,
     },
     {
       label: t('statsTotalReviewTime'),
       value: formatDuration(overview.reviews.total_duration_ms),
-      detail: substitute(t('statsReviewTimingDetail'), { count: formatCount(overview.reviews.total) }),
+      detail,
     },
   ];
 
   return (
-    <section className="grid gap-4" aria-label={t('statsHeading')}>
-      {[featured, supporting].map((metrics, index) => (
-        <dl key={index} className={index === 0 ? 'analytics-metrics analytics-metrics-featured' : 'analytics-metrics'}>
-          {metrics.map((metric) => (
-            <div key={metric.label}>
-              <dt>{metric.label}</dt>
-              <dd><strong>{metric.value}</strong><span>{metric.detail}</span></dd>
-            </div>
-          ))}
-        </dl>
-      ))}
-    </section>
+    <AnalyticsSection id="stats-timing-heading" title={t('statsReviewTiming')}>
+      <MetricList metrics={metrics} />
+    </AnalyticsSection>
   );
 }
 
@@ -505,7 +527,7 @@ function StateDistributionChart({ data }: { data: StatsDistribution }) {
           <div className="stats-meter-track" role="progressbar" aria-label={names[row.state]} aria-valuemin={0} aria-valuemax={max} aria-valuenow={row.total}>
             <span className={`stats-state-fill stats-state-fill-${row.state}`} style={{ width: `${(row.total / max) * 100}%` }} />
           </div>
-          <p className="m-0 text-sm text-on-surface-variant">
+    <p className="m-0 text-sm text-on-surface-variant">
             {t('statsYoung')}: {formatCount(row.young)} · {t('statsMature')}: {formatCount(row.mature)}
           </p>
         </div>
@@ -537,15 +559,18 @@ function DeckStability({ data }: { data: StatsDistribution }) {
   const max = Math.max(1, ...data.deck_median_stability.map((deck) => deck.median_stability));
   return (
     <ul className="stats-deck-stability">
-      {data.deck_median_stability.map((deck) => (
-        <li key={deck.deck_id}>
-          <span className="stats-deck-name">{deck.deck_name}</span>
-          <div className="stats-meter-track" role="progressbar" aria-label={`${deck.deck_name}: ${substitute(t('statsDays'), { count: formatDecimal(deck.median_stability) })}`} aria-valuemin={0} aria-valuemax={max} aria-valuenow={deck.median_stability}>
-            <span className="stats-deck-fill" style={{ width: `${(deck.median_stability / max) * 100}%` }} />
-          </div>
-          <span className="stats-deck-value">{substitute(t('statsDays'), { count: formatDecimal(deck.median_stability) })}</span>
-        </li>
-      ))}
+      {data.deck_median_stability.map((deck) => {
+        const days = formatDays(deck.median_stability);
+        return (
+          <li key={deck.deck_id}>
+            <span className="stats-deck-name">{deck.deck_name}</span>
+            <div className="stats-meter-track" role="progressbar" aria-label={`${deck.deck_name}: ${days}`} aria-valuemin={0} aria-valuemax={max} aria-valuenow={deck.median_stability}>
+              <span className="stats-deck-fill" style={{ width: `${(deck.median_stability / max) * 100}%` }} />
+            </div>
+            <span className="stats-deck-value">{days}</span>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -592,7 +617,7 @@ function CurveChart({ data }: { data: StatsCardCurve }) {
     <>
       <p className="m-0 text-sm text-on-surface-variant">
         {t('statsCurrentRetrievability')}: {formatPercent(data.retrievability)}
-        {data.stability !== undefined && <> · {t('statsStability')}: {substitute(t('statsDays'), { count: formatDecimal(data.stability) })}</>}
+        {data.stability !== undefined && <> · {t('statsStability')}: {formatDays(data.stability)}</>}
         {data.difficulty !== undefined && <> · {t('statsDifficulty')}: {formatDecimal(data.difficulty)}</>}
       </p>
       <ChartFrame label={chartLabel}>
@@ -649,15 +674,21 @@ function CurveSection({ cardId, term }: { cardId: number; term: string }) {
   );
 }
 
-function DistributionSection({ data, selectedCardId, onSelect }: {
-  data: StatsDistribution;
+function Details({ selectedCardId, onSelect }: {
   selectedCardId: number | null;
   onSelect: (cardId: number) => void;
 }) {
+  const query = useQuery({ queryKey: ['stats', 'distribution'], queryFn: getStatsDistribution, retry: false, staleTime });
+  if (query.isPending) return <ChartLoading />;
+  if (!query.data) return <ChartError error={query.error} retry={() => { void query.refetch(); }} />;
+
+  const data = query.data;
+  const selectedCard = data.leeches.find((card) => card.card_id === selectedCardId);
   const stateRows = distributionStates(data);
   const stateTotal = stateRows.reduce((sum, row) => sum + row.total, 0);
   return (
     <>
+      {query.isError && <ChartError error={query.error} retry={() => { void query.refetch(); }} />}
       <AnalyticsSection id="stats-distribution-heading" title={t('statsDistributionTitle')} description={t('statsDistributionDescription')}>
         <div className="analytics-distribution">
           <div className="space-y-3">
@@ -683,6 +714,7 @@ function DistributionSection({ data, selectedCardId, onSelect }: {
           <HardCards data={data} selectedCardId={selectedCardId} onSelect={onSelect} />
         </AnalyticsSection>
       </div>
+      {selectedCard && <CurveSection key={selectedCard.card_id} cardId={selectedCard.card_id} term={selectedCard.term} />}
     </>
   );
 }
@@ -690,12 +722,18 @@ function DistributionSection({ data, selectedCardId, onSelect }: {
 export function StatsPage({ timezone = Intl.DateTimeFormat().resolvedOptions().timeZone }: { timezone?: string }) {
   const queryClient = useQueryClient();
   const currentYear = Number(new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: timezone }).format(new Date()));
+  const tabId = useId();
+  const [tab, setTab] = useState<AnalyticsTab>('overview');
   const [period, setPeriod] = useState<RetentionPeriod>('week');
-  const [year, setYear] = useState(currentYear);
+  const [selectedYear, setYear] = useState<number>();
+  const year = selectedYear ?? currentYear;
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null);
   const overviewQuery = useQuery({ queryKey: ['stats', 'overview'], queryFn: getStatsOverview, retry: false, staleTime });
-  const distributionQuery = useQuery({ queryKey: ['stats', 'distribution'], queryFn: getStatsDistribution, retry: false, staleTime });
   const refreshAll = async () => queryClient.invalidateQueries({ queryKey: ['stats'] });
+  const overviewStatus = overviewQuery.isPending ? <ChartLoading /> : overviewQuery.isError && (
+    <ChartError error={overviewQuery.error} retry={() => { void overviewQuery.refetch(); }} />
+  );
+  const overview = overviewQuery.data;
 
   return (
     <div className="analytics-page">
@@ -707,22 +745,62 @@ export function StatsPage({ timezone = Intl.DateTimeFormat().resolvedOptions().t
         <Button type="button" variant="tonal" onClick={() => { void refreshAll(); }}>{t('statsRefresh')}</Button>
       </div>
 
-      {overviewQuery.isPending && <ChartLoading />}
-      {overviewQuery.isError && <ChartError error={overviewQuery.error} retry={() => { void overviewQuery.refetch(); }} />}
-      {overviewQuery.data && <Overview overview={overviewQuery.data} />}
+      <RovingFocus.Root role="tablist" aria-labelledby="stats-page-heading" orientation="horizontal" loop className="analytics-tabs">
+        {analyticsTabs.map(([value, label]) => (
+          <RovingFocus.Item key={value} active={tab === value} asChild>
+            <button
+              type="button"
+              role="tab"
+              id={`${tabId}-tab-${value}`}
+              aria-controls={`${tabId}-panel-${value}`}
+              aria-selected={tab === value}
+              onClick={() => setTab(value)}
+              className={`analytics-tab ${focus}`}
+            >{t(label)}</button>
+          </RovingFocus.Item>
+        ))}
+      </RovingFocus.Root>
 
-      <div className="analytics-pair analytics-pair-charts">
-        <RetentionSection period={period} setPeriod={setPeriod} />
-        <ForecastSection />
-      </div>
-      <HeatmapSection year={year} currentYear={currentYear} setYear={setYear} />
-
-      {distributionQuery.isPending && <ChartLoading />}
-      {distributionQuery.isError && <ChartError error={distributionQuery.error} retry={() => { void distributionQuery.refetch(); }} />}
-      {distributionQuery.data && (
-        <DistributionSection data={distributionQuery.data} selectedCardId={selectedCardId} onSelect={setSelectedCardId} />
-      )}
-      {selectedCardId !== null && <CurveSection key={selectedCardId} cardId={selectedCardId} term={distributionQuery.data?.leeches.find((card) => card.card_id === selectedCardId)?.term ?? ''} />}
+      {analyticsTabs.map(([value]) => (
+        <div
+          key={value}
+          role="tabpanel"
+          id={`${tabId}-panel-${value}`}
+          aria-labelledby={`${tabId}-tab-${value}`}
+          hidden={tab !== value}
+          tabIndex={0}
+          className={`analytics-panel ${focus}`}
+        >
+          {tab === value && (value === 'overview' ? (
+            <>
+              {overviewStatus}
+              {overview && <Overview overview={overview} />}
+              <ForecastSection />
+            </>
+          ) : value === 'activity' ? (
+            <>
+              <HeatmapSection year={year} currentYear={currentYear} setYear={setYear} />
+              <RetentionSection period={period} setPeriod={setPeriod} />
+              {overviewStatus}
+              {overview && <ReviewTiming overview={overview} />}
+            </>
+          ) : (
+            <>
+              {overviewStatus}
+              {overview && (
+                <dl className="analytics-memory">
+                  <div>
+                    <dt>{t('statsKnownRightNow')}</dt>
+                    <dd><strong>{formatDecimal(overview.known_right_now)}</strong></dd>
+                    <dd>{substitute(t('statsKnownRightNowDetail'), { count: formatCount(overview.cards.review) })}</dd>
+                  </div>
+                </dl>
+              )}
+              <Details selectedCardId={selectedCardId} onSelect={setSelectedCardId} />
+            </>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
