@@ -402,6 +402,8 @@ describe('account screens', () => {
     expect(await screen.findByRole('heading', { name: t('statsHeading') })).toBeTruthy();
     expect(screen.getByRole('link', { name: t('stats') }).getAttribute('aria-current')).toBe('page');
     expect(calls.map(({ url }) => url)).toContain('/api/v1/stats/overview');
-    expect(calls.map(({ url }) => url)).toContain('/api/v1/stats/distribution');
+    expect(calls.map(({ url }) => url)).not.toContain('/api/v1/stats/distribution');
+    await userEvent.setup().click(screen.getByRole('tab', { name: t('statsTabDetails') }));
+    await waitFor(() => expect(calls.map(({ url }) => url)).toContain('/api/v1/stats/distribution'));
   });
 });

@@ -22,7 +22,7 @@ function fixture(path: string): unknown {
     return {
       timezone: 'UTC',
       day_start_hour: 4,
-      streak_days: 5,
+      streak_days: 1,
       today: { reviews: 14, new_cards: 2, review_cards: 12, recalled_reviews: 11, retention: 11 / 12, duration_ms: 36000 },
       cards: { total: 90, new: 10, learning: 5, review: 70, relearning: 5, due: 13, young: 22, mature: 48, leeches: 1 },
       reviews: { total: 440, total_duration_ms: 1320000, average_duration_ms: 3000 },
@@ -109,6 +109,10 @@ function renderPage(timezone?: string) {
   return render(<QueryClientProvider client={queryClient}><StatsPage timezone={timezone} /></QueryClientProvider>);
 }
 
+function tab(name: 'statsTabOverview' | 'statsTabActivity' | 'statsTabDetails') {
+  return screen.getByRole('tab', { name: t(name) });
+}
+
 beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (input) => {
@@ -128,16 +132,21 @@ describe('StatsPage', () => {
     const user = userEvent.setup();
     renderPage();
 
-    expect(await screen.findByText('61.4')).toBeTruthy();
-    expect(screen.getByText(t('statsReviewsToday'))).toBeTruthy();
+    expect(screen.getByRole('tab', { name: t('statsTabOverview'), selected: true })).toBeTruthy();
+    expect(await screen.findByText(t('statsReviewsToday'))).toBeTruthy();
+    expect(screen.getByText('1 day')).toBeTruthy();
+    expect(await screen.findByRole('img', { name: t('statsForecastChartLabel') })).toBeTruthy();
+    expect(fetchMock.mock.calls.map(([url]) => String(url)).sort()).toEqual(['/api/v1/stats/forecast?days=30', '/api/v1/stats/overview']);
+
+    await user.click(tab('statsTabActivity'));
+    expect(screen.queryByText(t('statsReviewsToday'))).toBeNull();
     expect(screen.getByText(t('statsAverageAnswerTime'))).toBeTruthy();
     expect(screen.getByText('3 sec')).toBeTruthy();
     expect(screen.getByText(t('statsTotalReviewTime'), { selector: 'dt' })).toBeTruthy();
     expect(screen.getByText('22 min')).toBeTruthy();
-    const retentionPlot = screen.getByRole('region', { name: t('statsRetentionChartLabel') });
+    const retentionPlot = await screen.findByRole('region', { name: t('statsRetentionChartLabel') });
     expect(retentionPlot.tabIndex).toBe(0);
     expect(within(retentionPlot).getByRole('img', { name: t('statsRetentionChartLabel') })).toBeTruthy();
-    expect(screen.getByRole('img', { name: t('statsForecastChartLabel') })).toBeTruthy();
     expect(await screen.findByRole('list', { name: t('statsHeatmapLabel').replace('{year}', String(year)) })).toBeTruthy();
     const growthTable = screen.getByRole('table', { name: t('statsVocabularyGrowthTable') });
     expect(growthTable.textContent).toContain(t('german'));
@@ -145,7 +154,10 @@ describe('StatsPage', () => {
     expect(growthTable.textContent).toContain('January');
     const timingTable = screen.getByRole('table', { name: t('statsReviewTimingTable') });
     expect(timingTable.textContent).toContain('12 sec');
-    expect(screen.getByText(t('statsStabilityDistribution'))).toBeTruthy();
+
+    await user.click(tab('statsTabDetails'));
+    expect(screen.getByText('61.4')).toBeTruthy();
+    expect(await screen.findByText(t('statsStabilityDistribution'))).toBeTruthy();
     expect(screen.getByText(t('statsDifficultyDistribution'))).toBeTruthy();
     expect(screen.getByText('Chapter 1')).toBeTruthy();
 
@@ -162,7 +174,34 @@ describe('StatsPage', () => {
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain('/api/v1/stats/cards/42/curve');
   });
 
+  it('moves tab focus with Arrow and Home/End keys, then activates with Enter or Space', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.tab(); // Refresh analytics
+    await user.tab();
+    expect(document.activeElement).toBe(tab('statsTabOverview'));
+
+    await user.keyboard('{ArrowRight}');
+    await waitFor(() => expect(document.activeElement).toBe(tab('statsTabActivity')));
+    expect(tab('statsTabOverview').getAttribute('aria-selected')).toBe('true');
+    await user.keyboard('{End}');
+    await waitFor(() => expect(document.activeElement).toBe(tab('statsTabDetails')));
+    await user.keyboard('{Enter}');
+    const panel = screen.getByRole('tabpanel', { name: t('statsTabDetails') });
+    expect(panel.id).toBe(tab('statsTabDetails').getAttribute('aria-controls'));
+    await user.tab();
+    expect(document.activeElement).toBe(panel);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(tab('statsTabDetails'));
+
+    await user.keyboard('{Home}');
+    await waitFor(() => expect(document.activeElement).toBe(tab('statsTabOverview')));
+    await user.keyboard(' ');
+    expect(screen.getByRole('tabpanel', { name: t('statsTabOverview') })).toBeTruthy();
+  });
+
   it('uses the configured timezone year for heatmap options across the year boundary', async () => {
+    const user = userEvent.setup();
     const RealDate = Date;
     const fixedNow = RealDate.parse('2027-01-01T00:30:00.000Z');
     class FixedDate extends RealDate {
@@ -180,6 +219,7 @@ describe('StatsPage', () => {
     const timezone = browserYear === 2027 ? 'America/Adak' : 'Pacific/Kiritimati';
     const configuredYear = Number(new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: timezone }).format(new RealDate(fixedNow)));
     renderPage(timezone);
+    await user.click(tab('statsTabActivity'));
 
     const yearSelect = await screen.findByLabelText(t('statsHeatmapYear')) as HTMLSelectElement;
     expect(yearSelect.options[0]?.value).toBe(String(configuredYear));
@@ -202,15 +242,20 @@ describe('StatsPage', () => {
       return response(fixture(url));
     });
     renderPage();
+    await user.click(tab('statsTabActivity'));
 
     expect((await screen.findByRole('alert')).textContent).toContain('Analytics are unavailable.');
     await user.click(screen.getAllByRole('button', { name: t('statsTryAgain') })[0]!);
     expect(await screen.findByRole('img', { name: t('statsRetentionChartLabel') })).toBeTruthy();
     await user.selectOptions(screen.getByLabelText(t('statsRetentionPeriod')), 'month');
     await waitFor(() => expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain('/api/v1/stats/retention?period=month'));
+    await user.click(tab('statsTabOverview'));
+    await user.click(tab('statsTabActivity'));
+    expect((screen.getByLabelText(t('statsRetentionPeriod')) as HTMLSelectElement).value).toBe('month');
   });
 
   it('shows empty states when no review analytics exist yet', async () => {
+    const user = userEvent.setup();
     fetchMock.mockImplementation(async (input) => {
       const url = String(input);
       if (url === '/api/v1/stats/overview') return response(fixture(url));
@@ -232,10 +277,12 @@ describe('StatsPage', () => {
     });
     renderPage();
 
-    expect(await screen.findByText(t('statsNoRetention'))).toBeTruthy();
     expect(await screen.findByRole('img', { name: t('statsForecastChartLabel') })).toBeTruthy();
     expect(screen.getByText(t('statsForecastTotal').replace('{count}', '0'))).toBeTruthy();
+    await user.click(tab('statsTabActivity'));
+    expect(await screen.findByText(t('statsNoRetention'))).toBeTruthy();
     expect(await screen.findByText(t('statsNoActivity'))).toBeTruthy();
+    await user.click(tab('statsTabDetails'));
     await waitFor(() => expect(screen.getAllByText(t('statsNoDistribution'))).toHaveLength(3));
     expect(screen.getByText(t('statsNoDeckStability'))).toBeTruthy();
     expect(screen.getByText(t('statsNoHardCards'))).toBeTruthy();

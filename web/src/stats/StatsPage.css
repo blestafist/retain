@@ -4,54 +4,117 @@
   min-width: 0;
   gap: 1.5rem;
   margin-inline: auto;
-  container-type: inline-size;
+  container: analytics / inline-size;
 }
 
-.analytics-section {
+.analytics-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+  width: min(100%, 24rem);
+  padding: 0.25rem;
+  border-radius: var(--md-sys-shape-corner-extra-large);
+  background: var(--md-sys-color-surface-container);
+}
+
+.analytics-tab {
+  min-width: 3rem;
+  min-height: 3rem;
+  padding-inline: 0.375rem;
+  border-radius: var(--md-sys-shape-corner-large);
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-label-large);
+  cursor: pointer;
+}
+
+.analytics-tab:hover {
+  background: var(--md-sys-color-surface-container-highest);
+  color: var(--md-sys-color-on-surface);
+}
+
+.analytics-tab[aria-selected='true'] {
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  font-weight: 700;
+}
+
+@media (forced-colors: active) {
+  .analytics-tab[aria-selected='true'] { border: 1px solid SelectedItem; }
+}
+
+.analytics-panel:not([hidden]),
+.analytics-section,
+.analytics-today {
   display: grid;
   min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.analytics-panel { gap: clamp(1.5rem, 3cqi, 2.25rem); }
+
+.analytics-section {
   gap: 0.875rem;
-  padding-block-start: 0.875rem;
+  padding-block-start: 1rem;
   border-block-start: 1px solid var(--md-sys-color-outline-variant);
 }
 
 .analytics-section h2 {
   margin: 0;
-  font: var(--md-sys-typescale-title-medium-emphasized);
+  font: var(--md-sys-typescale-headline-small-emphasized);
 }
 
 .analytics-metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
-  gap: 0.75rem 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
   margin: 0;
 }
 
-.analytics-metrics-featured {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.5rem;
-  padding: clamp(0.875rem, 3cqi, 1.5rem);
+.analytics-today {
+  gap: 1rem;
+  padding: clamp(1rem, 4cqi, 2rem);
   border-radius: var(--md-sys-shape-corner-extra-large-increased);
   background: var(--md-sys-color-primary-container);
   color: var(--md-sys-color-on-primary-container);
 }
 
+.analytics-today h2 {
+  margin: 0;
+  font: var(--md-sys-typescale-headline-small-emphasized);
+}
+
 .analytics-metrics dd {
   display: grid;
-  gap: 0.125rem;
   margin: 0;
   overflow-wrap: anywhere;
 }
 
-.analytics-metrics dt { font: var(--md-sys-typescale-label-large); }
+.analytics-metrics dt,
+.analytics-memory dt { font: var(--md-sys-typescale-label-large); }
 .analytics-metrics dd > span { font: var(--md-sys-typescale-body-small); }
-.analytics-metrics:not(.analytics-metrics-featured) dd > span { color: var(--md-sys-color-on-surface-variant); }
-.analytics-metrics strong { font: var(--md-sys-typescale-headline-small-emphasized); font-variant-numeric: tabular-nums; }
-.analytics-metrics-featured strong {
-  font: var(--md-sys-typescale-headline-large-emphasized);
-  font-size: clamp(1.5rem, 4.8cqi, 2rem);
-  line-height: 1.2;
+.analytics-section .analytics-metrics dd > span { color: var(--md-sys-color-on-surface-variant); }
+.analytics-metrics strong {
+  font: var(--md-sys-typescale-headline-small-emphasized);
+  font-variant-numeric: tabular-nums;
 }
+
+.analytics-today .analytics-metrics strong,
+.analytics-memory strong {
+  font: var(--md-sys-typescale-display-small-emphasized);
+  font-variant-numeric: tabular-nums;
+}
+
+.analytics-memory {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.analytics-memory dd {
+  margin: 0;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.analytics-memory strong { color: var(--md-sys-color-primary); }
 
 .analytics-pair,
 .analytics-distribution {
@@ -60,13 +123,13 @@
   gap: 1.5rem;
 }
 
-@container (min-width: 42rem) {
-  .analytics-pair:not(.analytics-pair-charts) { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
-  .analytics-distribution { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@container analytics (min-width: 38rem) {
+  .analytics-today .analytics-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
-@container (min-width: 62rem) {
-  .analytics-pair-charts { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+@container analytics (min-width: 42rem) {
+  .analytics-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .analytics-distribution { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 .analytics-control {
