@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { ApiError } from '../api/client';
 import {
@@ -14,6 +14,7 @@ import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
 import { WorkspaceDialog } from '../ui/WorkspaceDialog';
 import { DeckEnrichmentPanel } from './DeckEnrichmentPanel';
+import { DeckGlyph } from './DeckGlyph';
 import { ImportPanel } from './ImportPanel';
 import { WordAutoFill, type SuggestionKey } from './WordAutoFill';
 import './DecksWorkspace.css';
@@ -41,7 +42,8 @@ const directionFlags = {
 function deckDirection(deck: DeckNode): Direction {
   return deck.reverseOnly ? 'reverse' : deck.reverseCards ? 'both' : 'forward';
 }
-type DeckPanel = 'add' | 'rename' | 'transfer' | 'enrich' | null;
+const directionLabels = { reverse: 'directionReverse', forward: 'directionForward', both: 'directionBoth' } as const;
+type DeckPanel = 'add' | 'rename' | 'direction' | 'transfer' | 'enrich' | null;
 
 const expandedViewport = '(min-width: 52.5rem)';
 const isExpanded = () => window.matchMedia?.(expandedViewport).matches ?? true;
@@ -88,20 +90,9 @@ function errorMessage(error: unknown): string {
   return error instanceof ApiError && error.serverMessage ? error.serverMessage : t('requestFailed');
 }
 
-function DeleteIcon() {
-  return <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 13h12l1-13M9 7V4h6v3" /></svg>;
-}
-
-function DeckIcon() {
-  return <svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3h10a3 3 0 0 1 3 3v11M4 7h10a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H4a3 3 0 0 1-3-3v-8a3 3 0 0 1 3-3Z" /><path d="M5 12h8M5 16h5" /></svg>;
-}
-
-function PlusIcon() {
-  return <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>;
-}
-
-function ImportIcon() {
-  return <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12m-4-4 4 4 4-4M4 15v5h16v-5" /></svg>;
+function wordCount(count: number, includesSubdecks: boolean) {
+  const words = count === 1 ? t('oneDeckWord') : t('deckWordCount').replace('{count}', numberFormat.format(count));
+  return includesSubdecks ? t('deckWordTotal').replace('{words}', words) : words;
 }
 
 function DeckArtwork() {
@@ -113,6 +104,23 @@ function DeckArtwork() {
       <path className="deck-art-lines" d="M70 123h64m-64 19h42m-42 19h26" transform="rotate(-16 102 132)" />
       <path className="deck-art-spark" d="M203 128c0 23 10 33 33 33-23 0-33 10-33 33 0-23-10-33-33-33 23 0 33-10 33-33ZM48 40c0 12 6 18 18 18-12 0-18 6-18 18 0-12-6-18-18-18 12 0 18-6 18-18Z" />
     </svg>
+  );
+}
+
+function DeckEntry({ deck, selected, onSelect }: { deck: DeckNode; selected?: boolean; onSelect: (deck: DeckNode, opener: HTMLButtonElement) => void }) {
+  const id = useId();
+  const children = deck.children.length;
+  const subdecks = children === 1 ? t('oneSubdeck') : t('subdeckCount').replace('{count}', numberFormat.format(children));
+  const meta = [children > 0 && subdecks, deck.counts && wordCount(deck.counts.notes, children > 0)].filter(Boolean).join(' · ');
+  return (
+    <button type="button" className="deck-entry" aria-current={selected ? 'true' : undefined} onClick={(event) => onSelect(deck, event.currentTarget)} aria-labelledby={id} aria-describedby={meta ? `${id}-meta` : undefined}>
+      <span className={`deck-entry-icon${children ? ' is-folder' : ''}`}><DeckGlyph name={children ? 'folder' : 'deck'} /></span>
+      <span className="deck-entry-copy">
+        <bdi className="deck-entry-name" id={id}>{deck.name}</bdi>
+        {meta && <span className="deck-entry-meta" id={`${id}-meta`}>{meta}</span>}
+      </span>
+      <span className="deck-entry-next"><DeckGlyph name="next" /></span>
+    </button>
   );
 }
 
@@ -129,30 +137,13 @@ function DeckTree({
 }) {
   if (decks.length === 0) return null;
   return (
-    <ul className="m-0 list-none space-y-1 p-0" aria-label={depth === 0 ? t('deckList') : undefined}>
-      {decks.map((deck) => {
-        const selected = selectedId === String(deck.id);
-        const counts = deck.counts;
-        return (
-          <li key={String(deck.id)}>
-            <div style={{ paddingInlineStart: `${Math.min(depth, 6) * 0.75}rem` }}>
-              <button
-                type="button"
-                aria-current={selected ? 'true' : undefined}
-                onClick={(event) => onSelect(deck, event.currentTarget)}
-                className={`deck-tree-item ${selected ? 'is-selected' : ''}`}
-              >
-                <span className="deck-tree-icon"><DeckIcon /></span>
-                <span className="deck-tree-copy"><span className="deck-tree-name">{deck.name}</span>
-                  {counts && <span className="deck-tree-count">{t('deckWordCount').replace('{count}', numberFormat.format(counts.notes))}</span>}
-                </span>
-                <svg className="deck-tree-chevron" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={selected ? 'm5 12 4 4 10-10' : 'm10 6 6 6-6 6'} /></svg>
-              </button>
-            </div>
-            <DeckTree decks={deck.children} selectedId={selectedId} onSelect={onSelect} depth={depth + 1} />
-          </li>
-        );
-      })}
+    <ul className={depth === 0 ? 'deck-tree' : 'deck-branches'} data-indent={depth > 0 && depth <= 3 || undefined} aria-label={depth === 0 ? t('deckList') : undefined}>
+      {decks.map((deck) => (
+        <li key={deck.id}>
+          <DeckEntry deck={deck} selected={selectedId === String(deck.id)} onSelect={onSelect} />
+          <DeckTree decks={deck.children} selectedId={selectedId} onSelect={onSelect} depth={depth + 1} />
+        </li>
+      ))}
     </ul>
   );
 }
@@ -302,6 +293,7 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
       setNewNoteTerm('');
       setNewNoteFields({});
     }
+    if (next === 'direction' && selectedDeck) setDirection(deckDirection(selectedDeck));
     setPanel(next);
     setPanelDirty(false);
     setPanelBusy(false);
@@ -357,6 +349,13 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
     if (!selectedDeck) return;
     const name = String(new FormData(event.currentTarget).get('name') ?? '').trim();
     if (name) patchDeckMutation.mutate({ id: selectedDeck.id, input: { name } }, { onSuccess: () => setPanel(null) });
+  }
+
+  function submitDeckDirection(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (selectedDeck) patchDeckMutation.mutate({ id: selectedDeck.id, input: directionFlags[direction] }, {
+      onSuccess: () => setPanel(null),
+    });
   }
 
   function removeDeck(deck: DeckNode) {
@@ -432,6 +431,8 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
 
   const pair = selectedDeck ? languagePair(decks, selectedDeck) : undefined;
   const counts = selectedDeck?.counts;
+  const hasSubdecks = !!selectedDeck?.children.length;
+  const showWords = !hasSubdecks || !notesQuery.isSuccess || notesQuery.data.length > 0;
   const LibraryHeading = expanded && selectedDeck ? 'h2' : 'h1';
 
   return (
@@ -452,10 +453,10 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
               {!expanded && decks.length > 0 && <p>{t('deckLibraryHint')}</p>}
             </div>
             <div className="deck-library-actions">
-              <Button type="button" onClick={() => beginCreate('root')}><PlusIcon />{t('newDeck')}</Button>
-              <button type="button" className="deck-library-import workspace-icon-button" aria-label={t('importExport')} title={t('importExport')} onClick={() => openPanel('transfer')}><ImportIcon /></button>
+              <Button type="button" onClick={() => beginCreate('root')}><DeckGlyph name="plus" />{t('newDeck')}</Button>
+              <button type="button" className="deck-library-import workspace-icon-button" aria-label={t('importExport')} title={t('importExport')} onClick={() => openPanel('transfer')}><DeckGlyph name="transfer" /></button>
             </div>
-            {decks.length === 0 ? <div className="deck-library-empty"><span className="deck-empty-icon"><DeckIcon /></span><p>{t('noDecks')}</p></div> : (
+            {decks.length === 0 ? <div className="deck-library-empty"><span className="deck-empty-icon"><DeckGlyph name="deck" /></span><p>{t('noDecks')}</p></div> : (
               <DeckTree decks={decks} selectedId={selectedId} onSelect={selectDeck} />
             )}
           </section>
@@ -501,40 +502,35 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
 
             {selectedDeck ? (
               <section className="deck-detail" aria-labelledby="selected-deck-heading">
-                {!expanded && <button type="button" className="deck-back" onClick={showLibrary}><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5m7-7-7 7 7 7" /></svg>{t('backToDecks')}</button>}
+                {!expanded && <button type="button" className="deck-back" onClick={showLibrary}><DeckGlyph name="back" />{t('backToDecks')}</button>}
                 <header className="deck-detail-header">
                   <div className="deck-heading-copy">
-                    <p className="deck-language"><DeckIcon />{pair ?? t('languagePairNotSet')}</p>
+                     <p className="deck-language"><DeckGlyph name={hasSubdecks ? 'folder' : 'deck'} />{pair ?? t('languagePairNotSet')}</p>
                     <h1 id="selected-deck-heading" ref={detailHeading} tabIndex={-1}>{selectedDeck.name}</h1>
                     {counts && <ul className="deck-count-summary">
-                      <li>{t('deckWordCount').replace('{count}', numberFormat.format(counts.notes))}</li>
+                       <li>{wordCount(counts.notes, hasSubdecks)}</li>
                       <li>{t('deckNewCount').replace('{count}', numberFormat.format(counts.new))}</li>
                       <li>{t('deckLearningCount').replace('{count}', numberFormat.format(counts.learning))}</li>
                       <li>{t('deckDueCount').replace('{count}', numberFormat.format(counts.due))}</li>
                     </ul>}
                   </div>
                   <DeckArtwork />
-                  <div className="deck-header-actions">
-                    <a className="deck-study-link" href={`/study?deck=${encodeURIComponent(selectedDeck.id)}`}><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7z" /></svg>{t('study')}</a>
-                    {selectedDeck.canEdit !== false && <DropdownMenu.Root>
-                      <DropdownMenu.Trigger ref={deckActionsTrigger} className="workspace-icon-button" aria-label={t('deckActions')}><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg></DropdownMenu.Trigger>
-                         <DropdownMenu.Portal><DropdownMenu.Content className="deck-actions-menu" align="start" sideOffset={8} collisionPadding={12}>
-                        <DropdownMenu.Item onSelect={() => openPanel('rename')}>{t('renameDeck')}</DropdownMenu.Item>
-                        <DropdownMenu.Label className="px-4 pt-2 text-xs text-on-surface-variant">{t('studyDirection')}</DropdownMenu.Label>
-                        <DropdownMenu.RadioGroup value={deckDirection(selectedDeck)} onValueChange={(value) => patchDeckMutation.mutate({ id: selectedDeck.id, input: directionFlags[value as Direction] })}>
-                          {(['reverse', 'forward', 'both'] as const).map((value) => <DropdownMenu.RadioItem key={value} value={value} role="menuitemradio">{deckDirection(selectedDeck) === value ? '✓ ' : '\u2003'}{t(value === 'reverse' ? 'directionReverse' : value === 'forward' ? 'directionForward' : 'directionBoth')}</DropdownMenu.RadioItem>)}
-                        </DropdownMenu.RadioGroup>
-                        <DropdownMenu.Separator />
-                        <DropdownMenu.Item onSelect={() => beginCreate('child')}>{t('addChildDeck')}</DropdownMenu.Item>
-                        <DropdownMenu.Item onSelect={() => openPanel('transfer')}>{t('importExport')}</DropdownMenu.Item>
-                        {ownerId > 0 && <DropdownMenu.Item onSelect={() => openPanel('enrich')}>{t('deckEnrichment')}</DropdownMenu.Item>}
-                        <DropdownMenu.Separator />
-                        <DropdownMenu.Item className="deck-action-destructive" onSelect={() => removeDeck(selectedDeck)}>{t('deleteDeck')}</DropdownMenu.Item>
+                   <div className="deck-header-actions">
+                     <a className="deck-study-link" href={`/study?deck=${encodeURIComponent(selectedDeck.id)}`}><DeckGlyph name="play" />{t('study')}</a>
+                     {selectedDeck.canEdit !== false && <button type="button" className="workspace-icon-button deck-direction-button" aria-label={t('studyDirection')} title={t('studyDirection')} onClick={() => openPanel('direction')}><DeckGlyph name="direction" /></button>}
+                     {selectedDeck.canEdit !== false && <DropdownMenu.Root>
+                       <DropdownMenu.Trigger ref={deckActionsTrigger} className="workspace-icon-button deck-more-button" aria-label={t('deckActions')}><DeckGlyph name="more" /></DropdownMenu.Trigger>
+                       <DropdownMenu.Portal><DropdownMenu.Content className="deck-actions-menu" align="end" sideOffset={8} collisionPadding={12}>
+                         <DropdownMenu.Item onSelect={() => openPanel('rename')}><DeckGlyph name="edit" />{t('renameDeck')}</DropdownMenu.Item>
+                         <DropdownMenu.Item onSelect={() => beginCreate('child')}><DeckGlyph name="subdeck" />{t('addChildDeck')}</DropdownMenu.Item>
+                         <DropdownMenu.Item onSelect={() => openPanel('transfer')}><DeckGlyph name="transfer" />{t('importExport')}</DropdownMenu.Item>
+                         {ownerId > 0 && <DropdownMenu.Item onSelect={() => openPanel('enrich')}><DeckGlyph name="sparkle" />{t('deckEnrichment')}</DropdownMenu.Item>}
+                         <DropdownMenu.Separator />
+                         <DropdownMenu.Item className="deck-action-destructive" onSelect={() => removeDeck(selectedDeck)}><DeckGlyph name="delete" />{t('deleteDeck')}</DropdownMenu.Item>
                       </DropdownMenu.Content></DropdownMenu.Portal>
                     </DropdownMenu.Root>}
                   </div>
                 </header>
-                {patchDeckMutation.isError && panel !== 'rename' && <p role="alert" className="text-error">{errorMessage(patchDeckMutation.error)}</p>}
                 {deleteDeckMutation.isError && <p role="alert" className="text-error">{errorMessage(deleteDeckMutation.error)}</p>}
                 {selectedDeck.canEdit === false && <p className="deck-readonly">{t('readOnlySubscription')}</p>}
 
@@ -548,11 +544,36 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                 </form>
                 {patchDeckMutation.isError && <p role="alert" className="m-0 text-error">{errorMessage(patchDeckMutation.error)}</p>}
                 {patchDeckMutation.isSuccess && <p role="status" className="m-0 text-on-surface-variant">{t('deckSaved')}</p>}
-                </WorkspaceDialog>}
+                 </WorkspaceDialog>}
 
-                <div className="deck-words">
-                  <div className="deck-words-heading"><h2>{t('notes')}</h2>
-                    {selectedDeck.canEdit !== false && <Button type="button" variant="tonal" onClick={() => openPanel('add')}><PlusIcon />{t('addNote')}</Button>}
+                 {selectedDeck.canEdit !== false && <WorkspaceDialog open={panel === 'direction'} onOpenChange={closePanel} title={t('studyDirection')} returnFocusRef={taskOpener}>
+                   <form onSubmit={submitDeckDirection} className="grid gap-3" aria-label={t('studyDirection')}>
+                     <label className="grid gap-2 text-sm font-medium text-on-surface">
+                       {t('studyDirection')}
+                       <select value={direction} onChange={(event) => setDirection(event.target.value as Direction)} aria-describedby="deck-direction-hint" className="min-h-12 rounded-xl border border-outline bg-surface-container-lowest px-4 text-base font-normal text-on-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+                         {Object.entries(directionLabels).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
+                       </select>
+                     </label>
+                     <p id="deck-direction-hint" className="m-0 text-sm text-on-surface-variant">{t('studyDirectionHint')} {hasSubdecks && t('deckDirectionScope')}</p>
+                     {patchDeckMutation.isError && <p role="alert" className="m-0 text-error">{errorMessage(patchDeckMutation.error)}</p>}
+                     <Button type="submit" disabled={patchDeckMutation.isPending}>{t(patchDeckMutation.isPending ? 'savingDeck' : 'saveDeck')}</Button>
+                   </form>
+                 </WorkspaceDialog>}
+
+                 {hasSubdecks && <section className="deck-subdecks" aria-labelledby="deck-subdecks-heading">
+                   <div className="deck-words-heading"><h2 id="deck-subdecks-heading">{t('subdecks')}</h2>
+                     {!showWords && selectedDeck.canEdit !== false && <Button type="button" variant="tonal" onClick={() => openPanel('add')}><DeckGlyph name="plus" />{t('addNote')}</Button>}
+                   </div>
+                   {hasSubdecks && <p className="deck-group-scope">{t('deckGroupScope')}</p>}
+                   <ul className="deck-subdeck-list">
+                     {selectedDeck.children.map((deck) => <li key={deck.id}><DeckEntry deck={deck} onSelect={selectDeck} /></li>)}
+                   </ul>
+                 </section>}
+
+                 <div className={showWords ? 'deck-words' : undefined}>
+                   {showWords && <>
+                   <div className="deck-words-heading"><h2>{t(hasSubdecks ? 'directWords' : 'notes')}</h2>
+                     {selectedDeck.canEdit !== false && <Button type="button" variant="tonal" onClick={() => openPanel('add')}><DeckGlyph name="plus" />{t('addNote')}</Button>}
                   </div>
                   {notesQuery.isPending && <p role="status" className="m-0 text-on-surface-variant">{t('loadingNotes')}</p>}
                   {notesQuery.isError && <p role="alert" className="m-0 text-error">{errorMessage(notesQuery.error)}</p>}
@@ -579,7 +600,7 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                               </div>
                               {selectedDeck.canEdit !== false && <div className="flex gap-2">
                                 <Button type="button" variant="tonal" onClick={() => setEditingNote(note.id)}>{t('edit')}</Button>
-                                <button type="button" aria-label={`${t('deleteNote')} ${note.term}`} title={t('deleteNote')} onClick={() => removeNote(note)} className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full text-on-surface-variant hover:bg-error-container hover:text-on-error-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"><DeleteIcon /></button>
+                                 <button type="button" aria-label={`${t('deleteNote')} ${note.term}`} title={t('deleteNote')} onClick={() => removeNote(note)} className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full text-on-surface-variant hover:bg-error-container hover:text-on-error-container focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"><DeckGlyph name="delete" /></button>
                               </div>}
                             </div>
                           )}
@@ -587,12 +608,13 @@ export function DecksWorkspace({ ownerId = 0 }: { ownerId?: number }) {
                       ))}
                     </ul>
                    ) : <div className="deck-empty">
-                     <span className="deck-empty-icon"><DeckIcon /></span>
+                      <span className="deck-empty-icon"><DeckGlyph name="deck" /></span>
                      <h3>{t('noNotes')}</h3>
-                      {selectedDeck.children.length > 0 ? <p>{t('deckChildWordsHint')}</p> : selectedDeck.canEdit !== false && <p>{t('emptyDeckHint')}</p>}
-                      {selectedDeck.canEdit !== false && <button type="button" className="deck-import-action" onClick={() => openPanel('transfer')}><ImportIcon />{t('importDeck')}</button>}
+                       {selectedDeck.canEdit !== false && <p>{t('emptyDeckHint')}</p>}
+                       {selectedDeck.canEdit !== false && <button type="button" className="deck-import-action" onClick={() => openPanel('transfer')}><DeckGlyph name="import" />{t('importDeck')}</button>}
                    </div>)}
-                  {deleteNoteMutation.isError && <p role="alert" className="m-0 text-error">{errorMessage(deleteNoteMutation.error)}</p>}
+                   {deleteNoteMutation.isError && <p role="alert" className="m-0 text-error">{errorMessage(deleteNoteMutation.error)}</p>}
+                   </>}
 
                   {selectedDeck.canEdit !== false && <WorkspaceDialog key={String(selectedDeck.id)} open={panel === 'add'} onOpenChange={(open) => { if (!open) setPanel(null); }} title={t('addNote')} returnFocusRef={taskOpener}>
                     <form ref={newNoteForm} onSubmit={submitNote} className="space-y-4" aria-label={t('addNote')}>

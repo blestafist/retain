@@ -8,8 +8,10 @@
 .deck-library-actions > button:first-child { flex: 1; }
 .deck-library-actions .deck-library-import { padding-inline: 0.875rem; border-radius: 0.75rem 2rem 2rem 0.75rem; background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
 .deck-library-import:hover { box-shadow: inset 0 0 0 1px currentColor; }
-.deck-sidebar > ul { padding: 0.25rem; border-radius: var(--md-sys-shape-corner-large-increased); background: var(--md-sys-color-surface-container-low); }
-.deck-tree-item {
+.deck-tree, .deck-branches, .deck-subdeck-list { margin: 0; padding: 0; list-style: none; }
+.deck-sidebar > .deck-tree { padding: 0.25rem; border-radius: var(--md-sys-shape-corner-large-increased); background: var(--md-sys-color-surface-container-low); }
+.deck-branches[data-indent] { margin-inline-start: 0.75rem; padding-inline-start: 0.25rem; border-inline-start: 1px solid var(--md-sys-color-outline-variant); }
+.deck-entry {
   display: flex;
   align-items: center;
   gap: 0.625rem;
@@ -21,15 +23,16 @@
   text-align: start;
   cursor: pointer;
 }
-.deck-tree-item:hover { background: var(--md-sys-color-surface-container-high); }
-.deck-tree-item.is-selected { border-radius: var(--md-sys-shape-corner-large); background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
-.deck-tree-icon { flex: none; display: grid; width: 2.5rem; height: 2.5rem; place-items: center; border-radius: 0.75rem; background: var(--md-sys-color-surface-container-high); color: var(--md-sys-color-on-surface); }
-.is-selected .deck-tree-icon { border-radius: 50%; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); }
-.deck-tree-icon svg { width: 1.25rem; height: 1.25rem; }
-.deck-tree-copy { min-width: 0; flex: 1; }
-.deck-tree-name { display: block; overflow-wrap: anywhere; font: var(--md-sys-typescale-title-small); }
-.deck-tree-count { display: block; margin-top: 0.125rem; font: var(--md-sys-typescale-body-small); }
-.deck-tree-chevron { flex: none; }
+.deck-entry:hover { background: var(--md-sys-color-surface-container-high); }
+.deck-entry[aria-current='true'] { border-radius: var(--md-sys-shape-corner-large); background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
+.deck-entry-icon { flex: none; display: grid; width: 2.5rem; height: 2.5rem; place-items: center; border-radius: 0.75rem; background: var(--md-sys-color-surface-container-high); color: var(--md-sys-color-on-surface); }
+.deck-entry-icon.is-folder { background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); }
+.deck-entry[aria-current='true'] .deck-entry-icon { border-radius: 50%; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); }
+.deck-entry-copy { min-width: 0; flex: 1; }
+.deck-entry-name { display: block; overflow-wrap: anywhere; font: var(--md-sys-typescale-title-small); }
+.deck-entry-meta { display: block; margin-top: 0.125rem; font: var(--md-sys-typescale-body-small); }
+.deck-entry-next { flex: none; }
+.deck-subdeck-list { display: grid; gap: 0.25rem; margin-top: 0.5rem; }
 .deck-library-empty { display: grid; justify-items: center; gap: 0.75rem; padding: 1.5rem 1rem; border-radius: var(--md-sys-shape-corner-large-increased); background: var(--md-sys-color-surface-container-low); color: var(--md-sys-color-on-surface-variant); text-align: center; }
 .deck-library-empty p { max-width: 28ch; }
 
@@ -61,16 +64,18 @@
 .deck-study-link, .deck-back, .deck-import-action { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: 3rem; padding-inline: 1rem; border-radius: var(--md-sys-shape-corner-full); font: var(--md-sys-typescale-label-large); text-decoration: none; cursor: pointer; }
 .deck-study-link { min-width: 7rem; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); }
 .deck-study-link:hover { text-decoration: underline; text-underline-offset: 0.2em; }
-.deck-header-actions .workspace-icon-button { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); border-radius: 0.75rem 2rem 2rem 0.75rem; }
+.deck-header-actions .deck-direction-button { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); border-radius: 0.75rem 2rem 2rem 0.75rem; }
+.deck-header-actions .deck-more-button { margin-inline-start: 0.5rem; background: var(--md-sys-color-surface-container-low); color: var(--md-sys-color-on-surface); }
 .deck-header-actions .workspace-icon-button:hover, .deck-header-actions .workspace-icon-button[data-state='open'] { box-shadow: inset 0 0 0 1px currentColor; }
 .deck-header-actions:has(button) .deck-study-link { border-radius: 2rem 0.75rem 0.75rem 2rem; }
+.deck-group-scope { grid-column: 1; margin: -0.75rem 0 0; font: var(--md-sys-typescale-body-small); }
 .deck-back { margin-block: -0.5rem 0.5rem; margin-inline-start: -0.5rem; padding-inline: 0.5rem 0.875rem; color: var(--md-sys-color-primary); }
 .deck-import-action { color: var(--md-sys-color-primary); }
 .deck-back:hover, .deck-import-action:hover { background: var(--md-sys-color-surface-container-high); }
-.deck-tree-item:focus-visible, .deck-back:focus-visible, .deck-import-action:focus-visible, .deck-study-link:focus-visible { outline: 3px solid var(--md-sys-color-primary); outline-offset: 2px; }
+.deck-entry:focus-visible, .deck-back:focus-visible, .deck-import-action:focus-visible, .deck-study-link:focus-visible { outline: 3px solid var(--md-sys-color-primary); outline-offset: 2px; }
 .deck-readonly { margin-top: 0.75rem; padding: 0.75rem 1rem; border-radius: var(--md-sys-shape-corner-medium); background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); font: var(--md-sys-typescale-body-medium); }
 
-.deck-words { margin-block-start: 1.25rem; }
+.deck-words, .deck-subdecks { margin-block-start: 1.25rem; }
 .deck-words-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding-block-end: 0.75rem; border-bottom: 1px solid var(--md-sys-color-outline-variant); }
 .deck-words-heading h2 { font: var(--md-sys-typescale-title-large); font-weight: 650; }
 .deck-words-heading > button { padding-inline: 0.875rem; font: var(--md-sys-typescale-label-large); }
@@ -90,7 +95,8 @@
 .deck-empty h3 { max-width: 30ch; margin: 0; font: var(--md-sys-typescale-title-large); }
 .deck-empty p { max-width: 40ch; margin: 0; color: var(--md-sys-color-on-surface-variant); font: var(--md-sys-typescale-body-medium); }
 .deck-actions-menu { z-index: 55; min-width: 14rem; max-width: calc(100vw - 2rem); max-height: var(--radix-dropdown-menu-content-available-height); overflow-y: auto; padding: 0.5rem; border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--md-sys-shape-corner-large); background: var(--md-sys-color-surface-container-high); color: var(--md-sys-color-on-surface); }
-.deck-actions-menu [role='menuitem'], .deck-actions-menu [role='menuitemradio'] { display: flex; min-height: 3rem; align-items: center; padding: 0.75rem 1rem; border-radius: var(--md-sys-shape-corner-small); font: var(--md-sys-typescale-body-medium); cursor: pointer; outline: none; }
+.deck-actions-menu [role='menuitem'] { display: flex; min-height: 3rem; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; border-radius: var(--md-sys-shape-corner-small); font: var(--md-sys-typescale-body-medium); cursor: pointer; outline: none; }
+.deck-actions-menu svg { flex: none; }
 .deck-actions-menu [data-highlighted] { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
 .deck-actions-menu [role='separator'] { height: 1px; margin: 0.375rem; background: var(--md-sys-color-outline-variant); }
 .deck-actions-menu .deck-action-destructive { color: var(--md-sys-color-error); }
@@ -103,7 +109,7 @@
 @media (min-width: 52.5rem) {
   .deck-workspace-layout { grid-template-columns: clamp(13rem, 20vw, 18rem) minmax(0, 1fr); gap: clamp(1rem, 2.2vw, 2.25rem); max-width: none; align-items: start; }
   .deck-sidebar { padding-block: 0.5rem; }
-  .deck-words { margin-block-start: 1.5rem; padding-inline: 0.5rem; }
+  .deck-words, .deck-subdecks { margin-block-start: 1.5rem; padding-inline: 0.5rem; }
   .deck-library-art { display: grid; place-items: center; min-height: 16rem; border-radius: var(--md-sys-shape-corner-extra-large-increased); background: var(--md-sys-color-primary-container); }
   .deck-library-art .deck-artwork { display: block; width: min(14rem, 75%); }
 }

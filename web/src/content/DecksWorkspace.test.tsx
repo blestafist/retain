@@ -134,6 +134,42 @@ describe('DecksWorkspace', () => {
     expect(document.activeElement).toBe(deck);
   });
 
+  it('links straight to subdecks and opens study direction outside the action menu', async () => {
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === '/api/v1/decks') return jsonResponse([{
+        id: 42, name: 'German course', parent_id: null, children: [
+          { id: 43, name: 'Chapter 1', parent_id: 42, children: [] },
+        ],
+      }]);
+      if (url === '/api/v1/decks/42/notes' || url === '/api/v1/decks/43/notes') return jsonResponse([]);
+      if (url === '/api/v1/decks/43' && init?.method === 'PATCH') return jsonResponse({ id: 43, name: 'Chapter 1', parent_id: 42, reverse_cards: true, children: [] });
+      if (url === '/api/v1/llm/status') return jsonResponse({ enabled: false });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    const subdecks = await screen.findByRole('region', { name: t('subdecks') });
+    await within(subdecks).findByRole('button', { name: t('addNote') });
+    expect(screen.queryByText(t('noNotes'))).toBeNull();
+    await user.click(within(subdecks).getByRole('button', { name: 'Chapter 1' }));
+    expect(await screen.findByRole('heading', { name: 'Chapter 1', level: 1 })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: t('deckActions') }));
+    expect(screen.queryByRole('menuitemradio')).toBeNull();
+    await user.keyboard('{Escape}');
+    const directionButton = screen.getByRole('button', { name: t('studyDirection') });
+    await user.click(directionButton);
+    const dialog = screen.getByRole('dialog', { name: t('studyDirection') });
+    await user.selectOptions(within(dialog).getByRole('combobox'), 'both');
+    await user.click(within(dialog).getByRole('button', { name: t('saveDeck') }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(directionButton);
+    const patch = fetchMock.mock.calls.find(([url, init]) => String(url) === '/api/v1/decks/43' && init?.method === 'PATCH');
+    expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ reverse_cards: true, reverse_only: false });
+  });
+
   it('keeps import available without decks and confirms before discarding an upload or preview', async () => {
     const user = userEvent.setup();
     const confirm = vi.mocked(window.confirm).mockReturnValue(false);
