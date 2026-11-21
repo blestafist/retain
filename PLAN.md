@@ -409,7 +409,7 @@ The entire palette is built at runtime from a single **seed color** (MD3 dynamic
 
 - **Default**: clear blue **`#2563EB`**, using `TonalSpot` for coordinated blue accents, neutral surfaces, and a restrained complementary tertiary. The previous swamp/Fidelity default made every surface look olive and visually flattened the workspace.
 - **Settings → Appearance**:
-  - Preset swatches (MD3 color swatches): blue `#2563EB` (default), swamp `#3A4527`, plus curated hues.
+  - Preset swatches (MD3 color swatches): blue `#2563EB` (default), swamp `#3A4527`, plus curated hues. Stage the accent with the other form edits and save them together; trying a swatch must not erase an unsaved schedule.
   - Custom color: color picker + HEX field.
   - **Scheme style**: `TonalSpot` (default — balanced accents and neutral surfaces), `Fidelity` (stays closest to the chosen hue), `Vibrant`, `Expressive` (rotates hue more, brighter), `Monochrome`.
   - **Contrast**: standard / medium / high (`contrastLevel` 0 / 0.5 / 1).

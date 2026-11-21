@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useMemo, useState, useSyncExternalStore, type CSSProperties, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiError, patchMeSettings, type MeResponse, type UserSettings, type UserSettingsPatch } from '../api/client';
 import { meQueryKey } from '../auth/session';
@@ -7,8 +7,8 @@ import { t } from '../i18n/en';
 import { Button } from '../ui/Button';
 import { PushSubscriptionControl } from './PushSubscriptionControl';
 import { useTheme } from '../theme/context';
-import { createThemePalette } from '../theme/palette';
-import { THEME_PRESETS } from '../theme/settings';
+import { createThemePalette, THEME_ROLE_NAMES, type ThemeRoleMap } from '../theme/palette';
+import { normalizeSeedColor, resolveThemeMode, themeFromServer, THEME_PRESETS, type ResolvedThemeMode } from '../theme/settings';
 import type { TranslationKey } from '../i18n/en';
 import './SettingsPage.css';
 
@@ -25,6 +25,7 @@ interface SettingsDraft {
   reminderEnabled: boolean;
   reminderTime: string;
   themeMode: UserSettings['theme_mode'];
+  themeSeed: string;
 }
 
 type SettingsField = keyof SettingsDraft;
@@ -44,6 +45,7 @@ function createDraft(settings: UserSettings): SettingsDraft {
     reminderEnabled: settings.reminder_time !== null,
     reminderTime: settings.reminder_time ?? '',
     themeMode: settings.theme_mode,
+    themeSeed: normalizeSeedColor(settings.theme_seed) ?? settings.theme_seed,
   };
 }
 
@@ -136,6 +138,7 @@ function getChanges(settings: UserSettings, draft: SettingsDraft): { patch: User
 
   if (draft.ttsAuto !== settings.tts_auto) patch.tts_auto = draft.ttsAuto;
   if (draft.themeMode !== settings.theme_mode) patch.theme_mode = draft.themeMode;
+  if (draft.themeSeed !== (normalizeSeedColor(settings.theme_seed) ?? settings.theme_seed)) patch.theme_seed = draft.themeSeed;
 
   return { patch, errors };
 }
@@ -146,13 +149,72 @@ function errorMessage(error: unknown): string {
 
 const fieldClass = 'settings-field';
 const fieldLabelClass = 'grid min-w-0 content-start gap-1 text-sm text-on-surface';
+const systemColorScheme = '(prefers-color-scheme: dark)';
+
+function subscribeToColorScheme(onChange: () => void) {
+  const query = window.matchMedia?.(systemColorScheme);
+  if (!query) return () => undefined;
+  if (typeof query.addEventListener === 'function') {
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }
+  query.addListener(onChange);
+  return () => query.removeListener(onChange);
+}
+
+function getSystemIsDark() {
+  return window.matchMedia?.(systemColorScheme).matches ?? false;
+}
+
+function AppearancePreview({ palette, mode }: { palette: ThemeRoleMap; mode: ResolvedThemeMode }) {
+  const style = Object.fromEntries(THEME_ROLE_NAMES.map((role) => [`--md-sys-color-${role}`, palette[role]])) as CSSProperties;
+  return (
+    <div role="group" aria-labelledby="appearance-preview-title" className="grid min-w-0 gap-2">
+      <p id="appearance-preview-title" className="m-0 text-sm font-medium">{t('appearancePreview')}</p>
+      <div style={{ ...style, colorScheme: mode }} className="settings-appearance-preview rounded-2xl border border-outline-variant bg-surface p-3 text-on-surface">
+        <div className="grid min-w-0 gap-2">
+          <div className="rounded-xl bg-primary-container px-3 py-2 text-on-primary-container">
+            <p className="m-0 text-lg font-semibold">{t('previewTerm')}</p>
+            <p className="m-0 text-sm">{t('previewDescription')}</p>
+          </div>
+          <div className="flex flex-wrap gap-1 text-sm font-medium">
+            {(['again', 'hard', 'good', 'easy'] as const).map((rating) => (
+              <span key={rating} className="rounded-lg px-2 py-1" style={{
+                background: `var(--md-sys-color-rating-${rating}-container)`,
+                color: `var(--md-sys-color-on-rating-${rating}-container)`,
+              }}>{t(rating)}</span>
+            ))}
+          </div>
+        </div>
+        <svg role="img" aria-label={t('chartDescription')} viewBox="0 0 180 80" preserveAspectRatio="none" fill="none" strokeWidth="3">
+          <path d="M2 65 Q42 72 83 41 T178 9" stroke="var(--md-sys-color-primary)" />
+          <path d="M2 73 Q45 48 83 48 T178 32" stroke="var(--md-sys-color-tertiary)" />
+          <path d="M2 53 Q38 38 82 61 T178 47" stroke="var(--md-sys-color-secondary)" />
+        </svg>
+      </div>
+    </div>
+  );
+}
 
 export function SettingsPage({ settings }: { settings: UserSettings }) {
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState(() => createDraft(settings));
+  const [edits, setEdits] = useState<Partial<SettingsDraft>>({});
+  const savedDraft = createDraft(settings);
+  const draft = { ...savedDraft, ...edits };
   const [showValidation, setShowValidation] = useState(false);
   const [saved, setSaved] = useState(false);
-  const { settings: theme, resolvedMode } = useTheme();
+  const { settings: theme } = useTheme();
+  const { variant, contrastLevel, seed: savedSeed } = themeFromServer(settings) ?? theme;
+  const systemIsDark = useSyncExternalStore(subscribeToColorScheme, getSystemIsDark, () => false);
+  const previewMode = resolveThemeMode(draft.themeMode, systemIsDark);
+  const previewSeed = normalizeSeedColor(draft.themeSeed) ?? savedSeed;
+  const swatches = useMemo(() => THEME_PRESETS.map((preset) => ({
+    ...preset,
+    colors: createThemePalette({ variant, contrastLevel, mode: previewMode, seed: preset.seed }, previewMode),
+  })), [variant, contrastLevel, previewMode]);
+  const previewPalette = useMemo(() => swatches.find(({ seed }) => seed === previewSeed)?.colors
+    ?? createThemePalette({ variant, contrastLevel, mode: previewMode, seed: previewSeed }, previewMode),
+  [swatches, variant, contrastLevel, previewMode, previewSeed]);
   const mutation = useMutation({
     mutationFn: patchMeSettings,
     onSuccess: async (nextSettings) => {
@@ -164,22 +226,22 @@ export function SettingsPage({ settings }: { settings: UserSettings }) {
       queryClient.setQueryData<MeResponse | null>(meQueryKey, (current) => (
         current ? { ...current, settings: nextSettings } : current
       ));
-      setDraft(createDraft(nextSettings));
+      setEdits({});
       setShowValidation(false);
       setSaved(true);
     },
   });
 
-  useEffect(() => {
-    setDraft(createDraft(settings));
-  }, [settings]);
-
   const { patch, errors } = getChanges(settings, draft);
   const hasChanges = Object.keys(patch).length > 0;
   const hasErrors = Object.keys(errors).length > 0;
 
-  function updateDraft(field: SettingsField, value: string | boolean) {
-    setDraft((current) => ({ ...current, [field]: value }));
+  function updateDraft<Field extends SettingsField>(field: Field, value: SettingsDraft[Field]) {
+    setEdits((current) => {
+      const next = { ...current, [field]: value };
+      if (value === savedDraft[field]) delete next[field];
+      return next;
+    });
     setSaved(false);
     mutation.reset();
   }
@@ -212,15 +274,14 @@ export function SettingsPage({ settings }: { settings: UserSettings }) {
             <fieldset className="m-0 min-w-0 border-0 p-0" aria-describedby="accent-color-hint">
               <legend className="mb-1 text-sm font-medium">{t('accentColor')}</legend>
               <div className="flex flex-wrap gap-1">
-                {THEME_PRESETS.map((preset) => {
-                  const colors = createThemePalette({ ...theme, seed: preset.seed }, resolvedMode);
-                  const selected = theme.seed === preset.seed;
+                {swatches.map((preset) => {
+                  const selected = draft.themeSeed === preset.seed;
                   return (
                     <button key={preset.id} type="button" aria-pressed={selected} aria-label={t(preset.id as TranslationKey)} title={t(preset.id as TranslationKey)} disabled={mutation.isPending}
-                      onClick={() => mutation.mutate({ theme_seed: preset.seed })}
+                      onClick={() => updateDraft('themeSeed', preset.seed)}
                       className="settings-swatch"
-                      style={{ color: colors['on-primary'] }}>
-                      <span aria-hidden="true" style={{ background: colors.primary }}>
+                      style={{ color: preset.colors['on-primary'] }}>
+                      <span aria-hidden="true" style={{ background: preset.colors.primary }}>
                         {selected && <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m5 12 4 4L19 6" /></svg>}
                       </span>
                     </button>
@@ -243,6 +304,7 @@ export function SettingsPage({ settings }: { settings: UserSettings }) {
               </select>
               <p id="theme-mode-hint" className="m-0 text-sm text-on-surface-variant">{t('themeModeHint')}</p>
             </div>
+            <AppearancePreview palette={previewPalette} mode={previewMode} />
           </div>
         </section>
 
