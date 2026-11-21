@@ -168,7 +168,7 @@ type Adapter interface {
 }
 ```
 - `retain` — the native format.
-- `school-wordsets` — an export shaped like `classes[].class / wordsets[].info / entries[]`: `class` → parent deck (`external_id = class:<group_id>`), `wordset` → child deck (`wordset:<info.id>`, `expected_count`), `entries` → notes. If the word count does not match `expected_count`, a warning is shown. The file has no languages, so the pair is chosen in the preview (default de/pl).
+- `school-wordsets` — an export shaped like `classes[].class / wordsets[].info / entries[]`: each wordset is a studyable deck (`wordset:<info.id>`, `expected_count`), and entries become notes. A class with one wordset imports as that deck, not an empty class plus a chapter. Multiple wordsets in the same class keep their `class:<group_id>` parent. Preserve wordset identity and progress across re-imports; flatten a legacy wrapper only when safe, never remove user content or break sharing. If the word count differs from `expected_count`, show a warning. The file has no languages, so the pair is chosen in the preview (default de/pl).
 - `csv` — `term;translation;example;tags`.
 - Later: Anki `.apkg`.
 

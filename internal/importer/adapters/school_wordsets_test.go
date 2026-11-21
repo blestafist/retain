@@ -94,12 +94,12 @@ func TestSchoolWordsetsAdapterParsesNestedDecksAndPreservesOrderAndText(t *testi
 		t.Fatalf("second wordset notes = %#v", secondWordset.Notes)
 	}
 
-	secondClass := bundle.Decks[1]
-	if secondClass.Name != "Second class" || secondClass.ExternalID != "class:group-2" || len(secondClass.Decks) != 1 {
-		t.Fatalf("second class deck = %#v", secondClass)
+	standalone := bundle.Decks[1]
+	if standalone.ExternalID != "wordset:set-3" || standalone.ExpectedCount == nil || *standalone.ExpectedCount != 0 || len(standalone.Decks) != 0 {
+		t.Fatalf("single wordset should be a root deck: %#v", standalone)
 	}
-	if secondClass.Decks[0].ExternalID != "wordset:set-3" || secondClass.Decks[0].ExpectedCount == nil || *secondClass.Decks[0].ExpectedCount != 0 {
-		t.Fatalf("second class wordset = %#v", secondClass.Decks[0])
+	if standalone.FormerGroup == nil || standalone.FormerGroup.ExternalID != "class:group-2" || standalone.FormerGroup.Name != "Second class" {
+		t.Fatalf("former group identity = %#v", standalone.FormerGroup)
 	}
 }
 
@@ -294,10 +294,10 @@ func TestParseSchoolWordsetsAllowsEmptyArraysAndMissingExpectedCount(t *testing.
 	if err != nil {
 		t.Fatalf("ParseSchoolWordsets() error = %v", err)
 	}
-	if len(bundle.Decks) != 1 || len(bundle.Decks[0].Decks) != 1 {
+	if len(bundle.Decks) != 1 || len(bundle.Decks[0].Decks) != 0 {
 		t.Fatalf("parsed hierarchy = %#v", bundle.Decks)
 	}
-	child := bundle.Decks[0].Decks[0]
+	child := bundle.Decks[0]
 	if child.ExpectedCount != nil || child.Notes == nil || len(child.Notes) != 0 {
 		t.Fatalf("optional expected count/empty entries = %#v", child)
 	}

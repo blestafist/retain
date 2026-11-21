@@ -10,8 +10,7 @@ import (
 	"github.com/pestit/retain/internal/importer"
 )
 
-// SchoolWordsetsAdapter converts the school's classes/wordsets export into
-// nested retain/v1 decks.
+// SchoolWordsetsAdapter converts the school's classes/wordsets export into retain/v1 decks.
 type SchoolWordsetsAdapter struct{}
 
 var _ importer.Adapter = SchoolWordsetsAdapter{}
@@ -25,12 +24,7 @@ func (SchoolWordsetsAdapter) Detect(raw []byte) bool {
 	if err != nil {
 		return false
 	}
-	for _, class := range bundle.Decks {
-		if len(class.Decks) > 0 {
-			return true
-		}
-	}
-	return false
+	return len(bundle.Decks) > 0
 }
 
 // Parse converts a school-wordsets document into a retain/v1 Bundle.
@@ -160,7 +154,17 @@ func ParseSchoolWordsets(raw []byte) (*importer.Bundle, error) {
 			}
 			parent.Decks = append(parent.Decks, child)
 		}
-		bundle.Decks = append(bundle.Decks, parent)
+		switch len(parent.Decks) {
+		case 0:
+			// The class is metadata; it has no studyable set in this export.
+		case 1:
+			deck := parent.Decks[0]
+			parent.Decks = nil
+			deck.FormerGroup = &parent
+			bundle.Decks = append(bundle.Decks, deck)
+		default:
+			bundle.Decks = append(bundle.Decks, parent)
+		}
 	}
 
 	if err := importer.ValidateBundle(bundle); err != nil {

@@ -72,6 +72,23 @@ WHERE child.owner_id = ?
   )
 ORDER BY child.position, child.id;
 
+-- name: IsPristineImportGroup :one
+SELECT CAST(EXISTS (
+    SELECT 1 FROM decks AS folder
+    WHERE folder.id = sqlc.arg(folder_id)
+      AND folder.owner_id = sqlc.arg(owner_id)
+      AND folder.name = sqlc.arg(original_name)
+      AND folder.deleted_at IS NULL
+      AND folder.description IS NULL AND folder.color_seed IS NULL
+      AND folder.expected_count IS NULL AND folder.source_deck_id IS NULL
+      AND folder.lang_target IS NOT NULL AND folder.lang_native IS NOT NULL
+      AND folder.reverse_cards = 0 AND folder.reverse_only = 0 AND folder.wrong_article_rating = 2
+      AND NOT EXISTS (SELECT 1 FROM notes WHERE deck_id = folder.id)
+      AND (SELECT count(*) FROM decks WHERE parent_id = folder.id) = 1
+      AND NOT EXISTS (SELECT 1 FROM deck_shares WHERE source_deck_id = folder.id)
+      AND NOT EXISTS (SELECT 1 FROM social_subscription_tree WHERE deck_id = folder.id AND share_status = 'active')
+) AS BOOLEAN);
+
 -- name: UpdateDeck :one
 UPDATE decks
 SET parent_id = sqlc.narg(parent_id),

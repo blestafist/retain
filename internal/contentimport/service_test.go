@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"path/filepath"
 	"strings"
@@ -350,13 +351,9 @@ func TestOwnerIsolationCSVReimportSchoolLanguageAndExpectedWarning(t *testing.T)
 	if _, err := service.Apply(ctx, ownerID, school.BatchID, ApplyInput{LangTarget: "de", LangNative: "ru"}); err != nil {
 		t.Fatalf("school Apply() error = %v", err)
 	}
-	schoolRoot := getImportedDeck(t, database, ownerID, "school-wordsets", "class:10")
 	schoolChild := getImportedDeck(t, database, ownerID, "school-wordsets", "wordset:20")
-	if !schoolRoot.LangTarget.Valid || schoolRoot.LangTarget.String != "de" || !schoolRoot.LangNative.Valid || schoolRoot.LangNative.String != "ru" {
-		t.Fatalf("school root language pair = %v / %v", schoolRoot.LangTarget, schoolRoot.LangNative)
-	}
-	if schoolChild.LangTarget.Valid || schoolChild.LangNative.Valid {
-		t.Fatalf("school child language should inherit: %v / %v", schoolChild.LangTarget, schoolChild.LangNative)
+	if school.DeckCounts != (DeckCounts{New: 1}) || schoolChild.ParentID.Valid || schoolChild.LangTarget.String != "de" || schoolChild.LangNative.String != "ru" {
+		t.Fatalf("expected a standalone school deck with the selected language pair: %+v", schoolChild)
 	}
 	schoolNotes, err := database.Queries().ListNotesByDeck(ctx, gen.ListNotesByDeckParams{DeckID: schoolChild.ID, OwnerID: ownerID})
 	if err != nil || len(schoolNotes) != 1 {
@@ -371,13 +368,13 @@ func TestOwnerIsolationCSVReimportSchoolLanguageAndExpectedWarning(t *testing.T)
 		t.Fatalf("school import was not enriched using selected inherited German: %+v, fields=%v alternatives=%v", schoolNotes[0], schoolFields, schoolAlternatives)
 	}
 	reimportPreview, err := service.Preview(ctx, ownerID, "school-again.json", "", schoolRaw)
-	if err != nil || reimportPreview.Counts != (Counts{Unchanged: 1}) || reimportPreview.DeckCounts != (DeckCounts{Unchanged: 2}) {
+	if err != nil || reimportPreview.Counts != (Counts{Unchanged: 1}) || reimportPreview.DeckCounts != (DeckCounts{Unchanged: 1}) {
 		t.Fatalf("enriched school re-import preview = %+v, %v", reimportPreview, err)
 	}
 	if _, err := service.Apply(ctx, ownerID, reimportPreview.BatchID, ApplyInput{LangTarget: "en", LangNative: "pl"}); err != nil {
 		t.Fatalf("Apply(enriched school re-import) error = %v", err)
 	}
-	rootAfterReimport := getImportedDeck(t, database, ownerID, "school-wordsets", "class:10")
+	rootAfterReimport := getImportedDeck(t, database, ownerID, "school-wordsets", "wordset:20")
 	if rootAfterReimport.LangTarget.String != "de" || rootAfterReimport.LangNative.String != "ru" {
 		t.Fatalf("re-import unexpectedly changed the selected language pair: %v / %v", rootAfterReimport.LangTarget, rootAfterReimport.LangNative)
 	}
@@ -448,10 +445,97 @@ func TestCSVExportGuardsFormulaCellsAndRetainPreservesAllNoteFields(t *testing.T
 	}
 }
 
+func TestSchoolReimportFlattensOnlyUntouchedLegacyGroups(t *testing.T) {
+	ctx := context.Background()
+	const source = "school-wordsets"
+	raw := []byte(`{"classes":[{"class":{"title":"Class","group_id":10},"wordsets":[{"info":{"id":20,"name":"Chapter"},"entries":[{"word":"der Hund","translation":"dog"}]}]}]}`)
+	for _, change := range []string{"untouched", "renamed", "notes", "other set", "ancestor shared"} {
+		t.Run(change, func(t *testing.T) {
+			database, service, owner, other := newImportFixture(t)
+			legacy := retainBundle(t, importer.Bundle{Format: "retain/v1", Source: source, Decks: []importer.Deck{{
+				Name: "Library folder", ExternalID: "library", Decks: []importer.Deck{{
+					Name: "Class", ExternalID: "class:10", LangTarget: "en", LangNative: "ru", Decks: []importer.Deck{{
+						Name: "Chapter", ExternalID: "wordset:20", Notes: []importer.Note{{Term: "der Hund", Translation: "dog"}},
+					}},
+				}},
+			}}})
+			input := ApplyInput{LangTarget: "de", LangNative: "pl"}
+			preview, err := service.Preview(ctx, owner, "legacy.json", "retain", legacy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.Apply(ctx, owner, preview.BatchID, input); err != nil {
+				t.Fatal(err)
+			}
+			library := getImportedDeck(t, database, owner, source, "library")
+			group := getImportedDeck(t, database, owner, source, "class:10")
+			wordset := getImportedDeck(t, database, owner, source, "wordset:20")
+			queries := database.Queries()
+			exec := func(query string, args ...any) {
+				t.Helper()
+				if _, err := database.SQL.ExecContext(ctx, query, args...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			switch change {
+			case "renamed":
+				exec(`UPDATE decks SET name = 'My class' WHERE id = ?`, group.ID)
+			case "notes":
+				exec(`INSERT INTO notes(deck_id, term, term_key, translation) VALUES (?, 'cat', 'cat', 'kot')`, group.ID)
+			case "other set":
+				exec(`INSERT INTO decks(owner_id, parent_id, name) VALUES (?, ?, 'My deck')`, owner, group.ID)
+			case "ancestor shared":
+				exec(`INSERT INTO deck_shares(source_deck_id, recipient_id, mode, status) VALUES (?, ?, 'subscribe', 'active')`, library.ID, other)
+			}
+			exec(`UPDATE decks SET position = 3 WHERE id = ?`, group.ID)
+			noteParams := gen.ListNotesByDeckParams{DeckID: wordset.ID, OwnerID: owner}
+			notes, err := queries.ListNotesByDeck(ctx, noteParams)
+			if err != nil || len(notes) != 1 {
+				t.Fatalf("legacy notes = %+v, %v", notes, err)
+			}
+			cardParams := gen.ListCardsByNoteParams{NoteID: notes[0].ID, UserID: owner}
+			cards, err := queries.ListCardsByNote(ctx, cardParams)
+			if err != nil || len(cards) != 1 {
+				t.Fatalf("legacy cards = %+v, %v", cards, err)
+			}
+			exec(`UPDATE cards SET state = 2, stability = 8.25, difficulty = 4.5, reps = 17, lapses = 3 WHERE id = ?`, cards[0].ID)
+			for range 2 {
+				preview, err := service.Preview(ctx, owner, "school.json", "", raw)
+				if err != nil || preview.Counts != (Counts{Unchanged: 1}) || len(preview.Tree) != 1 || preview.Tree[0].ExternalID != "wordset:20" {
+					t.Fatalf("single wordset preview = %+v, %v", preview, err)
+				}
+				if _, err := service.Apply(ctx, owner, preview.BatchID, input); err != nil {
+					t.Fatal(err)
+				}
+			}
+			updated := getImportedDeck(t, database, owner, source, "wordset:20")
+			_, groupErr := queries.GetDeck(ctx, gen.GetDeckParams{ID: group.ID, OwnerID: owner})
+			if updated.ID != wordset.ID {
+				t.Fatalf("wordset ID changed from %d to %d", wordset.ID, updated.ID)
+			}
+			if change == "untouched" {
+				if !errors.Is(groupErr, sql.ErrNoRows) || updated.ParentID.Int64 != library.ID || updated.Position != 3 || updated.LangTarget.String != "en" || updated.LangNative.String != "ru" {
+					t.Fatalf("wrapper wasn't safely flattened: deck=%+v, group error=%v", updated, groupErr)
+				}
+			} else if groupErr != nil || updated.ParentID.Int64 != group.ID {
+				t.Fatalf("protected wrapper was changed: deck=%+v, group error=%v", updated, groupErr)
+			}
+			updatedNotes, err := queries.ListNotesByDeck(ctx, noteParams)
+			if err != nil || len(updatedNotes) != 1 || updatedNotes[0].ID != notes[0].ID {
+				t.Fatalf("note identity changed: %+v, %v", updatedNotes, err)
+			}
+			progress, err := queries.ListCardsByNote(ctx, cardParams)
+			if err != nil || len(progress) != 1 || progress[0].ID != cards[0].ID || progress[0].State != 2 || progress[0].Stability.Float64 != 8.25 || progress[0].Difficulty.Float64 != 4.5 || progress[0].Reps != 17 || progress[0].Lapses != 3 {
+				t.Fatalf("FSRS progress changed: %+v, %v", progress, err)
+			}
+		})
+	}
+}
+
 func TestSelectedSchoolLanguageDrivesInheritedEnrichmentAndStablePreview(t *testing.T) {
 	database, service, ownerID, _ := newImportFixture(t)
 	ctx := context.Background()
-	raw := []byte(`{"classes":[{"class":{"title":"English class","group_id":"english"},"wordsets":[{"info":{"id":"english-set","name":"Chapter"},"entries":[{"word":"der Hund","translation":"dog, hound"}]}]}]}`)
+	raw := []byte(`{"classes":[{"class":{"title":"English class","group_id":"english"},"wordsets":[{"info":{"id":"english-set","name":"Chapter"},"entries":[{"word":"der Hund","translation":"dog, hound"}]},{"info":{"id":"english-set-2","name":"Next chapter"},"entries":[]}]}]}`)
 	preview, err := service.Preview(ctx, ownerID, "english-school.json", "", raw)
 	if err != nil {
 		t.Fatalf("Preview() error = %v", err)
@@ -461,7 +545,7 @@ func TestSelectedSchoolLanguageDrivesInheritedEnrichmentAndStablePreview(t *test
 	}
 	root := getImportedDeck(t, database, ownerID, "school-wordsets", "class:english")
 	child := getImportedDeck(t, database, ownerID, "school-wordsets", "wordset:english-set")
-	if !root.LangTarget.Valid || root.LangTarget.String != "en" || child.LangTarget.Valid {
+	if preview.DeckCounts != (DeckCounts{New: 3}) || child.ParentID.Int64 != root.ID || root.LangTarget.String != "en" || child.LangTarget.Valid {
 		t.Fatalf("selected/inherited language pair = root %v, child %v", root.LangTarget, child.LangTarget)
 	}
 	notes, err := database.Queries().ListNotesByDeck(ctx, gen.ListNotesByDeckParams{DeckID: child.ID, OwnerID: ownerID})

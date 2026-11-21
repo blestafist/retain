@@ -19,6 +19,8 @@ type Deck struct {
 	ExpectedCount *int64 `json:"expected_count,omitempty"`
 	Decks         []Deck `json:"decks,omitempty"`
 	Notes         []Note `json:"notes,omitempty"`
+	// FormerGroup identifies a synthetic wrapper an older adapter may have created.
+	FormerGroup *Deck `json:"-"`
 }
 
 // Note is a vocabulary item. Fields may contain arbitrary JSON values.

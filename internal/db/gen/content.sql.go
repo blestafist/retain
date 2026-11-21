@@ -836,6 +836,37 @@ func (q *Queries) GetReadableDeck(ctx context.Context, arg GetReadableDeckParams
 	return i, err
 }
 
+const isPristineImportGroup = `-- name: IsPristineImportGroup :one
+SELECT CAST(EXISTS (
+    SELECT 1 FROM decks AS folder
+    WHERE folder.id = ?1
+      AND folder.owner_id = ?2
+      AND folder.name = ?3
+      AND folder.deleted_at IS NULL
+      AND folder.description IS NULL AND folder.color_seed IS NULL
+      AND folder.expected_count IS NULL AND folder.source_deck_id IS NULL
+      AND folder.lang_target IS NOT NULL AND folder.lang_native IS NOT NULL
+      AND folder.reverse_cards = 0 AND folder.reverse_only = 0 AND folder.wrong_article_rating = 2
+      AND NOT EXISTS (SELECT 1 FROM notes WHERE deck_id = folder.id)
+      AND (SELECT count(*) FROM decks WHERE parent_id = folder.id) = 1
+      AND NOT EXISTS (SELECT 1 FROM deck_shares WHERE source_deck_id = folder.id)
+      AND NOT EXISTS (SELECT 1 FROM social_subscription_tree WHERE deck_id = folder.id AND share_status = 'active')
+) AS BOOLEAN)
+`
+
+type IsPristineImportGroupParams struct {
+	FolderID     int64
+	OwnerID      int64
+	OriginalName string
+}
+
+func (q *Queries) IsPristineImportGroup(ctx context.Context, arg IsPristineImportGroupParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, isPristineImportGroup, arg.FolderID, arg.OwnerID, arg.OriginalName)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const listCardsByNote = `-- name: ListCardsByNote :many
 SELECT cards.id, cards.note_id, cards.user_id, cards.direction, cards.state, cards.due, cards.stability, cards.difficulty, cards.elapsed_days, cards.scheduled_days, cards.step, cards.reps, cards.lapses, cards.last_review, cards.suspended, cards.is_leech, cards.updated_at, cards.deleted_at, cards.deletion_batch FROM cards
 JOIN notes ON notes.id = cards.note_id
